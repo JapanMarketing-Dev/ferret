@@ -2606,11 +2606,6 @@ body[data-resizing='row'] * {
   transition: transform var(--motion-fast) var(--ease-out);
 }
 
-/* 子の行（レビュー履歴）。Orca で worktree が並ぶ位置に1段下げて置く */
-.sb-project__children {
-  padding: 0 0 var(--space-3) 18px;
-}
-
 .sb-project__empty {
   margin: 0;
   padding: var(--space-3) var(--space-4);
@@ -2907,10 +2902,7 @@ button.sb-more__row:hover {
   vertical-align: -1px;
 }
 
-/*
- * プロジェクトの中の「＋ 新しいレビュー」。どのプロジェクトで録るかが分かるよう、履歴の一番上に置く。
- * 開いているプロジェクトにだけ ⌘⇧R を出す（ショートカットは開いているプロジェクトで始まる）。
- */
+/* 指摘のページ（ReviewHub）の「＋ 新しいレビュー」「MTG を取り込む」。⌘⇧R も出す */
 .sb-new-review {
   display: flex;
   width: 100%;
@@ -3362,4 +3354,64 @@ button.sb-more__row:hover {
 
 .sb-project__twisty .is-collapsed {
   transform: rotate(-90deg);
+}
+
+/* プロジェクトの並び順と「☆ のみ」（見出しの漏斗で開く） */
+.sb-view {
+  margin: 0 var(--space-2) var(--space-3);
+}
+
+/* ── 指摘のページ（components/ReviewHub.tsx）。左にレビューの履歴、右に指摘 ── */
+.rv-hub {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+}
+
+.rv-hub__side {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: var(--space-3) var(--space-2) 0;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+}
+
+.rv-hub__actions {
+  display: grid;
+  padding: 0 var(--space-1);
+}
+
+.rv-hub__list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.rv-hub__main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.rv-hub__main > * {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 760px) {
+  .rv-hub {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .rv-hub__side {
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
 }

@@ -342,6 +342,11 @@ describe('Ferret の外のプログラムの報告は送らない（FERRET-1X）
     expect(isOwnExecutable('ferret')).toBe(true)
     expect(isOwnExecutable('FERRET.EXE')).toBe(true)
     expect(isOwnExecutable('ferret-cli')).toBe(false)
+    // 開発版（electron-builder.dev.cjs の executableName）も Ferret 自身
+    expect(isOwnExecutable('Ferret-Dev.exe')).toBe(true)
+    expect(isOwnExecutable('ferret-dev')).toBe(true)
+    expect(isOwnExecutable('ferret-dev-cli')).toBe(false)
+    expect(isOwnExecutable('electron-dev')).toBe(false)
     expect(isOwnExecutable('my-electron')).toBe(false)
     expect(isOwnExecutable('')).toBe(false)
   })

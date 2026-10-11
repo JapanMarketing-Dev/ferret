@@ -93,6 +93,7 @@ import { OPEN_REVIEW_EVENT } from './lib/importedReview'
 import { setRecordingLevel } from './lib/recordingLevel'
 import { usePublishPanelRequest } from './lib/publishPanel'
 import { PublishPanel } from './components/PublishPanel'
+import { ReviewHub } from './components/ReviewHub'
 import { reportAnomaly, reportHandled } from '@shared/report'
 import type { SttLanguageCode } from '@shared/sttLanguages'
 
@@ -756,6 +757,14 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   workspaceProjectRef.current = workspace.projectId ?? null
   const emptyReasonRef = useRef(emptyReason)
   emptyReasonRef.current = emptyReason
+  /** 履歴からレビューを選んで開く（指摘のページの左の一覧） */
+  const selectReview = (id: string) => {
+    setSessionId(id)
+    setCenterTab('findings')
+    // 見本だけを除いて読む
+    if (!(showDemo && !history.length && DEMO_SESSION_IDS.includes(id))) void run(async () => { setReview(await window.ade.invoke('review:load', id)); await refreshHistory() })
+  }
+
   const startReviewIn = useCallback((projectId: string) => void run(async () => {
     const plan = planNewReview({ projectId, activeProjectId: workspaceProjectRef.current, projectIds: projects.projects.map((p) => p.id), recording })
     if (plan.action === 'busy') { toast({ tone: 'warning', message: t('sidebar.reviewBusy') }); return }
@@ -1288,23 +1297,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
             <Sidebar
               projects={projects}
               activeProjectId={workspace.projectId ?? null}
-              sessions={sessions}
-              selectedId={sessionId}
-              onSelect={(id) => {
-                setSessionId(id)
-                setCenterTab('findings')
-                // 別のプロジェクトの履歴から選ぶと history はまだ前のプロジェクトのもの。見本だけを除いて読む
-                if (!(showDemo && !history.length && DEMO_SESSION_IDS.includes(id))) void run(async () => { setReview(await window.ade.invoke('review:load', id)); await refreshHistory() })
-              }}
-              onNewReview={startReviewIn}
-              onStartRound={(kind) => (kind === 'record' ? recordAll() : void run(() => productRound.start()))}
-              onImportMeeting={() => setMeetingOpen(true)}
-              recording={recording}
-              onHistoryChanged={(deleted) => {
-                // 開いているレビューを消したら、確認画面も閉じる
-                if (sessionId && deleted.includes(sessionId)) { setSessionId(null); setReview(null) }
-                void run(refreshHistory)
-              }}
               onOverlayChange={setProjectDialogOpen}
             />
             </ErrorBoundary>
@@ -1405,7 +1397,21 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 </ErrorBoundary>
               ) : (
                 <ErrorBoundary name="findings">
+                <ReviewHub
+                  sessions={sessions}
+                  selectedId={sessionId}
+                  onSelect={selectReview}
+                  onNewReview={() => { if (workspace.projectId) startReviewIn(workspace.projectId) }}
+                  onImportMeeting={() => setMeetingOpen(true)}
+                  recording={recording}
+                  onHistoryChanged={(deleted) => {
+                    // 開いているレビューを消したら、確認画面も閉じる
+                    if (sessionId && deleted.includes(sessionId)) { setSessionId(null); setReview(null) }
+                    void run(refreshHistory)
+                  }}
+                >
                 {review ? <ReviewFindings terminalId={activeTerminal} review={review} recording={recording || recordBusy} onRecord={(mode) => { appendNext.current = mode === 'append' ? review.id : null; toggleRecording() }} onUpdate={(next) => { setReview(next); void refreshHistory() }} /> : <FindingsList findings={findings} sessionLabel={selectedSession?.label} />}
+                </ReviewHub>
                 </ErrorBoundary>
               )}
               </ErrorBoundary>

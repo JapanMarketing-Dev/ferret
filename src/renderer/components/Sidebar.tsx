@@ -12,30 +12,26 @@ import {
   FolderGit2,
   FolderOpen,
   FolderPlus,
-  ListChecks,
   MessageCircleQuestionMark,
   Network,
   Pencil,
   Plus,
-  Repeat,
   Settings2,
   Star,
   Trash2,
-  Users
+  ListFilter
 } from 'lucide-react'
 import type { Project, ProjectsState } from '@shared/types'
-import { formatShortcut } from '../lib/shortcut'
 import { errorMessage } from '../lib/errors'
 import { useT } from '../lib/i18n'
 import { Button, EmptyState, Field, IconButton, useToast } from '../ui'
-import { filterReviews, isEmptyDraft, reviewHosts, type ReviewFilter } from '@shared/reviewList'
 import { ProjectEditDialog } from './ProjectTargetsEditor'
 import { CreateRepoDialog } from './CreateRepoDialog'
 import { AddProjectDialog, ProjectSourceIcon } from './AddProjectDialog'
 import type { ProjectSource } from '@shared/projectSource'
 import { sshTargetLabel } from '@shared/sshCommand'
 import type { TranslationKey } from '@shared/i18n'
-import { ReviewFilterBar, ReviewList, loadReviewFilter, saveReviewFilter, toReviewSession, type ReviewSession } from './ReviewList'
+import { toReviewSession, type ReviewSession } from './ReviewList'
 import { SetupProgressLink } from '../onboarding/SetupChecklist'
 import { FeedbackLink } from './FeedbackDialog'
 import { useProjectActivity } from '../terminal/agentActivity'
@@ -46,7 +42,8 @@ import { isOrchestra, orchestraIdOf, treeDrop, treeRows } from '@shared/orchestr
 export { toReviewSession, type ReviewSession }
 
 /**
- * 左サイドバー（240px）。登録したプロジェクトの一覧と、その下に入れ子でレビュー履歴。
+ * 左サイドバー（240px）。登録したプロジェクトの一覧と、オーケストラの下に入れ子でサブフォルダのプロジェクト。
+ * レビューの履歴・新しいレビュー・MTG の取り込みは「指摘」のページ（ReviewHub.tsx）に置く（2026-10-11 本人指示。サイドバーでは見にくい）。
  *
  * Orca由来: ~/bench/orca/src/renderer/src/components/sidebar/ の Projects 節（MIT）。
  *   - 節の見出し「Projects」と右端の ＋（SidebarHeader.tsx）
@@ -54,32 +51,10 @@ export { toReviewSession, type ReviewSession }
  *     （worktree-list/rows/SectionHeader.tsx, ProjectHeaderActions.tsx）
  *   - 子の行を1段（18px）字下げして並べる（worktree-list/rows/indentation.ts の SIDEBAR_TREE_INDENT）
  *   - 右クリック／… のメニュー（repo-header-project-actions.tsx）。名前の変更と登録解除だけ
- * Orca で worktree が並ぶ位置に、このアプリではレビュー履歴を置く。
  * プロジェクトの行はドラッグ＆ドロップ・Alt+↑↓・メニューの「上へ」「下へ」で並べ替えられる（順は settings の projects の並び）。
- * 並び順（手動・動いている順・最近使った順・名前順・追加した順）と「☆ のみ」は絞り込みのパネルで選ぶ。☆ は上にまとめる。
+ * 並び順（手動・動いている順・最近使った順・名前順・追加した順）と「☆ のみ」は見出しの漏斗のパネルで選ぶ。☆ は上にまとめる。
  * 色・グループ・Finder連携は持ち込まない。
- *
- * レビュー履歴の一覧（フィルタ・1件の行・名前の変更／アーカイブ／削除）は ReviewList.tsx。
  */
-
-/** 折りたたみの状態はこの端末だけの好みなので localStorage に置く（読めなくても既定で動く） */
-const OPEN_KEY = 'ade.sidebar.openProjects'
-function loadOpen(): Record<string, boolean> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}') as unknown
-    return raw && typeof raw === 'object' ? (raw as Record<string, boolean>) : {}
-  } catch {
-    // ストレージが使えない・壊れた値（想定内。既定で続ける）
-    return {}
-  }
-}
-function saveOpen(open: Record<string, boolean>): void {
-  try {
-    localStorage.setItem(OPEN_KEY, JSON.stringify(open))
-  } catch {
-    // 保存できなくても、この起動の間は効く
-  }
-}
 
 /** プロジェクトの並び順と「☆ のみ」。この端末だけの好み（@shared/projectOrder） */
 const VIEW_KEY = 'ade.sidebar.projectView'
@@ -138,44 +113,21 @@ const PROJECT_DRAG_TYPE = 'application/x-ferret-project'
 export function Sidebar({
   projects,
   activeProjectId,
-  sessions,
-  selectedId,
-  onSelect,
-  onNewReview,
-  onImportMeeting,
-  onStartRound,
-  recording = false,
-  onHistoryChanged,
   onOverlayChange
 }: {
   projects: ProjectsState
-  /** 開いているプロジェクト。sessions はこのプロジェクトの履歴 */
+  /** 開いているプロジェクト */
   activeProjectId: string | null
-  sessions: ReviewSession[]
-  selectedId: string | null
-  onSelect: (id: string) => void
-  /** そのプロジェクトで新しいレビュー（録画）を始める。開いていなければ切り替えてから（App が行う） */
-  onNewReview: (projectId: string) => void
-  /** 開いているプロジェクトに mtg の録画・文字起こしを取り込む（MeetingImportDialog。App が開く） */
-  onImportMeeting?: () => void
-  /** プロダクトの巡回を始める（録画：全プロダクトを順にレビュー／確認：確認待ちを順に。src/renderer/hooks/useProductRound.ts） */
-  onStartRound?: (kind: 'record' | 'confirm') => void
-  /** 録画中は ＋ を押せなくする（⌘⇧R と違い、＋ で録画を止めないため） */
-  recording?: boolean
-  /** 開いているプロジェクトの履歴を名前の変更・アーカイブ・削除したあと。消した ID を渡す */
-  onHistoryChanged?: (deletedIds: string[]) => void
   /** 「プロジェクトを編集」のダイアログの開閉。開いている間は内蔵ブラウザのビューを隠す */
   onOverlayChange?: (open: boolean) => void
 }) {
-  const recordKey = formatShortcut('Mod', 'Shift', 'R')
   const toast = useToast()
   const t = useT()
   const rootRef = useRef<HTMLElement | null>(null)
   /** ターミナルで Agent が動いているプロジェクト（行に「実行中」の印を出す） */
   const projectActivity = useProjectActivity()
-  const [open, setOpen] = useState<Record<string, boolean>>(loadOpen)
-  /** 開いていないプロジェクトの履歴。開いた（展開した）ときに読み込む */
-  const [others, setOthers] = useState<Record<string, ReviewSession[]>>({})
+  /** 並び順・「☆ のみ」のパネル */
+  const [viewOpen, setViewOpen] = useState(false)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [renaming, setRenamingState] = useState<{ id: string; name: string } | null>(null)
   const renamingRef = useRef<{ id: string; name: string } | null>(null)
@@ -207,76 +159,6 @@ export function Sidebar({
     void fn().catch((err) => toast({ tone: 'warning', message: errorMessage(err) }))
   }, [toast])
 
-  // 既定では、開いているプロジェクトだけ展開する
-  const isOpen = (id: string) => open[id] ?? id === activeProjectId
-  const setProjectOpen = (id: string, next: boolean) => {
-    setOpen((prev) => {
-      const updated = { ...prev, [id]: next }
-      saveOpen(updated)
-      return updated
-    })
-  }
-  // 切り替えたら、前のプロジェクトの履歴は畳み、今のプロジェクトを開く（どれが今のプロジェクトか分かるように）
-  const previousActive = useRef(activeProjectId)
-  useEffect(() => {
-    const prev = previousActive.current
-    previousActive.current = activeProjectId
-    if (prev === activeProjectId || !activeProjectId) return
-    setOpen((state) => {
-      const updated = { ...state, [activeProjectId]: true, ...(prev ? { [prev]: false } : {}) }
-      saveOpen(updated)
-      return updated
-    })
-  }, [activeProjectId])
-
-  /** 開いていないプロジェクトの履歴を読み直す（名前の変更・削除のあと） */
-  const reloadOther = (project: Project) => run(async () => {
-    const list = await window.ade.invoke('review:list', project.folderPath)
-    setOthers((prev) => ({ ...prev, [project.id]: list.map(toReviewSession) }))
-  })
-
-  /** 全プロジェクト共通の絞り込み（「Projects」の見出しの下）。保存も全体で1つ */
-  const [filter, setFilterState] = useState<ReviewFilter>(loadReviewFilter)
-  const [filterOpen, setFilterOpen] = useState(false)
-  const setFilter = (next: ReviewFilter) => {
-    setFilterState(next)
-    saveReviewFilter(next)
-  }
-  /** 読み込んだ履歴（まだ読んでいないプロジェクトは undefined） */
-  const historyOf = (project: Project) => (project.id === activeProjectId ? sessions : others[project.id])
-  const loaded = projects.projects.flatMap((p) => historyOf(p) ?? [])
-
-  /** 指摘0件の下書きを、読み込んだ全プロジェクトからまとめて消す */
-  const deleteEmptyDrafts = () => run(async () => {
-    let total = 0
-    for (const project of projects.projects) {
-      const ids = (historyOf(project) ?? []).filter(isEmptyDraft).map((s) => s.id)
-      if (ids.length === 0) continue
-      const active = project.id === activeProjectId
-      const deleted = await window.ade.invoke('review:delete', ids, active ? undefined : project.folderPath)
-      total += deleted.length
-      if (active) onHistoryChanged?.(deleted)
-      else reloadOther(project)
-    }
-    if (total > 0) toast({ tone: 'success', message: t('sidebar.deleted', { count: total }) })
-  })
-
-  // 展開している「開いていないプロジェクト」の履歴を読む。一覧が変わったら読み直す。
-  // 絞り込みのパネルを開いたときは、対象の候補と件数を全プロジェクトから集めるため全部読む
-  const openIds = projects.projects.filter((p) => p.id !== activeProjectId && (isOpen(p.id) || filterOpen)).map((p) => p.id).join(',')
-  useEffect(() => {
-    if (!openIds) return
-    let cancelled = false
-    for (const id of openIds.split(',')) {
-      const folder = projects.projects.find((p) => p.id === id)?.folderPath
-      if (!folder) continue
-      void window.ade.invoke('review:list', folder).then((list) => {
-        if (!cancelled) setOthers((prev) => ({ ...prev, [id]: list.map(toReviewSession) }))
-      // 失敗は main の IPC が Sentry へ送る
-      }).catch(() => undefined)
-    }
-    return () => { cancelled = true }
-  }, [openIds, projects])
 
   // メニューは外側のクリックと Esc で閉じる
   useEffect(() => {
@@ -397,19 +279,7 @@ export function Sidebar({
     if (added && source !== 'ssh' && !added.orchestrator) openEdit(added.id)
   }
 
-  const switchTo = (project: Project) => run(async () => {
-    await window.ade.invoke('project:switch', project.id)
-    setProjectOpen(project.id, true)
-  })
-
-  /** 開いていないプロジェクトの履歴を選んだら、そのプロジェクトへ切り替えてから開く */
-  const selectSession = (project: Project, id: string) => {
-    if (project.id === activeProjectId) return onSelect(id)
-    run(async () => {
-      await window.ade.invoke('project:switch', project.id)
-      onSelect(id)
-    })
-  }
+  const switchTo = (project: Project) => run(() => window.ade.invoke('project:switch', project.id))
 
   const commitRename = (project: Project) => {
     const current = renamingRef.current
@@ -428,9 +298,7 @@ export function Sidebar({
       toast({ tone: 'warning', message: t(entries.length > 0 ? 'drop.errors.notFolder' : 'drop.errors.unreadable') })
       return
     }
-    let state: ProjectsState | null = null
-    for (const folder of folders) state = await window.ade.invoke('project:addDropped', folder.path)
-    if (state?.activeProjectId) setProjectOpen(state.activeProjectId, true)
+    for (const folder of folders) await window.ade.invoke('project:addDropped', folder.path)
   }))
 
   const menuProject = menu ? projects.projects.find((p) => p.id === menu.id) : undefined
@@ -451,31 +319,31 @@ export function Sidebar({
             onClick={addProject}
             data-testid="sidebar-add-project"
           />
+          {projects.projects.length > 0 && <IconButton
+            size="sm"
+            label={t('sidebar.viewOptions')}
+            title={t('sidebar.viewOptions')}
+            className={`rv-filter__toggle${view.starredOnly ? ' is-active' : ''}`}
+            selected={viewOpen}
+            icon={<ListFilter size={14} strokeWidth={1.75} />}
+            onClick={() => setViewOpen(!viewOpen)}
+            data-testid="sidebar-view-toggle"
+          />}
           {/* プロジェクト一覧を閉じる（開き直すのはタイトルバー右の開閉ボタン・⌘B・設定ページ） */}
         </div>
 
-        {projects.projects.length > 0 && (
-          <ReviewFilterBar
-            filter={filter}
-            onChange={setFilter}
-            open={filterOpen}
-            onOpenChange={setFilterOpen}
-            hosts={reviewHosts(loaded)}
-            emptyDraftCount={loaded.filter(isEmptyDraft).length}
-            onDeleteEmpty={deleteEmptyDrafts}
-            projectFiltering={view.starredOnly}
-            projectSection={<>
-              <div className="rv-filter__label">{t('sidebar.sort.label')}</div>
-              <select className="rv-filter__select" aria-label={t('sidebar.sort.label')} value={view.sort} data-testid="sidebar-project-sort"
-                onChange={(e) => setView({ ...view, sort: sanitizeProjectView({ sort: e.target.value }).sort })}>
-                {PROJECT_SORTS.map((sort) => <option key={sort} value={sort}>{t(`sidebar.sort.${sort}`)}</option>)}
-              </select>
-              <label className="rv-filter__check">
-                <input type="checkbox" checked={view.starredOnly} onChange={(e) => setView({ ...view, starredOnly: e.target.checked })} data-testid="sidebar-starred-only" />
-                <span>{t('sidebar.starredOnly')}</span>
-              </label>
-            </>}
-          />
+        {viewOpen && projects.projects.length > 0 && (
+          <div className="rv-filter__panel sb-view" data-testid="sidebar-view-panel">
+            <div className="rv-filter__label">{t('sidebar.sort.label')}</div>
+            <select className="rv-filter__select" aria-label={t('sidebar.sort.label')} value={view.sort} data-testid="sidebar-project-sort"
+              onChange={(e) => setView({ ...view, sort: sanitizeProjectView({ sort: e.target.value }).sort })}>
+              {PROJECT_SORTS.map((sort) => <option key={sort} value={sort}>{t(`sidebar.sort.${sort}`)}</option>)}
+            </select>
+            <label className="rv-filter__check">
+              <input type="checkbox" checked={view.starredOnly} onChange={(e) => setView({ ...view, starredOnly: e.target.checked })} data-testid="sidebar-starred-only" />
+              <span>{t('sidebar.starredOnly')}</span>
+            </label>
+          </div>
         )}
 
         {projects.projects.length === 0 ? (
@@ -492,8 +360,7 @@ export function Sidebar({
             {shown.length === 0 && <p className="sb-tree__empty" data-testid="sidebar-no-starred">{t('sidebar.noStarred')}</p>}
             {shown.map((project) => {
               const active = project.id === activeProjectId
-              const expanded = isOpen(project.id)
-              const items = active ? sessions : others[project.id]
+              const collapsed = rowOf.get(project.id)?.collapsed ?? false
               return (
                 <div
                   key={project.id}
@@ -503,7 +370,7 @@ export function Sidebar({
                     if (!dragging || !Array.from(e.dataTransfer.types).includes(PROJECT_DRAG_TYPE) || !treeDrop(projects.projects, rows, dragging, project.id, 'before')) return
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'move'
-                    // 上か下かは見出しの行で決める（展開した履歴の上は「下」）
+                    // 上か下かは見出しの行で決める
                     const row = (e.currentTarget.firstElementChild as HTMLElement | null)?.getBoundingClientRect()
                     const position = row ? dropPositionAt(e.clientY - row.top, row.height) : 'after'
                     if (dropAt?.id !== project.id || dropAt.position !== position) setDropAt({ id: project.id, position })
@@ -539,7 +406,7 @@ export function Sidebar({
                       role="treeitem"
                       tabIndex={0}
                       aria-selected={active}
-                      aria-expanded={expanded}
+                      {...(isOrchestra(project) ? { 'aria-expanded': !collapsed } : {})}
                       className="sb-project__row"
                       title={project.source === 'ssh' && project.ssh ? sshTargetLabel(project.ssh) : project.folderPath}
                       draggable
@@ -550,7 +417,7 @@ export function Sidebar({
                         setDragging(project.id)
                       }}
                       onDragEnd={endDrag}
-                      onClick={() => (active ? setProjectOpen(project.id, !expanded) : switchTo(project))}
+                      onClick={() => (active ? (isOrchestra(project) && toggleOrchestra(project.id)) : switchTo(project))}
                       onKeyDown={(e) => {
                         if (e.target !== e.currentTarget) return
                         // Alt+↑ / Alt+↓ で1つ上・下へ並べ替える
@@ -562,11 +429,9 @@ export function Sidebar({
                         }
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
-                          if (active) setProjectOpen(project.id, !expanded)
-                          else switchTo(project)
+                          if (active) { if (isOrchestra(project)) toggleOrchestra(project.id) } else switchTo(project)
                         }
-                        if (e.key === 'ArrowRight') setProjectOpen(project.id, true)
-                        if (e.key === 'ArrowLeft') setProjectOpen(project.id, false)
+                        if (isOrchestra(project) && ((e.key === 'ArrowRight' && collapsed) || (e.key === 'ArrowLeft' && !collapsed))) toggleOrchestra(project.id)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -616,27 +481,7 @@ export function Sidebar({
                           <Check size={12} strokeWidth={2.5} />
                         </span>
                       )}
-                      {items && items.length > 0 && (() => {
-                        // 絞り込みで隠れている分があれば「表示中/全体」
-                        const shown = filterReviews(items, filter).length
-                        return (
-                          <span className="sidebar__section-count sb-project__count" title={t('sidebar.filter.shown', { shown, total: items.length })}>
-                            {shown < items.length ? `${shown}/${items.length}` : items.length}
-                          </span>
-                        )
-                      })()}
                       <span className="sb-project__actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          className="sb-project__action"
-                          aria-label={t('sidebar.newReviewIn', { name: project.name })}
-                          title={t('sidebar.newReviewIn', { name: project.name })}
-                          disabled={recording}
-                          onClick={() => onNewReview(project.id)}
-                          data-testid="sidebar-project-new-review"
-                        >
-                          <Plus size={14} strokeWidth={1.5} />
-                        </button>
                         <button
                           type="button"
                           className={`sb-project__action${project.starred ? ' is-starred' : ''}`}
@@ -659,14 +504,6 @@ export function Sidebar({
                           data-testid="sidebar-project-menu"
                         >
                           <Ellipsis size={14} strokeWidth={1.5} />
-                        </button>
-                        <button
-                          type="button"
-                          className="sb-project__action"
-                          aria-label={expanded ? t('sidebar.collapseHistory') : t('sidebar.expandHistory')}
-                          onClick={() => setProjectOpen(project.id, !expanded)}
-                        >
-                          <ChevronDown size={14} strokeWidth={1.5} className={expanded ? '' : 'is-collapsed'} />
                         </button>
                       </span>
                     </div>
@@ -691,58 +528,6 @@ export function Sidebar({
                     </div>
                   )}
 
-                  {expanded && (
-                    <div className="sb-project__children" role="group">
-                      {/* 全体（すべてのプロダクト）：1回の録画で全プロダクトをレビューする（帯のタブでプロダクトを切り替える）・確認待ちを順に確かめる */}
-                      {project.editorWorkspace && onStartRound && <>
-                        <button type="button" className="sb-new-review sb-new-review--round" title={t('orchestra.recordAllHint')} disabled={recording} onClick={() => onStartRound('record')} data-testid="sidebar-round-record">
-                          <Repeat size={13} strokeWidth={1.75} />
-                          <span>{t('orchestra.recordAll')}</span>
-                        </button>
-                        <button type="button" className="sb-new-review sb-new-review--round" title={t('round.startConfirmTip')} disabled={recording} onClick={() => onStartRound('confirm')} data-testid="sidebar-round-confirm">
-                          <ListChecks size={13} strokeWidth={1.75} />
-                          <span>{t('round.startConfirm')}</span>
-                        </button>
-                      </>}
-                      {/* このプロジェクトで新しいレビューを始める。開いているプロジェクトには ⌘⇧R も出す */}
-                      <button
-                        type="button"
-                        className="sb-new-review"
-                        title={t('sidebar.newReviewIn', { name: project.name })}
-                        disabled={recording}
-                        onClick={() => onNewReview(project.id)}
-                        data-testid={active ? 'sidebar-new-review' : `sidebar-new-review-${project.id}`}
-                      >
-                        <Plus size={13} strokeWidth={1.75} />
-                        <span>{t('sidebar.newReview')}</span>
-                        {active && <kbd className="sb-new-review__key">{recordKey}</kbd>}
-                      </button>
-                      {/* mtg の録画・文字起こしから指摘の候補を作る。取り込み先は開いているプロジェクト */}
-                      {active && onImportMeeting && <button
-                        type="button"
-                        className="sb-new-review sb-new-review--import"
-                        title={t('sidebar.importMeetingTip')}
-                        disabled={recording}
-                        onClick={onImportMeeting}
-                        data-testid="sidebar-import-meeting"
-                      >
-                        <Users size={13} strokeWidth={1.75} />
-                        <span>{t('sidebar.importMeeting')}</span>
-                      </button>}
-                      {items !== undefined && (
-                        <ReviewList
-                          filter={filter}
-                          {...(active ? {} : { folderPath: project.folderPath })}
-                          active={active}
-                          items={items}
-                          selectedId={selectedId}
-                          {...(active ? {} : { emptyText: t('sidebar.emptyOther') })}
-                          onSelect={(id) => selectSession(project, id)}
-                          onChanged={(deleted) => (active ? onHistoryChanged?.(deleted) : reloadOther(project))}
-                        />
-                      )}
-                    </div>
-                  )}
                 </div>
               )
             })}

@@ -354,9 +354,12 @@ export function shouldReportLoadFailure(f: { ownPage: boolean; errorCode: number
   return f.ownPage
 }
 
-/** Ferret 自身の実行ファイルの名前か（配布版の ferret・ferret.exe、dev の electron。小文字で比べる） */
+/**
+ * Ferret 自身の実行ファイルの名前か（配布版の ferret・ferret.exe、開発版の Ferret-Dev.exe・ferret-dev（electron-builder.dev.cjs）、
+ * dev 起動の electron。小文字で比べる）
+ */
 export function isOwnExecutable(name: string): boolean {
-  return /^(ferret|electron)(\.exe)?$/.test(name.toLowerCase())
+  return /^(ferret(-dev)?|electron)(\.exe)?$/.test(name.toLowerCase())
 }
 
 /** render-process-gone / child-process-gone を送るか。正常終了と、利用者が止めた（killed）ものは送らない */
