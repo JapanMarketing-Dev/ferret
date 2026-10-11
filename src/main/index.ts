@@ -54,9 +54,11 @@ import { BrowserExtensions } from './browserExtensions'
 import { browserImportHandlers } from './browserImport/ipc'
 import { feedbackShareHandlers } from './feedbackShare/ipc'
 import { publishHandlers } from './publish/ipc'
-import { xIntentUrl } from '@shared/xPost'
 import { PublishStore } from './publish/store'
 import { PublishBackground } from './publish/background'
+import { PublishConnections } from './publish/connections'
+import { chooseKeyCipher } from './pipeline/stt/keys'
+import { waitForCallback } from './publish/xAuthServer'
 import { MAX_BROWSER_EXTENSIONS, relativeRect, sanitizeBrowserExtensions, type BrowserExtensionEntry, type BrowserExtensionInfo } from '@shared/browserExtensions'
 import { APP_ALLOWED_PERMISSIONS, installPermissionPolicy, isAllowedExternalUrl, isAppPageUrl, isBrowserPageExternalUrl, isSnapshotableBrowserUrl, type PermissionSessionLike } from './webPolicy'
 import { pathToFileURL } from 'node:url'
@@ -1800,6 +1802,14 @@ const publishBackground = new PublishBackground({
   onChanged: () => send('publish:changed')
 })
 
+/** 発信の接続先（X のトークン・ブログの秘密）。文字起こしのキーと同じく、配布版は OS の鍵で暗号化して保存する */
+let publishConnectionStore: PublishConnections | null = null
+function publishConnections(): PublishConnections {
+  publishConnectionStore ??= new PublishConnections(join(app.getPath('userData'), 'publish-connections.bin'),
+    chooseKeyCipher({ isPackaged: IS_PACKAGED, isE2E: IS_E2E, safeStorage }))
+  return publishConnectionStore
+}
+
 /** 発信の下書きを書く AI。使えなければ null */
 async function publishRunner(): Promise<import('./pipeline/organize/runner').LlmRunner | null> {
   const organizer = currentSettings().organizer
@@ -2236,7 +2246,7 @@ function registerIpc(): void {
       isE2E: IS_E2E,
       notifyChanged: () => send('passwords:changed')
     }),
-    // 発信（X への投稿の下書き。AI が作り置き、選んで内蔵ブラウザの X の投稿画面に入れる。src/main/publish/ipc.ts）
+    // 発信（X とブログへの投稿。AI が書き、X API・WordPress・EmDash の API で投稿する。src/main/publish/ipc.ts）
     ...publishHandlers({
       projectId: () => workspace.projectId ?? null,
       projectDir: () => workspace.folderPath ?? null,
@@ -2249,13 +2259,10 @@ function registerIpc(): void {
         const chosen = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
         return chosen.canceled ? [] : chosen.filePaths
       },
-      openComposerTab: async () => {
-        if (!browser) return null
-        await browser.newTab()
-        return browser.contents
-      },
-      fillComposer: async (contents, input) => (await import('./publish/xComposer')).fillXComposer(contents, input),
-      fallbackUrl: (parts) => xIntentUrl(parts[0] ?? ''),
+      connections: publishConnections(),
+      fetcher: (url, init) => import('./netFetch').then(({ mainFetch }) => mainFetch(url, init)),
+      openExternal: (url) => shell.openExternal(url),
+      waitForCallback: (options) => waitForCallback(options),
       notifyChanged: () => send('publish:changed')
     }),
     // ログイン無しで誰でも指摘を送れる共有リンク（作る・届いた録画を取り込む。src/main/feedbackShare/ipc.ts）

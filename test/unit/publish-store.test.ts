@@ -224,7 +224,7 @@ describe('PublishStore.update', () => {
     const [a, b, c] = withMedia.media.map((m) => m.id)
     const next = await store.update(P, d.id, { mediaOrder: [c, 'ffffffff', a, c] })
     expect(next.media.map((m) => m.id)).toEqual([c, a])
-    expect(await store.mediaPaths(P, d.id)).toEqual(['/abs/3.png', '/abs/1.png'])
+    expect((await store.stored(P, d.id)).media.map((x) => x.path)).toEqual(['/abs/3.png', '/abs/1.png'])
     expect(b).toBeTruthy()
     expect((await store.update(P, d.id, { mediaOrder: [] })).media).toEqual([])
   })
@@ -241,13 +241,13 @@ describe('PublishStore.addMedia', () => {
     const { store, id } = await fresh()
     await store.addMedia(P, id, [1, 2, 3, 4].map((i) => ({ path: `/abs/${i}.jpg`, bytes: MB })))
     await expect(store.addMedia(P, id, [{ path: '/abs/5.jpg', bytes: 1 }])).rejects.toMatchObject({ userFacing: true })
-    expect(await store.mediaPaths(P, id)).toHaveLength(4)
+    expect((await store.stored(P, id)).media.map((x) => x.path)).toHaveLength(4)
   })
 
   it('一度に5枚渡すと全部断る', async () => {
     const { store, id } = await fresh()
     await expect(store.addMedia(P, id, [1, 2, 3, 4, 5].map((i) => ({ path: `/abs/${i}.png`, bytes: 1 })))).rejects.toMatchObject({ userFacing: true })
-    expect(await store.mediaPaths(P, id)).toEqual([])
+    expect((await store.stored(P, id)).media.map((x) => x.path)).toEqual([])
   })
 
   it('動画と画像は混ぜない・動画は1本', async () => {
@@ -280,7 +280,7 @@ describe('PublishStore.addMedia', () => {
 
   it('無い下書きには付けられない', async () => {
     await expect(makeStore().addMedia(P, 'deadbeef', [{ path: '/abs/a.png', bytes: 1 }])).rejects.toMatchObject({ userFacing: true })
-    await expect(makeStore().mediaPaths(P, 'deadbeef')).rejects.toMatchObject({ userFacing: true })
+    await expect(makeStore().stored(P, 'deadbeef')).rejects.toMatchObject({ userFacing: true })
   })
 })
 
@@ -336,5 +336,79 @@ describe('PublishStore の見本・消去・バックグラウンドの状態', 
   it('titleFromText は最初の空でない行を上限まで', () => {
     expect(titleFromText('\n\n  見出し  \n本文')).toBe('見出し')
     expect(Array.from(titleFromText('😀'.repeat(200)))).toHaveLength(PUBLISH_LIMITS.titleChars)
+  })
+})
+
+describe('記事・投稿の記録・メディアの相対パス', () => {
+  it('記事は足すときに前後の空白を外して残し、無ければ空の記事', async () => {
+    const store = makeStore()
+    const [a, b] = await store.add(P, [draft('x', { article: { title: '  題 ', body: '\n本文\n' } }), draft('y')])
+    expect(a.article).toEqual({ title: '題', body: '本文' })
+    expect(b.article).toEqual({ title: '', body: '' })
+    expect(a.results).toEqual([])
+  })
+
+  it('記事の題・本文を変え、上限を超えたら断る（境界: ちょうどは通す）', async () => {
+    const store = makeStore()
+    const [d] = await store.add(P, [draft('x')])
+    expect((await store.update(P, d.id, { articleTitle: '新しい題' })).article).toEqual({ title: '新しい題', body: '' })
+    expect((await store.update(P, d.id, { articleBody: '本文' })).article).toEqual({ title: '新しい題', body: '本文' })
+    await expect(store.update(P, d.id, { articleTitle: 'あ'.repeat(PUBLISH_LIMITS.articleTitleChars) })).resolves.toBeTruthy()
+    await expect(store.update(P, d.id, { articleTitle: 'あ'.repeat(PUBLISH_LIMITS.articleTitleChars + 1) })).rejects.toMatchObject({ userFacing: true })
+    await expect(store.update(P, d.id, { articleBody: 'い'.repeat(PUBLISH_LIMITS.articleChars + 1) })).rejects.toMatchObject({ userFacing: true })
+    await expect(store.update(P, d.id, { articleBody: 5 as unknown as string })).rejects.toThrow(/article body/)
+    // 断った変更は残らない
+    expect((await makeStore().get(P, d.id))?.article.body).toBe('本文')
+  })
+
+  it('投稿の記録を足すと投稿済みになり、記録は古い順で20件まで', async () => {
+    const store = makeStore()
+    const [d] = await store.add(P, [draft('x')])
+    clock += 1000
+    await store.recordResult(P, d.id, { kind: 'x', targetName: '@me', url: 'https://x.com/me/status/1' })
+    let got = await store.get(P, d.id)
+    expect(got?.status).toBe('posted')
+    expect(got?.postedAt).toBe(new Date(clock).toISOString())
+    expect(got?.results).toEqual([{ kind: 'x', targetName: '@me', url: 'https://x.com/me/status/1', at: new Date(clock).toISOString() }])
+    for (let i = 0; i < 25; i++) await store.recordResult(P, d.id, { kind: 'wordpress', targetId: 'a'.repeat(16), targetName: `blog${i}`, draft: true })
+    got = await makeStore().get(P, d.id)
+    expect(got?.results).toHaveLength(20)
+    expect(got?.results.at(-1)).toMatchObject({ targetName: 'blog24', draft: true, targetId: 'a'.repeat(16) })
+    // 投稿した時刻は最初の投稿のまま
+    expect(got?.postedAt).toBe(new Date(Date.parse('2026-10-01T00:00:00.000Z') + 1000).toISOString())
+  })
+
+  it('消えた下書きへの記録は何もしない', async () => {
+    await expect(makeStore().recordResult(P, 'deadbeefdeadbeef', { kind: 'x', targetName: '@me' })).resolves.toBeUndefined()
+  })
+
+  it('メディアの相対パスを残し、危ないもの（絶対パス・..）は捨てる', async () => {
+    const store = makeStore()
+    const [d] = await store.add(P, [draft('x', { media: [{ path: '/abs/a.png', bytes: 1, ref: 'shots/a.png' }, { path: '/abs/b.png', bytes: 1, ref: '../b.png' }, { path: '/abs/c.png', bytes: 1, ref: '/etc/c.png' }] })])
+    expect(d.media.map((m) => m.ref)).toEqual(['shots/a.png', undefined, undefined])
+    const added = await store.addMedia(P, d.id, [{ path: '/abs/d.png', bytes: 1, ref: 'C:\\d.png' }])
+    expect(added.media.at(-1)?.ref).toBeUndefined()
+  })
+
+  it('保存したファイルの記事・記録・相対パスの形を確かめる', () => {
+    const at = '2026-10-01T00:00:00.000Z'
+    const data = sanitizeProjectData({
+      projectId: P,
+      drafts: [{
+        id: 'a1b2c3d4', createdAt: at, updatedAt: at, source: 'manual', status: 'posted', title: 't', text: 'x',
+        media: [{ id: 'e5f6a7b8', kind: 'image', name: 'a.png', bytes: 1, path: '/abs/a.png', ref: 'x/../../a.png' }],
+        article: { title: 5, body: 'b' },
+        results: [
+          { kind: 'x', targetName: '@me', at, url: 'javascript:alert(1)' },
+          { kind: 'ghost', targetName: 'n', at },
+          { kind: 'emdash', targetName: 'blog', at: 'nope' },
+          { kind: 'emdash', targetName: 'blog', at, targetId: 'XYZ', draft: 'yes' }
+        ]
+      }]
+    }, P)
+    const d = data.drafts[0]
+    expect(d.media[0].ref).toBeUndefined()
+    expect(d.article).toEqual({ title: '', body: 'b' })
+    expect(d.results).toEqual([{ kind: 'x', targetName: '@me', at }, { kind: 'emdash', targetName: 'blog', at }])
   })
 })

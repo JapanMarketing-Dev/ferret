@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 #
-# 公開の前の関門: commit 済みの中身で、Linux と Windows の単体テスト（pnpm test:unit）を手元で流す。
+# 公開の前の関門: commit 済みの中身で、単体テスト（pnpm test:unit）を手元で流す。
 #
-#   bash scripts/cross-os-unit.sh [ref（既定: HEAD）] [linux|win|all（既定: all）]
+#   bash scripts/cross-os-unit.sh [ref（既定: HEAD）] [mac|linux|win|all（既定: mac）]
+#
+#   mac:   この Mac で流す（速い。依存はリポジトリの node_modules を使う）。publish-squash.sh が既定で求めるのはこれだけ
+#   linux / win / all: 下の Linux コンテナ・Windows の VM で流す（遅い。FERRET_REQUIRE_CROSS_OS=1 のときだけ公開の条件になる）
+#
+# Linux・Windows は、公開したあとに GitHub Actions の Cross-platform が3つの OS で並列に流す。
+# release-github.mjs create はその結果が通るまでリリースを作らない（scripts/release-ci.mjs）。
 #
 # 公開リポジトリの CI（Cross-platform）は、publish-squash.sh で出したあとにまとめて走る。mac では通るのに
 # Windows・Linux でだけ落ちるテスト（実行ビット、パスの区切り、EMFILE、fs.watch など）にリリース後に気づかないよう、
@@ -25,8 +31,8 @@
 set -euo pipefail
 
 REF="${1:-HEAD}"
-WHICH="${2:-all}"
-case "$WHICH" in linux | win | all) ;; *) echo "2つ目の引数は linux / win / all です: $WHICH" >&2; exit 2 ;; esac
+WHICH="${2:-mac}"
+case "$WHICH" in mac | linux | win | all) ;; *) echo "2つ目の引数は mac / linux / win / all です: $WHICH" >&2; exit 2 ;; esac
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
@@ -42,6 +48,16 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ] && [ "$REF" = "HEAD" 
   echo "注意: 作業ツリーの未 commit の変更は試しません。試すのは commit 済みの ${REF}（tree ${SHORT}）です。"
 fi
 git archive --format=tar "$REF" > "$WORK/src.tar"
+
+run_mac() {
+  say "この Mac で単体テスト"
+  mkdir -p "$WORK/mac"
+  tar -x -C "$WORK/mac" -f "$WORK/src.tar" || return 1
+  # 依存は入れ直さず、リポジトリのものを使う（pnpm-lock.yaml が同じことを確かめる）
+  cmp -s "$WORK/mac/pnpm-lock.yaml" "$ROOT/pnpm-lock.yaml" || { echo "pnpm-lock.yaml が作業ツリーと違います。pnpm install してから流してください" >&2; return 1; }
+  ln -s "$ROOT/node_modules" "$WORK/mac/node_modules"
+  (cd "$WORK/mac" && CI=true pnpm test:unit)
+}
 
 run_linux() {
   say "Linux（arm64 コンテナ）で単体テスト"
@@ -106,6 +122,9 @@ run_win() {
 
 # 下の if の中では set -e が効かない。run_linux / run_win の途中の失敗は || return 1 で止めている
 status=0
+if [ "$WHICH" = mac ]; then
+  if run_mac; then passed mac; else status=1; say "mac: 落ちました"; fi
+fi
 if [ "$WHICH" = linux ] || [ "$WHICH" = all ]; then
   if run_linux; then passed linux; else status=1; say "linux: 落ちました"; fi
 fi

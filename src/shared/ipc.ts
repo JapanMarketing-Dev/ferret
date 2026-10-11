@@ -1,7 +1,7 @@
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
-import type { PostDraftPatch, PublishGenerateRequest, PublishSnapshot, XComposeResult } from './publish'
+import type { BlogTargetInput, PostBlogResult, PostDraftPatch, PostXResult, PublishConnectionsInfo, PublishGenerateRequest, PublishSnapshot } from './publish'
 import type { ShareRecordingStatus, ShareSettingsInput, ShareSettingsView, ShareSnapshot, ShareSummaryInfo, ShareUrl } from './feedbackShare'
 import type { MeetingImportProgress, MeetingImportRequest, MeetingMediaPick, MeetingScoreResult, MeetingTranscriptPick } from './meetingImport'
 import type { AgentNotifyOpen, AgentNotifyRequest } from './agentNotify'
@@ -295,9 +295,9 @@ export interface IpcRequests {
   'passwords:fill': (id: string) => number
   /** 資格情報が複数あるときのネイティブのメニュー（at はウインドウの中の位置）。選んだものを入れたら true、管理を選んだら 'manage' */
   'passwords:menu': (at: { x: number; y: number }) => boolean | 'manage'
-  /** 発信（X への投稿。src/main/publish/）。このプロジェクトの下書きとバックグラウンドの生成の様子（メディアは見本だけ） */
+  /** 発信（X とブログへの投稿。src/main/publish/）。このプロジェクトの下書きとバックグラウンドの生成の様子（メディアは見本だけ） */
   'publish:list': () => PublishSnapshot
-  /** AI に下書きを作らせる（文章を渡せばそれから、無ければプロジェクトの最近の変更から）。作った数（新しいものが一覧の先頭） */
+  /** AI に下書きを作らせる（intent＝何を発信したいか・文章を渡せばそれから、無ければプロジェクトの最近の変更から）。作った数（新しいものが一覧の先頭） */
   'publish:generate': (request: PublishGenerateRequest) => number
   /** 手で書く下書きを作る */
   'publish:create': (text: string) => string
@@ -309,8 +309,22 @@ export interface IpcRequests {
   'publish:addProjectMedia': (id: string, relPaths: string[]) => number
   /** バックグラウンドで下書きを作るか */
   'publish:setBackground': (enabled: boolean) => void
-  /** 内蔵ブラウザで X の投稿画面を開き、本文（parts。スレッドなら複数）とメディアを入れる。「ポスト」は利用者が押す */
-  'publish:composeX': (id: string, parts: string[]) => XComposeResult
+  /** 接続先（X の Client ID・つながっているか・ブログの一覧）。トークン・パスワードは返さない */
+  'publish:connections': () => PublishConnectionsInfo
+  /** X の Client ID を保存する（空なら消す。変えたら前のトークンは捨てる） */
+  'publish:setXClientId': (clientId: string) => PublishConnectionsInfo
+  /** 既定のブラウザで X の認証を開き、許可されるまで待ってトークンを保存する */
+  'publish:connectX': () => PublishConnectionsInfo
+  /** 待っている X の認証をやめる */
+  'publish:cancelConnectX': () => void
+  'publish:disconnectX': () => PublishConnectionsInfo
+  /** ブログの接続先を、接続を確かめてから足す */
+  'publish:addBlog': (input: BlogTargetInput) => PublishConnectionsInfo
+  'publish:removeBlog': (id: string) => PublishConnectionsInfo
+  /** 保存した下書きを X API で投稿する（長ければスレッド。メディアは1件目） */
+  'publish:postX': (id: string) => PostXResult
+  /** 保存した下書きの記事をブログへ投稿する（draft なら下書きとして置く） */
+  'publish:postBlog': (id: string, blogId: string, draft: boolean) => PostBlogResult
   /** ログイン無しで誰でも指摘を送れる共有リンク（src/main/feedbackShare/）。このプロジェクトの共有の一覧 */
   'share:list': () => { shares: ShareSummaryInfo[]; persisted: boolean }
   /** 開いているページの共有（同じ URL の期限内のもの）を返す。無ければ作る。リンクは画面がコピーする */
@@ -779,7 +793,8 @@ export const IPC_REQUEST_CHANNELS = [
   'browser:state',
   'browserExtensions:list', 'browserExtensions:addFolder', 'browserExtensions:scanInstalled', 'browserExtensions:import', 'browserExtensions:setEnabled', 'browserExtensions:remove', 'browserExtensions:menu', 'browserExtensions:open', 'browserExtensions:installFromStore', 'browserExtensions:addCrx',
   'browserImport:status', 'browserImport:importPasswords', 'browserImport:findExports', 'browserImport:trashExport', 'browserImport:clearPasswords', 'browserImport:historySources', 'browserImport:importHistory', 'browserImport:clearHistory', 'browserImport:suggest', 'passwords:forPage', 'passwords:fill', 'passwords:menu',
-  'publish:list', 'publish:generate', 'publish:create', 'publish:update', 'publish:remove', 'publish:pickMedia', 'publish:addProjectMedia', 'publish:setBackground', 'publish:composeX',
+  'publish:list', 'publish:generate', 'publish:create', 'publish:update', 'publish:remove', 'publish:pickMedia', 'publish:addProjectMedia', 'publish:setBackground',
+  'publish:connections', 'publish:setXClientId', 'publish:connectX', 'publish:cancelConnectX', 'publish:disconnectX', 'publish:addBlog', 'publish:removeBlog', 'publish:postX', 'publish:postBlog',
   'share:list', 'share:forPage', 'share:create', 'share:settings', 'share:update', 'share:copyPassword', 'share:open', 'share:setStatus', 'share:import', 'share:delete',
   'terminal:create',
   'terminal:write',

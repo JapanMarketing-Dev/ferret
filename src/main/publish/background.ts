@@ -10,7 +10,7 @@ import { UserFacingError } from '@shared/errors'
 import { PUBLISH_LIMITS, type PublishGenerateRequest } from '@shared/publish'
 import type { LlmRunner } from '../pipeline/organize/runner'
 import {
-  collectProjectMaterial, generateDrafts, resolveDraftMedia,
+  collectFolderMedia, collectProjectMaterial, generateDrafts, mergeCandidates, resolveDraftMedia,
   type GeneratedDraft, type ProjectMaterial, type PublishPromptOptions, type TextMaterial
 } from './generate'
 import { publishText, type PublishStore } from './store'
@@ -32,16 +32,18 @@ export interface PublishBackgroundDeps {
   store: Pick<PublishStore, 'add' | 'background' | 'setBackground' | 'pendingCount' | 'recentTitles'>
   /** 使える AI。使えなければ null */
   makeRunner: () => Promise<LlmRunner | null>
-  /** runner ごとの待ち時間。既定は API 180秒・CLI 120秒 */
+  /** runner ごとの待ち時間。既定は API 240秒・CLI 300秒（記事も書くので長め） */
   timeoutMs?: (runner: LlmRunner) => number
   /** runner の作業フォルダ（記録用。CLI の runner は空の一時フォルダで動く） */
   workDir: () => string
   /** 下書きの言語 */
   language?: () => 'ja' | 'en'
   collect?: (dir: string, options: { sinceHead?: string }) => Promise<ProjectMaterial>
+  /** フォルダの中の画像・動画の候補（主題に合うもの → 新しいもの） */
+  collectFolder?: (dir: string, intent: string) => Promise<string[]>
   generate?: (runner: LlmRunner, material: ProjectMaterial | TextMaterial,
     options: PublishPromptOptions & { cwd: string; timeoutMs: number }) => Promise<GeneratedDraft[]>
-  resolveMedia?: (dir: string, relPaths: readonly string[]) => Promise<Array<{ path: string; bytes: number }>>
+  resolveMedia?: (dir: string, relPaths: readonly string[]) => Promise<Array<{ path: string; bytes: number; ref?: string }>>
   /** 下書き・状態が変わった（画面へ知らせる） */
   onChanged: (projectId: string) => void
 }
@@ -124,6 +126,7 @@ export class PublishBackground {
 
   /**
    * 利用者が押した生成。text があればその文章から（ai-text）、無ければ最近の変更から（新しいコミットの有無・間隔は見ない）。
+   * intent（何を発信したいか）があれば、それを主題に1件作り、フォルダの画像・動画から候補を選ぶ。
    * 同じプロジェクトの生成が走っていればそれを待ち、別のプロジェクトのものが走っていれば断る。作った数を返す
    */
   async runNow(projectId: string, request: PublishGenerateRequest = {}): Promise<number> {
@@ -133,17 +136,20 @@ export class PublishBackground {
     }
     const project = this.deps.project()
     if (!project || project.id !== projectId) throw new UserFacingError(publishText('publish.errors.projectNotOpen'))
+    const intent = request.intent?.trim() ?? ''
+    const folder = () => (this.deps.collectFolder ?? ((dir, words) => collectFolderMedia(dir, words)))(project.dir, intent).catch(() => [] as string[])
     return this.fly(projectId, async () => {
       if (request.text !== undefined) {
         const text = request.text.slice(0, PUBLISH_LIMITS.sourceTextChars)
         if (!text.trim()) throw new UserFacingError(publishText('publish.errors.nothingToWrite'))
-        const added = await this.produce(project, { text, ...(request.textLabel ? { textLabel: request.textLabel } : {}) }, request.hint)
+        const added = await this.produce(project, { text, ...(request.textLabel ? { textLabel: request.textLabel } : {}), mediaCandidates: await folder() }, intent)
         return { added }
       }
       const collect = this.deps.collect ?? ((dir, options) => collectProjectMaterial(dir, options))
-      const material = await collect(project.dir, {})
-      if (!material.commits.length && !material.readme) throw new UserFacingError(publishText('publish.errors.nothingToWrite'))
-      const added = await this.produce(project, material, request.hint)
+      const collected = await collect(project.dir, {})
+      if (!intent && !collected.commits.length && !collected.readme) throw new UserFacingError(publishText('publish.errors.nothingToWrite'))
+      const material = intent ? { ...collected, mediaCandidates: mergeCandidates(await folder(), collected.mediaCandidates) } : collected
+      const added = await this.produce(project, material, intent)
       await this.deps.store.setBackground(projectId, { lastRunAt: this.iso(), lastError: null, ...(material.head ? { lastHead: material.head } : {}) })
       return { added }
     })
@@ -167,23 +173,23 @@ export class PublishBackground {
   }
 
   /** AI に作らせて足す。足した数 */
-  private async produce(project: PublishProject, material: ProjectMaterial | TextMaterial, hint?: string): Promise<number> {
+  private async produce(project: PublishProject, material: ProjectMaterial | TextMaterial, intent?: string): Promise<number> {
     const runner = await this.deps.makeRunner()
     if (!runner) throw new UserFacingError(publishText('publish.errors.aiUnavailable'))
     const generate = this.deps.generate ?? generateDrafts
     const resolveMedia = this.deps.resolveMedia ?? resolveDraftMedia
-    const timeoutMs = this.deps.timeoutMs?.(runner) ?? (runner.id.startsWith('api:') ? 180_000 : 120_000)
+    const timeoutMs = this.deps.timeoutMs?.(runner) ?? (runner.id.startsWith('api:') ? 240_000 : 300_000)
     const drafts = await generate(runner, material, {
-      count: PUBLISH_LIMITS.backgroundBatch,
+      count: intent?.trim() ? 1 : PUBLISH_LIMITS.backgroundBatch,
       language: this.deps.language?.() ?? 'ja',
       existingTitles: await this.deps.store.recentTitles(project.id),
       cwd: this.deps.workDir(),
       timeoutMs,
-      ...(hint?.trim() ? { hint } : {})
+      ...(intent?.trim() ? { intent: intent.trim() } : {})
     })
     const source = 'text' in material ? 'ai-text' as const : 'ai-background' as const
     const withMedia = await Promise.all(drafts.map(async (d) => ({
-      source, title: d.title, text: d.text, ...(d.basis ? { basis: d.basis } : {}),
+      source, title: d.title, text: d.text, article: d.article, ...(d.basis ? { basis: d.basis } : {}),
       media: d.media.length ? await resolveMedia(project.dir, d.media) : []
     })))
     return (await this.deps.store.add(project.id, withMedia)).length

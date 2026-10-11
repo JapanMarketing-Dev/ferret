@@ -44,7 +44,8 @@ function materialFor(head: string | null, commits = 1): ProjectMaterial {
 interface Harness {
   bg: PublishBackground
   collects: Array<{ dir: string; sinceHead?: string }>
-  generates: Array<{ material: ProjectMaterial | TextMaterial; count: number; timeoutMs: number; cwd: string; hint?: string; existingTitles: readonly string[] }>
+  generates: Array<{ material: ProjectMaterial | TextMaterial; count: number; timeoutMs: number; cwd: string; intent?: string; existingTitles: readonly string[] }>
+  folders: Array<{ dir: string; intent: string }>
   changed: string[]
   timers: Array<{ fn: () => void; ms: number; cleared: boolean }>
   /** 生成を止めておく（single-flight を確かめる） */
@@ -54,7 +55,7 @@ interface Harness {
 
 function harness(overrides: Partial<PublishBackgroundDeps> = {}): Harness {
   const h = {
-    collects: [], generates: [], changed: [], timers: [],
+    collects: [], generates: [], changed: [], timers: [], folders: [],
     state: { head: HEAD1, commits: 1, runner, fail: null, project: PROJECT }
   } as unknown as Harness
   let gate: Promise<void> | null = null
@@ -77,12 +78,13 @@ function harness(overrides: Partial<PublishBackgroundDeps> = {}): Harness {
       return materialFor(h.state.head, h.state.commits)
     },
     generate: async (_runner, material, options): Promise<GeneratedDraft[]> => {
-      h.generates.push({ material, count: options.count, timeoutMs: options.timeoutMs, cwd: options.cwd, hint: options.hint, existingTitles: options.existingTitles })
+      h.generates.push({ material, count: options.count, timeoutMs: options.timeoutMs, cwd: options.cwd, intent: options.intent, existingTitles: options.existingTitles })
       if (gate) await gate
       if (h.state.fail) throw h.state.fail
-      return Array.from({ length: options.count }, (_, i) => ({ title: `t${h.generates.length}-${i}`, text: `本文${h.generates.length}-${i}`, media: i === 0 ? ['shot.png'] : [] }))
+      return Array.from({ length: options.count }, (_, i) => ({ title: `t${h.generates.length}-${i}`, text: `本文${h.generates.length}-${i}`, media: i === 0 ? ['shot.png'] : [], article: { title: `記事${i}`, body: `記事の本文${i}` } }))
     },
-    resolveMedia: async (dir, rels) => rels.map((r) => ({ path: `${dir}/${r}`, bytes: 10 })),
+    collectFolder: async (dir, intent) => { h.folders.push({ dir, intent }); return ['folder/pic.png'] },
+    resolveMedia: async (dir, rels) => rels.map((r) => ({ path: `${dir}/${r}`, bytes: 10, ref: r })),
     onChanged: (id) => h.changed.push(id),
     ...overrides
   })
@@ -99,15 +101,15 @@ describe('PublishBackground.tick', () => {
     expect(snap.drafts[0].media.map((m) => m.name)).toEqual(['shot.png'])
     expect(await store.background(PROJECT.id)).toEqual({ enabled: true, lastHead: HEAD1, lastRunAt: new Date(clock).toISOString() })
     expect(h.collects[0]).toEqual({ dir: PROJECT.dir })
-    expect(h.generates[0]).toMatchObject({ count: PUBLISH_LIMITS.backgroundBatch, timeoutMs: 120_000, cwd: '/tmp/work' })
+    expect(h.generates[0]).toMatchObject({ count: PUBLISH_LIMITS.backgroundBatch, timeoutMs: 300_000, cwd: '/tmp/work' })
     expect(h.changed).toEqual([PROJECT.id])
   })
 
-  it('API の runner は長く待つ', async () => {
+  it('API の runner は CLI と別の待ち時間（記事も書くので長め）', async () => {
     const h = harness()
     h.state.runner = { ...runner, id: 'api:openai' }
     await h.bg.tick()
-    expect(h.generates[0].timeoutMs).toBe(180_000)
+    expect(h.generates[0].timeoutMs).toBe(240_000)
   })
 
   it('間隔が空くまでは作らない（境界: ちょうど間隔で作る）', async () => {
@@ -225,9 +227,13 @@ describe('PublishBackground.runNow', () => {
   it('間隔・新しいコミットの有無を見ずに最近の変更から作る（sinceHead を渡さない）', async () => {
     const h = harness()
     await h.bg.tick()
-    expect(await h.bg.runNow(PROJECT.id, { hint: '告知' })).toBe(PUBLISH_LIMITS.backgroundBatch)
+    expect(await h.bg.runNow(PROJECT.id, { intent: '告知' })).toBe(1)
     expect(h.collects[1]).toEqual({ dir: PROJECT.dir })
-    expect(h.generates[1].hint).toBe('告知')
+    expect(h.generates[1].intent).toBe('告知')
+    expect(h.generates[1].count).toBe(1)
+    // 主題があればフォルダの候補を先に並べる
+    expect(h.folders).toEqual([{ dir: PROJECT.dir, intent: '告知' }])
+    expect((h.generates[1].material as { mediaCandidates: string[] }).mediaCandidates[0]).toBe('folder/pic.png')
     expect(h.generates[1].existingTitles.length).toBeGreaterThan(0)
   })
 
@@ -235,7 +241,7 @@ describe('PublishBackground.runNow', () => {
     const h = harness()
     expect(await h.bg.runNow(PROJECT.id, { text: 'メモの本文', textLabel: 'memo.md' })).toBe(PUBLISH_LIMITS.backgroundBatch)
     expect(h.collects).toHaveLength(0)
-    expect(h.generates[0].material).toEqual({ text: 'メモの本文', textLabel: 'memo.md' })
+    expect(h.generates[0].material).toEqual({ text: 'メモの本文', textLabel: 'memo.md', mediaCandidates: ['folder/pic.png'] })
     const snap = await store.snapshot(PROJECT.id)
     expect(snap.drafts.every((d) => d.source === 'ai-text')).toBe(true)
     expect(await store.background(PROJECT.id)).toEqual({ enabled: true })

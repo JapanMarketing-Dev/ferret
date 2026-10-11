@@ -7,7 +7,8 @@
 # 手元の develop の履歴（作者のメールなど）は公開しない。元の ref の「コミット済みの中身」だけを、
 # 公開先の main の上に1コミットとして積む。作業は一時的な worktree で行い、手元の作業ツリーには触らない。
 #
-#   0. 元の ref の中身（tree）が、Windows と Linux の単体テストを通っているか確かめる（scripts/cross-os-unit.sh の記録）。
+#   0. 元の ref の中身（tree）が、この Mac の単体テストを通っているか確かめる（scripts/cross-os-unit.sh の記録。
+#      FERRET_REQUIRE_CROSS_OS=1 なら Linux・Windows の記録も求める。既定では公開後の GitHub Actions に任せる）。
 #      同じ tree を CI と同じ CodeQL で調べて警告が0件だったかも確かめる（scripts/codeql-local.sh の記録）
 #   1. 公開先の main を取得し、一時的な worktree を作る
 #   2. 元の ref の中身を git archive で写し、公開しないもの（E2E 一式・docs/qa など）を外す
@@ -67,15 +68,18 @@ done
 
 git rev-parse --verify --quiet "$SOURCE_REF^{commit}" >/dev/null || die "ref が見つかりません: $SOURCE_REF"
 
-# --- 0. 公開の前の関門（Windows・Linux の単体テスト） -------------------------
-# 公開リポジトリの CI はこの1コミットを出したあとにまとめて走るので、OS の違いで落ちるとリリース後に気づく。
-# 同じ中身（tree）で scripts/cross-os-unit.sh が linux と win の両方を通した記録が無ければ止める。dry run は止めない
+# --- 0. 公開の前の関門（単体テスト） -------------------------------------------
+# 同じ中身（tree）で scripts/cross-os-unit.sh がこの Mac で通した記録が無ければ止める。dry run は止めない。
+# Linux・Windows は公開後に GitHub Actions の Cross-platform が流し、release-github.mjs create がその結果を待つ
+# （VM・コンテナで先に流すときは FERRET_REQUIRE_CROSS_OS=1。その記録も求める）
 SOURCE_TREE="$(git rev-parse "$SOURCE_REF^{tree}")"
 CROSS_OS_RECORD="$(git rev-parse --git-common-dir)/ferret-cross-os-unit"
+REQUIRED_OS=(mac)
+[ "${FERRET_REQUIRE_CROSS_OS:-}" = "1" ] && REQUIRED_OS=(linux win)
 if [ "${PUBLISH_DRY_RUN:-}" != "1" ]; then
-  for os in linux win; do
+  for os in "${REQUIRED_OS[@]}"; do
     grep -qx "$SOURCE_TREE $os" "$CROSS_OS_RECORD" 2>/dev/null \
-      || die "${SOURCE_REF}（tree ${SOURCE_TREE:0:12}）は $os の単体テストを通した記録がありません。先に bash scripts/cross-os-unit.sh $SOURCE_REF を流してください"
+      || die "${SOURCE_REF}（tree ${SOURCE_TREE:0:12}）は $os の単体テストを通した記録がありません。先に bash scripts/cross-os-unit.sh $SOURCE_REF $os を流してください"
   done
   # 公開リポジトリの Code scanning（CodeQL）に警告を出さない。同じ tree で scripts/codeql-local.sh が0件だった記録が無ければ止める
   grep -qx "$SOURCE_TREE codeql" "$(git rev-parse --git-common-dir)/ferret-codeql" 2>/dev/null \

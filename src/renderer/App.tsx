@@ -1463,7 +1463,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onManageAccounts={manageAccounts}
         /></ErrorBoundary>}
       </div>
-      {publishRequest && <ErrorBoundary name="publish"><PublishPanel request={publishRequest} onShowBrowser={() => setCenterTab('browser')} /></ErrorBoundary>}
+      {publishRequest && <ErrorBoundary name="publish"><PublishPanel request={publishRequest} /></ErrorBoundary>}
 
       {/* 全体では、ターミナルの欄を閉じて右下の小さなボタンにする（フィードバックの対象を大きく見せる。ChatGPT の画面のように） */}
       {mode === 'editor' && <button type="button" className={`orchestra-peek${orchestraBusy ? ' is-busy' : ''}`} onClick={() => setTerminalPeek((v) => !v)}

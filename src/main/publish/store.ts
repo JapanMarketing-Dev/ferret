@@ -1,6 +1,6 @@
 /**
  * 「発信」の下書きの置き場（プロジェクトごと）。userData/publish/<プロジェクトの id の sha256 の先頭32文字>.json に、
- * 下書き・付けたメディア・バックグラウンドの生成の状態を置く（所有者だけが読める・一時ファイルから置き換え。atomicFile.ts）。
+ * 下書き（X の本文・ブログの記事）・付けたメディア・投稿した記録・バックグラウンドの生成の状態を置く（所有者だけが読める・一時ファイルから置き換え。atomicFile.ts）。
  *
  * - メディアの実パスは main だけが持つ。画面へは名前・大きさ・見本だけを返す（snapshot）
  * - 読むときに形を確かめ、壊れたファイルは空として、形の合わない下書き・メディアは捨てる（feedbackShare/store.ts と同じ）
@@ -13,7 +13,8 @@ import { t, type MessageParams, type TranslationKey } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import {
   mediaKindOf, PUBLISH_LIMITS, xMediaProblem,
-  type PostDraftInfo, type PostDraftPatch, type PostDraftSource, type PostDraftStatus, type PostMediaInfo, type PostMediaKind, type PublishSnapshot
+  type PostArticle, type PostDraftInfo, type PostDraftPatch, type PostDraftSource, type PostDraftStatus, type PostMediaInfo, type PostMediaKind,
+  type PostResultInfo, type PublishSnapshot, type PublishTargetKind
 } from '@shared/publish'
 import { savePrivateFile } from '../atomicFile'
 
@@ -24,6 +25,8 @@ export interface StoredMedia {
   bytes: number
   /** 実パス（絶対パス）。画面へは返さない */
   path: string
+  /** プロジェクトの中のファイルなら、プロジェクトからの相対パス */
+  ref?: string
 }
 
 export interface StoredDraft extends Omit<PostDraftInfo, 'media'> {
@@ -53,8 +56,12 @@ export interface NewDraft {
   title: string
   text: string
   basis?: string
-  media?: ReadonlyArray<{ path: string; bytes: number }>
+  article?: PostArticle
+  media?: ReadonlyArray<{ path: string; bytes: number; ref?: string }>
 }
+
+/** 投稿した記録を足すときに渡すもの（時刻は store が付ける） */
+export type NewResult = Omit<PostResultInfo, 'at'>
 
 /** 下書きのメディアの見本を作る（作れなければ undefined） */
 export type ThumbnailMaker = (path: string, kind: PostMediaKind) => Promise<string | undefined>
@@ -69,6 +76,8 @@ const BASIS_CHARS = 500
 const ERROR_CHARS = 500
 const STATUSES: readonly PostDraftStatus[] = ['new', 'posted', 'dismissed']
 const SOURCES: readonly PostDraftSource[] = ['ai-background', 'ai-text', 'manual']
+const TARGET_KINDS: readonly PublishTargetKind[] = ['x', 'wordpress', 'emdash']
+const MAX_RESULTS = 20
 /** 変えてよい状態（同じ状態への変更はいつでも可）。投稿済みは「使わない」にだけ動かせる（同じ本文を X は二度受け付けない） */
 const TRANSITIONS: Record<PostDraftStatus, readonly PostDraftStatus[]> = {
   new: ['posted', 'dismissed'],
@@ -99,6 +108,33 @@ function validDate(v: unknown): string | null {
   return typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v : null
 }
 
+/** 相対パスとして安全か（絶対パス・.. を含まない） */
+function safeRef(v: unknown): string | undefined {
+  if (typeof v !== 'string' || !v || v.length > 1000 || v.includes('\0') || /^([\\/]|[A-Za-z]:)/.test(v)) return undefined
+  return v.split(/[\\/]/).includes('..') ? undefined : v
+}
+
+function sanitizeArticle(raw: unknown): PostArticle {
+  const a = (raw ?? {}) as Record<string, unknown>
+  return {
+    title: typeof a.title === 'string' ? clip(a.title, PUBLISH_LIMITS.articleTitleChars) : '',
+    body: typeof a.body === 'string' ? clip(a.body, PUBLISH_LIMITS.articleChars) : ''
+  }
+}
+
+function sanitizeResults(raw: unknown): PostResultInfo[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item: unknown): PostResultInfo[] => {
+    const r = (item ?? {}) as Record<string, unknown>
+    const kind = TARGET_KINDS.find((k) => k === r.kind)
+    const at = validDate(r.at)
+    if (!kind || !at || typeof r.targetName !== 'string') return []
+    const url = typeof r.url === 'string' && /^https?:\/\//.test(r.url) ? clip(r.url, 2000) : undefined
+    const targetId = typeof r.targetId === 'string' && /^[0-9a-f]{16}$/.test(r.targetId) ? r.targetId : undefined
+    return [{ kind, targetName: clip(r.targetName, 120), at, ...(targetId ? { targetId } : {}), ...(url ? { url } : {}), ...(r.draft === true ? { draft: true } : {}) }]
+  }).slice(-MAX_RESULTS)
+}
+
 function sanitizeMedia(raw: unknown): StoredMedia[] {
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
@@ -111,7 +147,8 @@ function sanitizeMedia(raw: unknown): StoredMedia[] {
     if (!id || !path || !kind || m.kind !== kind || bytes === null || seen.has(id)) return []
     seen.add(id)
     const name = typeof m.name === 'string' && m.name ? clip(m.name, 255) : basename(path)
-    return [{ id, kind, name, bytes, path }]
+    const ref = safeRef(m.ref)
+    return [{ id, kind, name, bytes, path, ...(ref ? { ref } : {}) }]
   })
 }
 
@@ -136,7 +173,10 @@ export function sanitizeProjectData(raw: unknown, projectId: string): ProjectDat
     const postedAt = status === 'posted' ? validDate(d.postedAt) ?? updatedAt : status === 'dismissed' ? validDate(d.postedAt) ?? undefined : undefined
     // 組み合わせが X の決まりから外れたもの（手で書き換えた・決まりが変わった）は、収まる分だけ残す
     const media = fitMedia([], sanitizeMedia(d.media))
-    return [{ id, createdAt, updatedAt, source, status, title, text, media, ...(basis ? { basis } : {}), ...(postedAt ? { postedAt } : {}) }]
+    return [{
+      id, createdAt, updatedAt, source, status, title, text, media, article: sanitizeArticle(d.article), results: sanitizeResults(d.results),
+      ...(basis ? { basis } : {}), ...(postedAt ? { postedAt } : {})
+    }]
   })
   // 新しい順（同じ時刻は保存の順のまま）
   drafts.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
@@ -162,9 +202,9 @@ function fitMedia(current: StoredMedia[], additions: StoredMedia[]): StoredMedia
 function toInfo(d: StoredDraft, thumbnails?: ReadonlyMap<string, string | undefined>): PostDraftInfo {
   const media: PostMediaInfo[] = d.media.map((m) => {
     const thumbnail = thumbnails?.get(m.id)
-    return { id: m.id, kind: m.kind, name: m.name, bytes: m.bytes, ...(thumbnail ? { thumbnail } : {}) }
+    return { id: m.id, kind: m.kind, name: m.name, bytes: m.bytes, ...(m.ref ? { ref: m.ref } : {}), ...(thumbnail ? { thumbnail } : {}) }
   })
-  return { ...d, media }
+  return { ...d, media, article: { ...d.article }, results: d.results.map((r) => ({ ...r })) }
 }
 
 const MEDIA_PROBLEM_KEYS = { tooMany: 'publish.errors.mediaTooMany', mixed: 'publish.errors.mediaMixed', tooLarge: 'publish.errors.mediaTooLarge' } as const
@@ -262,10 +302,12 @@ export class PublishStore {
         const title = Array.from(n.title.replace(/\s+/g, ' ').trim()).slice(0, PUBLISH_LIMITS.titleChars).join('') || titleFromText(text)
         const media = fitMedia([], (n.media ?? []).flatMap((f) => {
           const kind = isAbsolute(f.path) ? mediaKindOf(f.path) : null
-          return kind ? [{ id: newId(), kind, name: basename(f.path), bytes: Math.max(0, Math.floor(f.bytes)), path: f.path }] : []
+          const ref = safeRef(f.ref)
+          return kind ? [{ id: newId(), kind, name: basename(f.path), bytes: Math.max(0, Math.floor(f.bytes)), path: f.path, ...(ref ? { ref } : {}) }] : []
         }))
         const basis = n.basis?.trim() ? clip(n.basis.trim(), BASIS_CHARS) : undefined
-        return [{ id: newId(), createdAt: at, updatedAt: at, source: n.source, status: 'new' as const, title, text, media, ...(basis ? { basis } : {}) }]
+        const article = sanitizeArticle({ title: n.article?.title.trim(), body: n.article?.body.trim() })
+        return [{ id: newId(), createdAt: at, updatedAt: at, source: n.source, status: 'new' as const, title, text, media, article, results: [], ...(basis ? { basis } : {}) }]
       }).slice(0, PUBLISH_LIMITS.draftsPerProject)
       if (!added.length) return []
       let all = [...added, ...data.drafts]
@@ -298,6 +340,20 @@ export class PublishStore {
         if (Array.from(title).length > PUBLISH_LIMITS.titleChars) throw new UserFacingError(publishText('publish.errors.titleTooLong', { max: PUBLISH_LIMITS.titleChars }))
         next.title = title || titleFromText(next.text)
       }
+      if (patch.articleTitle !== undefined || patch.articleBody !== undefined) {
+        const article = { ...draft.article }
+        if (patch.articleTitle !== undefined) {
+          if (typeof patch.articleTitle !== 'string') throw new Error('invalid article title')
+          if (patch.articleTitle.length > PUBLISH_LIMITS.articleTitleChars) throw new UserFacingError(publishText('publish.errors.articleTitleTooLong', { max: PUBLISH_LIMITS.articleTitleChars }))
+          article.title = patch.articleTitle
+        }
+        if (patch.articleBody !== undefined) {
+          if (typeof patch.articleBody !== 'string') throw new Error('invalid article body')
+          if (patch.articleBody.length > PUBLISH_LIMITS.articleChars) throw new UserFacingError(publishText('publish.errors.articleTooLong', { max: PUBLISH_LIMITS.articleChars }))
+          article.body = patch.articleBody
+        }
+        next.article = article
+      }
       if (patch.status !== undefined && patch.status !== draft.status) {
         if (!STATUSES.includes(patch.status)) throw new Error('invalid draft status')
         if (!TRANSITIONS[draft.status].includes(patch.status)) throw new Error(`invalid draft status change: ${draft.status} -> ${patch.status}`)
@@ -324,7 +380,7 @@ export class PublishStore {
   }
 
   /** メディアを付ける（後ろに足す）。知らない形式・X の決まり（4枚まで・動画は1本で画像と混ぜない・大きさ）に外れたら断る */
-  async addMedia(projectId: string, id: string, files: ReadonlyArray<{ path: string; bytes: number }>): Promise<PostDraftInfo> {
+  async addMedia(projectId: string, id: string, files: ReadonlyArray<{ path: string; bytes: number; ref?: string }>): Promise<PostDraftInfo> {
     return this.exclusive(projectId, async (data) => {
       const draft = data.drafts.find((d) => d.id === id)
       if (!draft) throw new UserFacingError(publishText('publish.errors.draftNotFound'))
@@ -336,7 +392,8 @@ export class PublishStore {
         if (!kind) throw new UserFacingError(publishText('publish.errors.mediaUnsupported', { name }))
         // 同じファイルを2回付けない
         if (draft.media.some((m) => m.path === f.path) || additions.some((m) => m.path === f.path)) continue
-        additions.push({ id: newId(), kind, name, bytes: Math.max(0, Math.floor(f.bytes)), path: f.path })
+        const ref = safeRef(f.ref)
+        additions.push({ id: newId(), kind, name, bytes: Math.max(0, Math.floor(f.bytes)), path: f.path, ...(ref ? { ref } : {}) })
       }
       const media = [...draft.media, ...additions]
       const problem = xMediaProblem(media)
@@ -347,12 +404,24 @@ export class PublishStore {
     })
   }
 
-  /** 投稿に使うメディアの実パス（並び順）。下書きが無ければ断る */
-  async mediaPaths(projectId: string, id: string): Promise<string[]> {
+  /** 投稿に使う下書き（メディアの実パスを含む）。無ければ断る */
+  async stored(projectId: string, id: string): Promise<StoredDraft> {
     const data = await this.exclusive(projectId, (d) => d)
     const draft = data.drafts.find((d) => d.id === id)
     if (!draft) throw new UserFacingError(publishText('publish.errors.draftNotFound'))
-    return draft.media.map((m) => m.path)
+    return { ...draft, media: draft.media.map((m) => ({ ...m })), article: { ...draft.article }, results: [...draft.results] }
+  }
+
+  /** 投稿した記録を足し、未使用なら投稿済みにする。下書きが消えていたら何もしない */
+  async recordResult(projectId: string, id: string, result: NewResult): Promise<void> {
+    await this.exclusive(projectId, async (data) => {
+      const draft = data.drafts.find((d) => d.id === id)
+      if (!draft) return
+      const at = this.iso()
+      const next: StoredDraft = { ...draft, results: [...draft.results, { ...result, at }].slice(-MAX_RESULTS), updatedAt: at }
+      if (draft.status === 'new') { next.status = 'posted'; next.postedAt = at }
+      await this.save(projectId, { ...data, drafts: data.drafts.map((d) => (d.id === id ? next : d)) })
+    })
   }
 
   /** 下書きを消す。無ければ何もしない */
