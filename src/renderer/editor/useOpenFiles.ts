@@ -112,6 +112,8 @@ export interface OpenFilesApi {
   togglePreview: (id: string) => void
   /** プレビューを内蔵ブラウザで開く（そのまま録画でレビューできる） */
   openPreviewInBrowser: (id: string) => void
+  /** 今の内容（プレビューで編集中のまだ写していない分も含める）。開いていなければ undefined */
+  currentText: (id: string) => string | undefined
   /** 外部の変更を取り込む（自分の変更は捨てる） */
   reloadFromDisk: (id: string) => void
   /** 外部の変更の知らせを閉じ、自分の変更を残す */
@@ -376,6 +378,11 @@ export function useOpenFiles({
     setActiveTab('browser')
     void window.ade.invoke('browser:navigate', previewUrl(file.path)).catch((err) => onError(errorMessage(err)))
   }, [setActiveTab, onError])
+  const currentText = useCallback((id: string) => {
+    draftFlushers.get(id)?.()
+    const file = filesRef.current.find((f) => f.id === id)
+    return file ? drafts.current.get(id) ?? file.saved : undefined
+  }, [])
 
   /*
    * 外部の変更（Agent の書き換えなど）。
@@ -514,7 +521,7 @@ export function useOpenFiles({
   const pendingClose = allFiles.find((f) => f.id === pendingCloseId) ?? null
 
   return {
-    files, activeFile, open, openSource, previewHtml, requestClose, requestCloseMany, save, setDraft, getDraft, togglePreview, openPreviewInBrowser,
+    files, activeFile, open, openSource, previewHtml, requestClose, requestCloseMany, save, setDraft, getDraft, togglePreview, openPreviewInBrowser, currentText,
     reloadFromDisk, keepMine, openAsText, reveal, openExternally, pendingClose, resolveClose, dirtyPaths, followRename, closeDeleted
   }
 }

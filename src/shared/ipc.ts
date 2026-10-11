@@ -1,6 +1,7 @@
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
+import type { PostDraftPatch, PublishGenerateRequest, PublishSnapshot, XComposeResult } from './publish'
 import type { ShareRecordingStatus, ShareSettingsInput, ShareSettingsView, ShareSnapshot, ShareSummaryInfo, ShareUrl } from './feedbackShare'
 import type { MeetingImportProgress, MeetingImportRequest, MeetingMediaPick, MeetingScoreResult, MeetingTranscriptPick } from './meetingImport'
 import type { AgentNotifyOpen, AgentNotifyRequest } from './agentNotify'
@@ -294,6 +295,22 @@ export interface IpcRequests {
   'passwords:fill': (id: string) => number
   /** 資格情報が複数あるときのネイティブのメニュー（at はウインドウの中の位置）。選んだものを入れたら true、管理を選んだら 'manage' */
   'passwords:menu': (at: { x: number; y: number }) => boolean | 'manage'
+  /** 発信（X への投稿。src/main/publish/）。このプロジェクトの下書きとバックグラウンドの生成の様子（メディアは見本だけ） */
+  'publish:list': () => PublishSnapshot
+  /** AI に下書きを作らせる（文章を渡せばそれから、無ければプロジェクトの最近の変更から）。作った数（新しいものが一覧の先頭） */
+  'publish:generate': (request: PublishGenerateRequest) => number
+  /** 手で書く下書きを作る */
+  'publish:create': (text: string) => string
+  'publish:update': (id: string, patch: PostDraftPatch) => void
+  'publish:remove': (id: string) => void
+  /** 画像・動画を選んで下書きに付ける（ファイルの選択は main が出す。実パスは main だけが持つ）。付けた数 */
+  'publish:pickMedia': (id: string) => number
+  /** プロジェクトの中のファイル（相対パス）を下書きに付ける（ファイルツリーからのドロップ） */
+  'publish:addProjectMedia': (id: string, relPaths: string[]) => number
+  /** バックグラウンドで下書きを作るか */
+  'publish:setBackground': (enabled: boolean) => void
+  /** 内蔵ブラウザで X の投稿画面を開き、本文（parts。スレッドなら複数）とメディアを入れる。「ポスト」は利用者が押す */
+  'publish:composeX': (id: string, parts: string[]) => XComposeResult
   /** ログイン無しで誰でも指摘を送れる共有リンク（src/main/feedbackShare/）。このプロジェクトの共有の一覧 */
   'share:list': () => { shares: ShareSummaryInfo[]; persisted: boolean }
   /** 開いているページの共有（同じ URL の期限内のもの）を返す。無ければ作る。リンクは画面がコピーする */
@@ -635,6 +652,8 @@ export interface IpcEvents {
   'agentNotify:open': (target: AgentNotifyOpen) => void
   /** プロジェクトの中のファイルが外部（Agent など）で変わった */
   'fs:changed': (event: FsChangedEvent) => void
+  /** 発信の下書きが増えた・変わった（バックグラウンドの生成など） */
+  'publish:changed': () => void
   /** 解決済みの配色が変わった（設定の変更、または system のときの OS の切り替え） */
   'theme:changed': (theme: ResolvedTheme) => void
   /** 解決済みの画面の言語が変わった */
@@ -760,6 +779,7 @@ export const IPC_REQUEST_CHANNELS = [
   'browser:state',
   'browserExtensions:list', 'browserExtensions:addFolder', 'browserExtensions:scanInstalled', 'browserExtensions:import', 'browserExtensions:setEnabled', 'browserExtensions:remove', 'browserExtensions:menu', 'browserExtensions:open', 'browserExtensions:installFromStore', 'browserExtensions:addCrx',
   'browserImport:status', 'browserImport:importPasswords', 'browserImport:findExports', 'browserImport:trashExport', 'browserImport:clearPasswords', 'browserImport:historySources', 'browserImport:importHistory', 'browserImport:clearHistory', 'browserImport:suggest', 'passwords:forPage', 'passwords:fill', 'passwords:menu',
+  'publish:list', 'publish:generate', 'publish:create', 'publish:update', 'publish:remove', 'publish:pickMedia', 'publish:addProjectMedia', 'publish:setBackground', 'publish:composeX',
   'share:list', 'share:forPage', 'share:create', 'share:settings', 'share:update', 'share:copyPassword', 'share:open', 'share:setStatus', 'share:import', 'share:delete',
   'terminal:create',
   'terminal:write',
@@ -813,6 +833,7 @@ export const IPC_EVENT_CHANNELS = [
   'recording:warning', 'transcript:status', 'transcript:segments', 'capture:targetChanged', 'annotation:history', 'annotation:shortcut', 'capture:modelProgress', 'usage:apiCallsChanged', 'review:ready', 'review:progressChanged', 'meeting:progress',
   'note:added', 'note:mode', 'note:error',
   'fs:changed',
+  'publish:changed',
   'theme:changed',
   'locale:changed',
   'usage:changed',

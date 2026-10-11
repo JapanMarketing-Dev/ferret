@@ -91,6 +91,8 @@ import { StarPromptHost } from './components/StarPrompt'
 import { FeedbackDialogHost } from './components/FeedbackDialog'
 import { OPEN_REVIEW_EVENT } from './lib/importedReview'
 import { setRecordingLevel } from './lib/recordingLevel'
+import { usePublishPanelRequest } from './lib/publishPanel'
+import { PublishPanel } from './components/PublishPanel'
 import { reportAnomaly, reportHandled } from '@shared/report'
 import type { SttLanguageCode } from '@shared/sttLanguages'
 
@@ -380,6 +382,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const liveAlert = liveProblem && !(targetsOpen && shownSideTab === 'transcript') ? t('liveTranscript.alert') : null
   const fileError = useCallback((message: string) => toast({ tone: 'danger', message }), [toast])
   const files = useOpenFiles({ root: workspace.folderPath, activeTab: centerTab, setActiveTab: setCenterTab, onError: fileError })
+  // 発信（X への投稿の下書き）。フッター・エディタから開く
+  const publishRequest = usePublishPanelRequest()
   // 外からエディタの領域へ落としたファイルを開く。プロジェクトの外はファイルツリーへの取り込みを案内し、フォルダはプロジェクトとして開く。
   // Markdown のエディタ（ソース・プレビュー）の上に落とした画像・動画は、開かずにその位置へ埋め込む（外のものは隣の assets/ などへコピー。markdownDrop.ts）
   const importMedia = useCallback((markdownRel: string, paths: string[]) => window.ade.invoke('fs:importMedia', markdownRel, paths), [])
@@ -1459,6 +1463,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onManageAccounts={manageAccounts}
         /></ErrorBoundary>}
       </div>
+      {publishRequest && <ErrorBoundary name="publish"><PublishPanel request={publishRequest} onShowBrowser={() => setCenterTab('browser')} /></ErrorBoundary>}
 
       {/* 全体では、ターミナルの欄を閉じて右下の小さなボタンにする（フィードバックの対象を大きく見せる。ChatGPT の画面のように） */}
       {mode === 'editor' && <button type="button" className={`orchestra-peek${orchestraBusy ? ' is-busy' : ''}`} onClick={() => setTerminalPeek((v) => !v)}

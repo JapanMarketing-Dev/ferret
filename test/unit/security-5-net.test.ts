@@ -235,8 +235,11 @@ describe('security-5 [6] saved credentials are bound to approved origins in main
     expect(organize.indexOf('gateCredentials(')).toBeGreaterThan(0)
     expect(organize.indexOf('gateCredentials(')).toBeLessThan(organize.indexOf('providerKey('))
     expect(index).toMatch(/authorize: \(prefs, url, interactive\) => gateCredentials\(/)
-    // providerKey を呼ぶ所は、定義・判定の readKey・上の2つの「接続を確かめる」・整理・録画の文字起こしだけ（増えたら gate を通すこと）
-    expect(index.match(/providerKey\(/g)?.length).toBe(6)
+    // providerKey を呼ぶ所は、定義・判定の readKey・上の2つの「接続を確かめる」・整理・録画の文字起こし・発信の下書きだけ（増えたら gate を通すこと）
+    expect(index.match(/providerKey\(/g)?.length).toBe(7)
+    const publish = index.slice(index.indexOf('async function publishRunner('))
+    expect(publish.indexOf('gateCredentials(')).toBeGreaterThan(0)
+    expect(publish.indexOf('gateCredentials(')).toBeLessThan(publish.indexOf('providerKey('))
     const stt = index.slice(index.indexOf("const gate = await gateCredentials(`stt:${provider}`"))
     expect(stt.indexOf('gateCredentials(')).toBeLessThan(stt.indexOf('providerKey('))
     // 送り主は main ウィンドウの本体のフレームだけ（IPC の共通の入口）

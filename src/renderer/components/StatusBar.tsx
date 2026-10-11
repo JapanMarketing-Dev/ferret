@@ -15,6 +15,7 @@ import {
   PanelBottom,
   PanelRight,
   RefreshCw,
+  Send,
   Settings,
   type LucideIcon
 } from 'lucide-react'
@@ -30,6 +31,8 @@ import { StatusPopover as Popover } from './StatusPopover'
 import { ResourceManager } from './ResourceManager'
 import { UsageMeter } from './UsageMeter'
 import { FailoverStatus } from './FailoverStatus'
+import { PublishStatusItem } from './PublishStatusItem'
+import { openPublishPanel } from '../lib/publishPanel'
 import { ApiUsageMeter } from './ApiUsageMeter'
 import { useT, type TFunction } from '../lib/i18n'
 import { useRecordingLevel } from '../lib/recordingLevel'
@@ -570,6 +573,8 @@ export function StatusBar({
       />
       {divider}</>)}
 
+      {slot('publish', <><PublishStatusItem />{divider}</>)}
+
       {/* GitHub のリポジトリとブランチ。区切り線も部品の中で出す（git でないフォルダでは何も出さない。中身は GitHub 連携担当） */}
       {slot('github', <GitHubStatusItem />)}
 
@@ -664,6 +669,8 @@ export function StatusBar({
                 return <div key={id} className="sb-more__row"><span className="sb-more__name">{name}</span><span className="sb-more__control"><ThemeToggle /></span></div>
               case 'github':
                 return <div key={id} className="sb-more__row"><span className="sb-more__name">{name}</span><span className="sb-more__control"><GitHubStatusItem /></span></div>
+              case 'publish':
+                return <button key={id} type="button" className="sb-more__row" onClick={() => { close(); openPublishPanel() }}><Send size={13} aria-hidden="true" /><span className="sb-more__name">{name}</span></button>
               case 'apiUsage':
                 return <div key={id} className="sb-more__row"><span className="sb-more__name">{name}</span><span className="sb-more__control"><ApiUsageMeter onOpenChange={setApiUsageOpen} /></span></div>
               default:

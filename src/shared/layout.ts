@@ -35,6 +35,7 @@ export const FOOTER_ITEMS = [
   'mic',
   'transcription',
   'resources',
+  'publish',
   'github',
   'page',
   'layout',
@@ -250,7 +251,9 @@ export const FOOTER_PRIORITY: Record<FooterItemId, number> = {
   page: 6,
   resources: 7,
   theme: 8,
-  layout: 9
+  layout: 9,
+  // 発信（X への投稿の下書き）。押したときに開ければよいので、狭いときは最初に「…」へ移す
+  publish: 10
 }
 
 /**

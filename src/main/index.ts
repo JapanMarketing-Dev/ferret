@@ -19,7 +19,7 @@ import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
 import { captureTargetLabel, resolveCaptureTarget, sanitizeCaptureTarget, targetSourceIds } from '@shared/captureTarget'
 import { mirrorSourceParam } from '@shared/captureComposite'
 import { AGENT_SKILL_AGENTS, type AgentSkillAgent, type SkillContext } from '@shared/agentSkill'
-import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
+import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { IpcEventChannel, IpcEvents, IpcRequests } from '@shared/ipc'
 import type { AiVendor, LlmApiProvider, SttRemoteProvider } from '@shared/aiProviders'
@@ -53,6 +53,10 @@ import { browserPartition, sanitizeBrowserProfile } from '@shared/browserProfile
 import { BrowserExtensions } from './browserExtensions'
 import { browserImportHandlers } from './browserImport/ipc'
 import { feedbackShareHandlers } from './feedbackShare/ipc'
+import { publishHandlers } from './publish/ipc'
+import { xIntentUrl } from '@shared/xPost'
+import { PublishStore } from './publish/store'
+import { PublishBackground } from './publish/background'
 import { MAX_BROWSER_EXTENSIONS, relativeRect, sanitizeBrowserExtensions, type BrowserExtensionEntry, type BrowserExtensionInfo } from '@shared/browserExtensions'
 import { APP_ALLOWED_PERMISSIONS, installPermissionPolicy, isAllowedExternalUrl, isAppPageUrl, isBrowserPageExternalUrl, isSnapshotableBrowserUrl, type PermissionSessionLike } from './webPolicy'
 import { pathToFileURL } from 'node:url'
@@ -77,6 +81,7 @@ import {
   removeAgentAccount,
   renameAgentAccount,
   requireTuiAgent,
+  resolveAgentEnv,
   selectAgentAccount
 } from './accounts'
 import { attachUsageWindow, getAccountUsage, getUsageState, refreshUsage } from './usage/service'
@@ -1781,6 +1786,59 @@ function flowOf(channel: string): { name: string; data?: Record<string, string> 
   return null
 }
 
+/*
+ * 発信（X への投稿の下書き。src/main/publish/）。下書きの控えと AI の生成の順番待ちは1つだけ持つ（2つ作ると書き込みが互いを上書きする）。
+ * AI は「整理」と同じ実行方法（settings.json の organizer.runner。CLI は各自の契約、api: は保存したキー）を使う
+ */
+const publishStore = new PublishStore(app.getPath('userData'))
+const publishBackground = new PublishBackground({
+  project: () => (workspace.projectId && workspace.folderPath && !isRemoteWorkspace() ? { id: workspace.projectId, dir: workspace.folderPath } : null),
+  store: publishStore,
+  makeRunner: () => publishRunner(),
+  workDir: () => join(app.getPath('userData'), 'publish', 'work'),
+  language: () => guideLanguage(),
+  onChanged: () => send('publish:changed')
+})
+
+/** 発信の下書きを書く AI。使えなければ null */
+async function publishRunner(): Promise<import('./pipeline/organize/runner').LlmRunner | null> {
+  const organizer = currentSettings().organizer
+  const runnerId = organizer?.runner ?? 'codex'
+  const project = workspace.folderPath
+  if (!project) return null
+  const { CodexRunner, ClaudeCodeRunner } = await import('./pipeline/organize')
+  if (runnerId.startsWith('api:')) {
+    const [{ ApiLlmRunner }, { LLM_PROVIDER_PRESETS, resolveEndpoint }] = await Promise.all([import('./pipeline/organize/runners/api'), import('@shared/aiProviders')])
+    const provider = runnerId.slice(4) as keyof typeof LLM_PROVIDER_PRESETS
+    const endpoint = organizer?.endpoints?.[provider]
+    const vendor = LLM_PROVIDER_PRESETS[provider].vendor
+    const resolved = resolveEndpointRefs(endpoint, keyLookup())
+    // 認証情報は認めた接続元にだけ送る（security-5 [6]。整理と同じ確かめ方）
+    await gateCredentials(`organize:${provider}`, resolveEndpoint(LLM_PROVIDER_PRESETS[provider], resolved).baseUrl, endpoint, vendor, [LLM_PROVIDER_PRESETS[provider].baseUrl], false)
+    const runner = new ApiLlmRunner({ provider, endpoint: resolved, apiKey: await providerKey(endpoint, vendor) })
+    return await runner.available() ? runner : null
+  }
+  const cliModels = organizer?.cliModels
+  const runner = runnerId === 'claude-code'
+    ? new ClaudeCodeRunner({ project, accountEnv: () => resolveAgentEnv('claude'), ...(cliModels?.['claude-code'] ? { model: cliModels['claude-code'] } : {}) })
+    : new CodexRunner({ project, accountEnv: () => resolveAgentEnv('codex'), ...(cliModels?.codex ? { model: cliModels.codex } : {}) })
+  return await runner.available() ? runner : null
+}
+
+/** 下書きに付けた画像・動画の小さな見本（動画は OS のサムネイル。作れなければ無し） */
+async function publishThumbnail(path: string, kind: 'image' | 'video'): Promise<string | undefined> {
+  const size = { width: 176, height: 176 }
+  try {
+    const image = await nativeImage.createThumbnailFromPath(path, size)
+    if (!image.isEmpty()) return image.toDataURL()
+  } catch {
+    // Linux などで OS のサムネイルが無い（画像は読み込んで縮める。動画は名前だけ出す）
+  }
+  if (kind !== 'image') return undefined
+  const image = nativeImage.createFromPath(path)
+  return image.isEmpty() ? undefined : image.resize({ width: size.width }).toDataURL()
+}
+
 function registerIpc(): void {
   const handlers: { [C in keyof IpcRequests]: (...args: Parameters<IpcRequests[C]>) => unknown } = {
     'app:ready': () => reportInteractive(),
@@ -2177,6 +2235,28 @@ function registerIpc(): void {
       isPackaged: IS_PACKAGED,
       isE2E: IS_E2E,
       notifyChanged: () => send('passwords:changed')
+    }),
+    // 発信（X への投稿の下書き。AI が作り置き、選んで内蔵ブラウザの X の投稿画面に入れる。src/main/publish/ipc.ts）
+    ...publishHandlers({
+      projectId: () => workspace.projectId ?? null,
+      projectDir: () => workspace.folderPath ?? null,
+      store: publishStore,
+      background: publishBackground,
+      thumbnail: publishThumbnail,
+      pickFiles: async () => {
+        const { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } = await import('@shared/publish')
+        const options: Electron.OpenDialogOptions = { title: t('publish.pickMediaTitle'), properties: ['openFile', 'multiSelections'], filters: [{ name: t('publish.media'), extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS] }] }
+        const chosen = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+        return chosen.canceled ? [] : chosen.filePaths
+      },
+      openComposerTab: async () => {
+        if (!browser) return null
+        await browser.newTab()
+        return browser.contents
+      },
+      fillComposer: async (contents, input) => (await import('./publish/xComposer')).fillXComposer(contents, input),
+      fallbackUrl: (parts) => xIntentUrl(parts[0] ?? ''),
+      notifyChanged: () => send('publish:changed')
     }),
     // ログイン無しで誰でも指摘を送れる共有リンク（作る・届いた録画を取り込む。src/main/feedbackShare/ipc.ts）
     ...feedbackShareHandlers({
@@ -3268,6 +3348,8 @@ async function main(): Promise<void> {
   // 最初のタブを開く要求が届く前に、node-pty の読み込みと最初のシェルの起動（rc の読み込み）を済ませておく
   terminals.prewarm()
   registerIpc()
+  // 発信の下書きを、最近の変更から裏で作り置く（新しいコミットがあり、未使用が少ないときだけ。src/main/publish/background.ts）
+  if (!IS_E2E) publishBackground.start()
   // 裏での更新。配布版だけ、起動から少し待って確かめ、あとは6時間ごと（開発版・E2E では動かさない）
   autoUpdater().start()
   // スリープ明けはすぐ、ウインドウに戻ったときは前の確認から1時間たっていれば確かめる（6時間ごとの確認はスリープで遅れる）
@@ -3537,6 +3619,7 @@ app.on('before-quit', (event) => {
 app.on('quit', (_event, exitCode) => {
   // Agent どうしの依頼の受け口（一時フォルダ）を消す
   stopAgentMail()
+  publishBackground.stop()
   if (exitCode === 0) autoUpdates?.installOnQuit()
 })
 
