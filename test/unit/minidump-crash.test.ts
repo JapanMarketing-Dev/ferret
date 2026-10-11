@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { STACK_LIMIT, parseMinidumpCrash } from '../../src/shared/minidump'
-import { NATIVE_CRASH_FLOW_LIMIT, memoryBucket, minimizeNativeCrash, scrubEvent, shouldSendNativeCrash, uptimeBucket } from '../../src/shared/telemetry'
+import { NATIVE_CRASH_FLOW_LIMIT, isOwnExecutable, memoryBucket, minimizeNativeCrash, scrubEvent, shouldSendNativeCrash, uptimeBucket } from '../../src/shared/telemetry'
 
 /**
  * main のネイティブのクラッシュ（FERRET-12、0.4.16 の Windows）は、minidump を捨てていたので原因が分からなかった。
@@ -60,12 +60,12 @@ const MODULES = [
 describe('minidump から落ちた理由を読む', () => {
   it('Windows のアクセス違反と、落ちた場所のモジュールのファイル名（パスは持たない）', () => {
     const out = parseMinidumpCrash(minidump({ code: 0xc0000005, address: 0x7ffa00000123n, modules: MODULES }))
-    expect(out).toEqual({ code: '0xc0000005', kind: 'access-violation', module: 'pty.node', offset: '0x123' })
+    expect(out).toEqual({ code: '0xc0000005', kind: 'access-violation', executable: 'ferret.exe', module: 'pty.node', offset: '0x123' })
     expect(JSON.stringify(out)).not.toContain('someone')
   })
 
   it('Chromium のメモリ不足（0xe0000008）は oom', () => {
-    expect(parseMinidumpCrash(minidump({ code: 0xe0000008, address: 0x7ff600000010n, modules: MODULES }))).toEqual({ code: '0xe0000008', kind: 'oom', module: 'ferret.exe', offset: '0x10' })
+    expect(parseMinidumpCrash(minidump({ code: 0xe0000008, address: 0x7ff600000010n, modules: MODULES }))).toEqual({ code: '0xe0000008', kind: 'oom', executable: 'ferret.exe', module: 'ferret.exe', offset: '0x10' })
   })
 
   it('macOS と Linux は番号の意味が違う', () => {
@@ -74,7 +74,7 @@ describe('minidump から落ちた理由を読む', () => {
   })
 
   it('知らない番号は番号だけ、どのモジュールにも入らない番地はモジュール名なし', () => {
-    expect(parseMinidumpCrash(minidump({ code: 0x12345678, address: 0x10n, modules: MODULES }))).toEqual({ code: '0x12345678' })
+    expect(parseMinidumpCrash(minidump({ code: 0x12345678, address: 0x10n, modules: MODULES }))).toEqual({ code: '0x12345678', executable: 'ferret.exe' })
   })
 
   it('形の違うモジュール名は送らない', () => {
@@ -168,7 +168,7 @@ describe('minidump から落ちた場所の手がかりを読む（FERRET-1Q の
     const stack = [0x1234n, 0x7ff600001000n, 0xdeadbeefn, 0x7ffa00000040n, 0x7ff600abcdefn]
     const out = parseMinidumpCrash(richMinidump({ address: 0x7ff600000123n, stack, modules }))
     expect(out).toEqual({
-      code: '0xc0000005', kind: 'access-violation', module: 'ferret.exe', offset: '0x123',
+      code: '0xc0000005', kind: 'access-violation', executable: 'ferret.exe', module: 'ferret.exe', offset: '0x123',
       debugId: '123456789ABCDEF001020304050607082', codeId: '6543ABCD9000000', thread: 'CrBrowserMain',
       stack: ['ferret.exe+0x1000', 'ntdll.dll+0x40', 'ferret.exe+0xabcdef']
     })
@@ -293,5 +293,56 @@ describe('dyld で読み込みの途中に止められた子のプロセスは�
     expect(shouldSendNativeCrash(unknown({ code: '0x0', module: 'Electron Framework' }))).toBe(true)
     const main = minimizeNativeCrash({ level: 'fatal', platform: 'native', tags: { 'event.process': 'browser' }, contexts: { electron: { details: { reason: 'unknown' } } } }, { code: '0x0', module: 'dyld' })
     expect(shouldSendNativeCrash(scrubEvent(main))).toBe(true)
+  })
+})
+
+describe('Ferret の外のプログラムの報告は送らない（FERRET-1X）', () => {
+  // macOS では crashpad の受け口がターミナルから起動したプログラムにも引き継がれる
+  const mac = 0x8101
+  const external = (exe: string, module = exe) => minidump({
+    code: 10, address: 0x2000n, platformId: mac,
+    modules: [{ base: 0x1000n, size: 0x100, name: `/Users/me/Library/Caches/ms-playwright/${exe}` }, { base: 0x2000n, size: 0x100, name: `/usr/lib/${module}` }]
+  })
+  const unknown = (data: Uint8Array) => scrubEvent(minimizeNativeCrash({ level: 'fatal', platform: 'native', tags: { 'os.platform': 'darwin' }, contexts: { electron: { details: { reason: 'unknown' } } } }, parseMinidumpCrash(data)))
+
+  it('モジュールの一覧の先頭を実行ファイルとして読む（パスは持たない・小文字）', () => {
+    const out = parseMinidumpCrash(external('headless_shell', 'libsystem_kernel.dylib'))
+    expect(out?.executable).toBe('headless_shell')
+    expect(JSON.stringify(out)).not.toContain('/Users/me')
+    expect(parseMinidumpCrash(external('Ferret'))?.executable).toBe('ferret')
+  })
+
+  it('実行ファイルが Ferret でなければ、プロセスが分からなくても送らない', () => {
+    const event = unknown(external('headless_shell'))
+    expect(event.tags).toMatchObject({ 'crash.exe': 'headless_shell' })
+    expect(shouldSendNativeCrash(event)).toBe(false)
+    expect(shouldSendNativeCrash(unknown(external('node')))).toBe(false)
+    expect(shouldSendNativeCrash(unknown(external('python3.12')))).toBe(false)
+  })
+
+  it('Ferret（配布版・dev）の実行ファイルは送る', () => {
+    for (const exe of ['Ferret', 'ferret', 'ferret.exe', 'Electron', 'electron.exe']) {
+      expect(shouldSendNativeCrash(unknown(external(exe))), exe).toBe(true)
+    }
+  })
+
+  it('helper（名前に空白）や実行ファイルの分からない報告は、これまでどおり送る', () => {
+    const helper = minidump({ code: 1, address: 0x2000n, platformId: mac, modules: [{ base: 0x1000n, size: 0x100, name: '/Applications/Ferret.app/Contents/Frameworks/Ferret Helper (Renderer).app/Contents/MacOS/Ferret Helper (Renderer)' }, { base: 0x2000n, size: 0x100, name: 'Electron Framework' }] })
+    expect(parseMinidumpCrash(helper)?.executable).toBeUndefined()
+    expect(shouldSendNativeCrash(unknown(helper))).toBe(true)
+    expect(shouldSendNativeCrash(unknown(minidump({ code: 1, address: 0x2000n, platformId: mac })))).toBe(true)
+  })
+
+  it('main（browser）は実行ファイルの名前に関係なく送る', () => {
+    const main = minimizeNativeCrash({ level: 'fatal', platform: 'native', tags: { 'event.process': 'browser' }, contexts: { electron: { details: { reason: 'unknown' } } } }, parseMinidumpCrash(external('headless_shell')))
+    expect(shouldSendNativeCrash(scrubEvent(main))).toBe(true)
+  })
+
+  it('isOwnExecutable は前後の違う名前を Ferret と見なさない', () => {
+    expect(isOwnExecutable('ferret')).toBe(true)
+    expect(isOwnExecutable('FERRET.EXE')).toBe(true)
+    expect(isOwnExecutable('ferret-cli')).toBe(false)
+    expect(isOwnExecutable('my-electron')).toBe(false)
+    expect(isOwnExecutable('')).toBe(false)
   })
 })

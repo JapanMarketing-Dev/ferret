@@ -19,6 +19,11 @@ export interface MinidumpCrash {
   debugId?: string
   /** 落ちたモジュールの code id（Windows の TimeDateStamp＋SizeOfImage） */
   codeId?: string
+  /**
+   * 落ちたプロセスの実行ファイルの名前（モジュールの一覧の先頭。小文字・パスなし。例 ferret・ferret.exe・headless_shell）。
+   * Ferret の外のプログラムの報告を見分ける（macOS ではターミナルから起動したプログラムにも Ferret の crashpad が付く。FERRET-1X）
+   */
+  executable?: string
   /** 落ちたスレッドの名前（Chromium・Node が付けたもの。例 CrBrowserMain） */
   thread?: string
   /**
@@ -110,6 +115,7 @@ export function parseMinidumpCrash(input: Uint8Array): MinidumpCrash | null {
     const kind = table[rawCode]
     const out: MinidumpCrash = { code, ...(kind ? { kind } : {}) }
     const modules = modulesAt >= 0 ? readModules(input, u32, u64, modulesAt) : []
+    if (modules[0]?.name) out.executable = modules[0].name
     const hit = moduleAt(modules, address)
     // 名前の分からないモジュールの位置は、symbols を引けないので送らない
     if (hit?.module.name) {

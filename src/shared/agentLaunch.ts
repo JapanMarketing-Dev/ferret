@@ -1,6 +1,7 @@
 import type { AgentLaunchConfig, TuiAgent } from './types'
 import { defaultLaunchConfig, isBuiltinAgent } from './agentCatalog'
 import { t } from './i18n'
+import { quotePowerShellLiteral, quoteWindowsCmdArgument } from './shellQuote'
 
 /**
  * Agent起動コマンドの組み立て（純粋関数だけ。main と単体テストから使う）。
@@ -142,10 +143,6 @@ function quotePortableUnixArg(value: string): string {
   return parts.join('')
 }
 
-/** PowerShell は和文のシングルクォート（‘’ など）でも文字列を閉じるので、それも二重にする */
-function quotePowerShellLiteral(value: string): string {
-  return `'${value.replace(/['‘’‚‛]/g, '$&$&')}'`
-}
 
 /**
  * どの Unix シェルでも特別な意味を持たない文字だけの引数（`--yolo`、`/opt/bin/x`、`--mode=auto` など）。
@@ -157,23 +154,10 @@ const POSIX_SAFE_ARG = /^[A-Za-z0-9_@+,./:-][A-Za-z0-9_@+,./:=-]*$/
 
 export function quoteStartupArg(value: string, shell: AgentStartupShell): string {
   if (shell === 'powershell') return quotePowerShellLiteral(value)
-  if (shell === 'cmd') return quoteCmdArg(value)
+  if (shell === 'cmd') return quoteWindowsCmdArgument(value)
   return POSIX_SAFE_ARG.test(value) ? value : quotePortableUnixArg(value)
 }
 
-/**
- * cmd.exe の1引数。ダブルクォートの中では `^` は普通の文字なので、`& | < > ( )` は囲むだけで文字どおりになる。
- * - `"` は `""`（cmd のクォートの状態がずれず、受け取る側の CRT は1つの `"` に読む）
- * - `"` の直前と末尾のバックスラッシュは二重にする（CRT は `\"` をエスケープと読むため）
- * - `%` はクォートの中でも変数として展開されるので、いったんクォートを閉じて `^%` にする
- */
-function quoteCmdArg(value: string): string {
-  const escaped = value
-    .replace(/(\\*)("|$)/g, (_match, slashes: string, end: string) => slashes + slashes + end)
-    .replace(/"/g, '""')
-    .replace(/%/g, '"^%"')
-  return `"${escaped}"`
-}
 
 type AgentLaunchCommand = { ok: true; command: string } | { ok: false; error: string }
 

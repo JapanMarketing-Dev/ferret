@@ -13,6 +13,7 @@ import type { TranslationKey } from '@shared/i18n'
 import { formatShortcut } from '../lib/shortcut'
 import { IconButton, RecordButton, RecordDot } from '../ui'
 import { useT } from '../lib/i18n'
+import { useRecordingLevel } from '../lib/recordingLevel'
 
 /**
  * フィードバックモードのツールバー（設計 3章 / MODE-2）。
@@ -72,9 +73,10 @@ function KeyCaps({ keys }: { keys: Keys }) {
 }
 
 /** マイクの入力レベル。5本のバーで、声の大きさに合わせて伸びる */
-function MicLevel({ level, live }: { level: number; live: boolean }) {
+function MicLevel({ live }: { live: boolean }) {
   // rms は話し声でも 0.05〜0.2 程度なので5倍して 0〜1 に寄せる
   const t = useT()
+  const level = useRecordingLevel()
   const value = live ? Math.min(1, level * 5) : 0
   return (
     <span
@@ -100,7 +102,6 @@ function MicLevel({ level, live }: { level: number; live: boolean }) {
 
 export function FeedbackToolbar({
   state,
-  level = 0,
   captureMic = true,
   recording,
   elapsed,
@@ -133,7 +134,6 @@ export function FeedbackToolbar({
   mic,
   extensions = true
 }: {
-  level?: number
   captureMic?: boolean
   state: BrowserState
   recording: boolean
@@ -357,11 +357,11 @@ export function FeedbackToolbar({
         {mic ? (
           <button ref={micRef} type="button" className="fb-micbtn" aria-expanded={micOpen} data-testid="feedback-mic"
             title={t('feedback.micTitle', { name: micName })} onClick={() => setMicOpen((open) => !open)}>
-            {captureMic ? <MicLevel level={level} live={recording && !paused} /> : <span className="fb-mic is-off" role="img" aria-label={t('feedback.micOff')}><MicOff size={15} strokeWidth={1.75} /></span>}
+            {captureMic ? <MicLevel live={recording && !paused} /> : <span className="fb-mic is-off" role="img" aria-label={t('feedback.micOff')}><MicOff size={15} strokeWidth={1.75} /></span>}
             <span className="fb-micbtn__name" data-testid="feedback-mic-name">{micName}</span>
           </button>
         ) : captureMic ? (
-          <MicLevel level={level} live={recording && !paused} />
+          <MicLevel live={recording && !paused} />
         ) : (
           <span className="fb-mic is-off" role="img" aria-label={t('feedback.micOff')}>
             <MicOff size={15} strokeWidth={1.75} />
@@ -369,7 +369,7 @@ export function FeedbackToolbar({
         )}
         {mic && micOpen && <StatusPopover anchor={micRef.current} placement="below" label={t('statusBar.micAndTranscription')} onClose={closeMic}>
           <MicPopover value={mic.settings} onChange={mic.onChange} recording={recording} micDevices={mic.devices} available={mic.available}
-            level={level} onOpenSettings={() => { closeMic(); mic.onOpenSettings() }} />
+            onOpenSettings={() => { closeMic(); mic.onOpenSettings() }} />
         </StatusPopover>}
 
         {divider}

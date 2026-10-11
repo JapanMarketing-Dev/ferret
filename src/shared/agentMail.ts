@@ -1,5 +1,7 @@
 import { AGENT_CATALOG, BUILTIN_AGENTS, isBuiltinAgent } from './agentCatalog'
 import type { CustomAgent, TuiAgent } from './types'
+import { quotePowerShellLiteral } from './shellQuote'
+import { isAbsolutePath } from './browserExtensions'
 
 /**
  * Agent どうしの依頼（agent mail）。Ferret のターミナルで動く Agent が、別の Agent に仕事を頼み、結果をファイルで受け取る。
@@ -104,9 +106,6 @@ export function parseAgentMail(text: string): ParseResult {
   return { ok: true, mail: { kind, from, to, replyTo, file, cwd, body } }
 }
 
-function isAbsolutePath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
-}
 
 /** よく使う呼び方 → Agent の id */
 const TARGET_ALIASES: Record<string, string> = {
@@ -148,9 +147,12 @@ export function replyFileName(at: Date, number: number, agent: string): string {
 /** process.platform の値（renderer からも読めるよう NodeJS の型を使わない） */
 type MailPlatform = string
 
-/** シェルに貼る1語（POSIX は単引用符、Windows は二重引用符） */
+/**
+ * シェルに貼る1語（POSIX は単引用符、Windows は PowerShell の単引用符）。
+ * Windows で二重引用符にすると、PowerShell が中の `$` と「`」を展開する（`C:\$work\` のようなフォルダが別の値になる）
+ */
 export function quoteArg(value: string, platform: MailPlatform): string {
-  if (platform === 'win32') return `"${value.replace(/"/g, '""')}"`
+  if (platform === 'win32') return quotePowerShellLiteral(value)
   return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`
 }
 
@@ -190,7 +192,7 @@ export function renderRequest(r: RequestText): string {
     `  ${cli} reply ${r.number} --file ${quoteArg(r.replyPath, r.platform)} "<one-line summary>"`,
     'Reply even if you could not finish (say why). Do not ask the user; Ferret pastes your reply into the sender\'s terminal.'
   )
-  if (r.platform === 'win32') lines.push('(From bash or cmd, run the same path without the leading &.)')
+  if (r.platform === 'win32') lines.push('(From bash, run the same command without the leading &. From cmd, also use double quotes instead of single quotes.)')
   return lines.join('\n')
 }
 

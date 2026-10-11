@@ -5,7 +5,8 @@
  * ──────────────────────────── 使い方 ────────────────────────────
  *
  * 【Agent を起動した直後（1回）】入力欄の準備を待つ
- *   const status = await awaitComposerReady(terminal)   // 静止1500ms・上限8000ms
+ *   const readiness = new ComposerReadiness(); terminal.onData((c) => readiness.push(c))
+ *   const status = await waitForComposer(readiness)      // 静止1500ms・上限8000ms
  *   if (status === 'timeout') …                          // 送らずに理由を出す
  *
  * 【状態を追う】PTY の出力を食べさせる

@@ -74,7 +74,8 @@ export function dedupeApps(apps: readonly DesktopAppInfo[]): DesktopAppInfo[] {
     seen.add(key)
     out.push(app)
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })).slice(0, MAX_DESKTOP_APPS)
+  const order = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true })
+  return out.sort((a, b) => order.compare(a.name, b.name)).slice(0, MAX_DESKTOP_APPS)
 }
 
 /** 検索欄の文字で絞る。空白で区切った語がすべて名前かパスに含まれるもの。名前の前方一致を先に出す */

@@ -92,7 +92,7 @@ describe('貼る文', () => {
 
   it('Windows は PowerShell の書き方', () => {
     const text = renderRequest({ number: 1, fromLabel: 'Codex', fromTitle: 'Codex', body: 'x', bodyFile: 'C:\\w\\r.md', file: null, replyPath: 'C:\\w\\a b.md', cliPath: 'C:\\T\\ferret agent.cmd', platform: 'win32' })
-    expect(text).toContain('& "C:\\T\\ferret agent.cmd" reply 1 --file "C:\\w\\a b.md"')
+    expect(text).toContain("& 'C:\\T\\ferret agent.cmd' reply 1 --file 'C:\\w\\a b.md'")
     expect(text).toContain('without the leading &')
     expect(text).toContain('The full request is in C:\\w\\r.md')
   })
@@ -113,7 +113,10 @@ describe('貼る文', () => {
     expect(quoteArg('/a/b.md', 'darwin')).toBe('/a/b.md')
     expect(quoteArg("/a/it's.md", 'darwin')).toBe(`'/a/it'\\''s.md'`)
     expect(quoteArg('/a/$(rm).md', 'linux')).toBe(`'/a/$(rm).md'`)
-    expect(quoteArg('C:\\a "b"', 'win32')).toBe('"C:\\a ""b"""')
+    expect(quoteArg('C:\\a "b"', 'win32')).toBe(`'C:\\a "b"'`)
+    // PowerShell の単引用符の中では $ と ` を展開しない。単引用符（和文のものも）は二重にする
+    expect(quoteArg('C:\\$work\\`x', 'win32')).toBe("'C:\\$work\\`x'")
+    expect(quoteArg("C:\\it's ‘q’", 'win32')).toBe("'C:\\it''s ‘‘q’’'")
   })
 
   it('結果のファイルの名前は日時・番号・Agent', () => {

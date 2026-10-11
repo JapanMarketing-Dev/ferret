@@ -684,8 +684,10 @@ export class TerminalManager {
 
   private enqueue(session: Session, data: string): void {
     session.history.push(data)
-    this.failover?.output(session.id, stripAnsi(data))
-    session.tail = (session.tail + stripAnsi(data)).slice(-8000)
+    // 色などの制御を外すのは1回だけ（どのターミナルの出力も main で毎回通る）
+    const plain = stripAnsi(data)
+    this.failover?.output(session.id, plain)
+    session.tail = (session.tail + plain).slice(-8000)
     session.title = parseTitle(data) ?? session.title
     session.readiness.push(data)
     // 先に起動しておいたシェル：どのタブにも渡していないので送らない（渡すときに履歴をまとめて返す）

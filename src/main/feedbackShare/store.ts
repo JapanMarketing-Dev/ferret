@@ -8,8 +8,8 @@
  * renderer へはトークン・パスワードを渡さない（ShareSummary だけ。パスワードは main がクリップボードへ写す）。
  */
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile, rm } from 'node:fs/promises'
+import { savePrivateFile } from '../atomicFile'
 import { OWNER_TOKEN_PATTERN, SHARE_ID_PATTERN, SHARE_LIMITS, sanitizeShareUrls, type ShareSummaryInfo, type ShareUrl } from '@shared/feedbackShare'
 import type { KeyCipher } from '../pipeline/stt/keys'
 
@@ -78,15 +78,7 @@ export class ShareStore {
       await rm(this.path, { force: true })
       return
     }
-    await mkdir(dirname(this.path), { recursive: true })
-    const tmp = `${this.path}.${process.pid}.tmp`
-    try {
-      await writeFile(tmp, this.cipher.encrypt(JSON.stringify({ version: 2, shares })), { mode: 0o600 })
-      await rename(tmp, this.path)
-    } catch (err) {
-      await rm(tmp, { force: true })
-      throw err
-    }
+    await savePrivateFile(this.path, this.cipher.encrypt(JSON.stringify({ version: 2, shares })))
   }
 
   /** そのプロジェクトの共有（新しい順） */

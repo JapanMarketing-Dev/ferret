@@ -6,6 +6,7 @@ import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { t } from '@shared/i18n'
+import { asRecord } from '@shared/guards'
 
 /**
  * 設定フォルダから「ログイン済みか」と「誰としてログインしているか」を読む。
@@ -28,9 +29,6 @@ export interface AccountIdentity {
 
 const NONE: AccountIdentity = { signedIn: false, email: null, workspaceLabel: null }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
-}
 
 function readString(record: Record<string, unknown> | null, key: string): string | null {
   const value = record?.[key]

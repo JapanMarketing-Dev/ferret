@@ -1,6 +1,7 @@
 import type { GitLabAccount } from '@shared/forge'
 import { isSafeGitLabPath, isSafeHost } from '@shared/forge'
 import { normalizeCloneUrl, stripUrlCredentials, type GitHubRepoItem } from '@shared/projectSource'
+import { asRecord } from '@shared/guards'
 
 /**
  * glab（GitLab CLI）の出力を読み、`glab api` の引数を組み立てる純粋な関数。単体テストの対象。
@@ -61,8 +62,6 @@ export function glabApiArgs(host: string, endpoint: string): string[] {
 /** 「GitLab から取得」の一覧に出すプロジェクト（自分がメンバーのもの、新しく触った順） */
 export const GITLAB_PROJECTS_ENDPOINT = 'projects?membership=true&simple=true&per_page=100&order_by=last_activity_at'
 
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 
 /** GitLab の projects API の結果を一覧にする。clone の URL は normalizeCloneUrl を通ったものだけ */
 export function mapGitLabProjects(json: unknown, host: string): GitHubRepoItem[] {

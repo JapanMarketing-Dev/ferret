@@ -12,6 +12,7 @@
  *
  * Electron に依存させない（純粋な関数。単体テストの対象）。
  */
+import { isRecord } from '@shared/guards'
 
 export type DecisionWire = 'systemone' | 'openai-decisions'
 
@@ -23,8 +24,6 @@ export function decisionWireFor(url: string): DecisionWire {
     return 'systemone'
   }
 }
-
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** OpenAI の質問の name に使える形（使えない鍵は q1, q2… にして、応答で元の鍵へ戻す） */
 const SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/

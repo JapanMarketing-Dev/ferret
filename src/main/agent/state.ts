@@ -155,6 +155,8 @@ export function normalizeTail(tail: string): string {
 
 /** OSC 0 / 2（タイトル）を取り出す。最後のものを使う */
 export function parseTitle(data: string): string | undefined {
+  // ほとんどの出力にはタイトルが無い（出力のたびに呼ばれるので、正規表現の前に OSC の始まりだけ見る）
+  if (!data.includes('\x1b]')) return undefined
   const matches = [...data.matchAll(/\x1b\](?:0|2);([^\x07\x1b]*)(?:\x07|\x1b\\)/g)]
   const last = matches[matches.length - 1]
   return last?.[1]

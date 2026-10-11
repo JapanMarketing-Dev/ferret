@@ -1,5 +1,6 @@
 import type { BuiltinAgent, TuiAgent } from './types'
 import { isBuiltinAgent } from './agentCatalog'
+import { isRecord } from './guards'
 
 /**
  * ターミナルのタブを、アプリを終了・再起動したあと・閉じたあとに戻す（純粋関数だけ。main・renderer・単体テストから使う）。
@@ -170,7 +171,6 @@ export function fitTotalBudget(texts: readonly string[], total = RESTORE_TOTAL_B
 
 // ───────────────────────── 読む・書く ─────────────────────────
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isKey = (value: unknown): value is string => typeof value === 'string' && KEY_PATTERN.test(value)
 
 function cleanText(value: unknown, max: number): string | null {

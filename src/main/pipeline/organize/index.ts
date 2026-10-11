@@ -120,7 +120,7 @@ export async function organize(input: OrganizeInput, options: OrganizeOptions): 
   }
 }
 
-export { buildPayload, buildPrompt, organizeInstructions } from './prompt'
+export { buildPayload, buildPrompt } from './prompt'
 export { validateOrganizeOutput, defaultValidateOptions } from './validate'
 export type { ValidationIssue, ValidationResult } from './validate'
 export type { LlmRunner, RunnerRequest, RunnerResult } from './runner'

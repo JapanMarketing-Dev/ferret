@@ -93,20 +93,3 @@ export async function waitForComposer(
     await sleep(pollMs)
   }
 }
-
-/**
- * ターミナルに繋いで、準備完了を待つところまでを1つにしたもの。
- * 購読は必ず解除する。
- */
-export async function awaitComposerReady(
-  terminal: { onData(listener: (chunk: string) => void): () => void },
-  options: Partial<ComposerOptions> & { sleep?: (ms: number) => Promise<void>; pollMs?: number } = {}
-): Promise<ComposerStatus> {
-  const readiness = new ComposerReadiness(options)
-  const off = terminal.onData((chunk) => readiness.push(chunk))
-  try {
-    return await waitForComposer(readiness, options)
-  } finally {
-    off()
-  }
-}

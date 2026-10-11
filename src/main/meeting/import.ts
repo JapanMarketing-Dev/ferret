@@ -19,6 +19,7 @@ import { pipeline } from 'node:stream/promises'
 import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import { reportHandled } from '@shared/report'
+import { delay } from '@shared/delay'
 import { parseMeetingTranscript } from '@shared/meetingTranscript'
 import { MEETING_SCORE_THRESHOLD, isAudioOnly, meetingDecisionBody, meetingFrameTimes, meetingMediaExtension, meetingScoreFromAnswer,
   type MeetingImportProgress, type MeetingImportRequest, type MeetingItemScore, type MeetingMediaPick, type MeetingScoreResult } from '@shared/meetingImport'
@@ -346,7 +347,7 @@ export async function scoreMeetingReview(deps: MeetingScoreDeps): Promise<Meetin
   const record = await loadSession(deps.paths)
   if (!record) throw new UserFacingError(t('review.errors.notFound'))
   const items = record.document.items.slice(0, MAX_SCORED_ITEMS)
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const sleep = deps.sleep ?? delay
   const scores = new Map<string, MeetingItemScore>()
   let failure: string | null = null
   for (let i = 0; i < items.length; i++) {

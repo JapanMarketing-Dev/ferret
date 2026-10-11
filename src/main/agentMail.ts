@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto'
-import { rmSync } from 'node:fs'
+import { rmSync, watch, type FSWatcher } from 'node:fs'
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -54,7 +54,10 @@ interface Thread {
   toAgent: TuiAgent
 }
 
-const POLL_MS = 400
+/** 受け口の見張りが知らせを落としたときのための読み直し（ふだんは fs.watch の知らせですぐ読む） */
+const POLL_MS = 2000
+/** 知らせが続けて来たら、まとめて1回読む */
+const WATCH_SETTLE_MS = 25
 /** 新しく開いたタブが作られるまで（renderer が開く） */
 const CREATE_TIMEOUT_MS = 30_000
 /** 開いた Agent の入力欄の準備ができるまで */
@@ -69,7 +72,10 @@ let root: Promise<{ base: string; mailbox: string; core: string } | null> | null
 /** mkdtemp で作った一時フォルダ（終了時に消す） */
 let baseDir: string | null = null
 let timer: NodeJS.Timeout | null = null
+let watcher: FSWatcher | null = null
+let settle: NodeJS.Timeout | null = null
 let polling = false
+let pollAgain = false
 let counter = 0
 const secrets = new Map<string, string>() // 合言葉 → ターミナル
 const bySession = new Map<string, { secret: string; cli: string; dir: string }>() // ターミナル → 合言葉とそのタブの CLI
@@ -170,16 +176,35 @@ export function agentMailTerminalCreated(id: string, options: TerminalCreateOpti
   resolve?.(id)
 }
 
+/**
+ * 受け口を見張る。ファイルが置かれたらすぐ読む（400ms ごとの読み直しは、使わない人の main も起こし続けていた）。
+ * fs.watch は知らせを落とすことがある（ネットワークの一時フォルダ・OS の制限）ので、ゆっくりの読み直しも残す
+ */
 function startPolling(mailbox: string): void {
   if (timer) return
   timer = setInterval(() => void poll(mailbox), POLL_MS)
   timer.unref?.()
+  try {
+    watcher = watch(mailbox, { persistent: false }, () => {
+      if (settle) return
+      settle = setTimeout(() => { settle = null; void poll(mailbox) }, WATCH_SETTLE_MS)
+      settle.unref?.()
+    })
+    watcher.on('error', () => { watcher?.close(); watcher = null })
+  } catch {
+    // 見張れない環境では読み直しだけで届ける（想定内）
+    watcher = null
+  }
 }
 
 /** 終了するとき。受け口と CLI の一時フォルダを消す（残ったタブの CLI は「Ferret の外」と出して止まる） */
 export function stopAgentMail(): void {
   if (timer) clearInterval(timer)
   timer = null
+  if (settle) clearTimeout(settle)
+  settle = null
+  watcher?.close()
+  watcher = null
   const dir = baseDir
   baseDir = null
   if (dir) {
@@ -187,14 +212,9 @@ export function stopAgentMail(): void {
   }
 }
 
-/** すぐ受け口を読む（単体テスト用。ふだんは POLL_MS ごと） */
-export async function pollAgentMailNow(): Promise<void> {
-  const ready = await root
-  if (ready) await poll(ready.mailbox)
-}
-
 async function poll(mailbox: string): Promise<void> {
-  if (polling) return
+  // 読んでいる途中に届いた知らせは、読み終えてからもう1度読む（取りこぼすと次の読み直しまで待たせる）
+  if (polling) { pollAgain = true; return }
   polling = true
   try {
     const names = await readdir(mailbox).catch(() => [] as string[])
@@ -220,6 +240,10 @@ async function poll(mailbox: string): Promise<void> {
     }
   } finally {
     polling = false
+    if (pollAgain) {
+      pollAgain = false
+      void poll(mailbox)
+    }
   }
 }
 

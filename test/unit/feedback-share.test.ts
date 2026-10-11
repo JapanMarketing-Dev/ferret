@@ -376,7 +376,10 @@ describe('共有の形と暗号（src/shared）', () => {
     const sealed = await sealMemo('correct horse', 'ID: a\nPW: b')
     expect(await openMemo('correct horse', sealed)).toBe('ID: a\nPW: b')
     expect(await openMemo('Correct horse', sealed)).toBeNull()
-    expect(sealed.data).not.toContain('PW')
+    // 平文もその base64 も入っていない（暗号文は乱数の base64 なので、'PW' の2文字だけなら偶然含まれうる。Windows の関門で一度落ちた）
+    expect(sealed.data).not.toContain('PW: b')
+    expect(sealed.data).not.toContain(Buffer.from('ID: a\nPW: b').toString('base64').slice(0, 12))
+    expect(Buffer.from(sealed.data, 'base64').toString('latin1')).not.toContain('PW: b')
     // 同じ文でも毎回違う暗号文
     expect((await sealMemo('correct horse', 'ID: a\nPW: b')).data).not.toBe(sealed.data)
   })

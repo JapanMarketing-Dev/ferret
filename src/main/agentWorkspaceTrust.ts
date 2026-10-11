@@ -4,6 +4,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync
 import { homedir } from 'node:os'
 import { dirname, join, normalize, resolve } from 'node:path'
 import { errorKind, reportHandled } from '@shared/report'
+import { isRecord } from '@shared/guards'
 
 /**
  * 登録したプロジェクトのフォルダを、起動するエージェントに「信頼済み」として先に書いておく。
@@ -33,9 +34,6 @@ type TrustOutcome = 'granted' | 'unchanged' | 'missing-config' | 'locked' | 'unr
 /** 書き込みを待つ上限。Orca の SHORT_AGENT_TRUST_WRITE_DEADLINE_MS と同じ */
 const TRUST_WRITE_DEADLINE_MS = 1500
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 // ───────────────────────── Claude Code ─────────────────────────
 
@@ -78,16 +76,16 @@ type ClaudeFolderTrustChange =
 
 /** projects[<key>].hasTrustDialogAccepted = true を足した設定（ほかの項目はそのまま） */
 export function applyClaudeFolderTrust(config: Record<string, unknown>, folderKeys: readonly string[]): ClaudeFolderTrustChange {
-  if (config.projects !== undefined && !isPlainObject(config.projects)) return { kind: 'refuse' }
+  if (config.projects !== undefined && !isRecord(config.projects)) return { kind: 'refuse' }
   const projects: Record<string, unknown> = { ...(config.projects as Record<string, unknown> | undefined) }
   const alreadyTrusted = folderKeys.some((key) => {
     const entry = projects[key]
-    return isPlainObject(entry) && entry.hasTrustDialogAccepted === true
+    return isRecord(entry) && entry.hasTrustDialogAccepted === true
   })
   if (alreadyTrusted) return { kind: 'unchanged' }
   for (const key of folderKeys) {
     const entry = projects[key]
-    projects[key] = isPlainObject(entry) ? { ...entry, hasTrustDialogAccepted: true } : { hasTrustDialogAccepted: true }
+    projects[key] = isRecord(entry) ? { ...entry, hasTrustDialogAccepted: true } : { hasTrustDialogAccepted: true }
   }
   return { kind: 'changed', config: { ...config, projects } }
 }
@@ -102,7 +100,7 @@ function readJsonObject(path: string): Record<string, unknown> | null {
   try {
     if (statSync(path).size > MAX_TRUST_CONFIG_BYTES) return null
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    return isPlainObject(parsed) ? parsed : null
+    return isRecord(parsed) ? parsed : null
   } catch {
     // 無い・壊れている設定は書き換えない（想定内。エージェントが自分で確認を出す）
     return null

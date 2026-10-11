@@ -116,9 +116,7 @@ export async function readJsonConfig(path: string, collector: Collector): Promis
   return null
 }
 
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
-}
+export { asRecord } from '@shared/guards'
 
 const DESCRIPTION_MAX = 300
 

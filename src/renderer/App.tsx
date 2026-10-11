@@ -49,7 +49,6 @@ import { MIC_DEVICES_REFRESH_EVENT, StatusBar, type FooterCapture } from './comp
 import { TerminalPane } from './components/TerminalPane'
 import { onAgentLaunchRequest } from './lib/agentLaunchRequest'
 import { TitleBar } from './components/TitleBar'
-import { Gallery } from './gallery/Gallery'
 import { useViewBounds } from './hooks/useViewBounds'
 import { useAnyModalOpen } from './lib/openModals'
 import { useProjectSession } from './hooks/useProjectSession'
@@ -57,7 +56,6 @@ import { matchWindowSource } from '@shared/projectTargets'
 import { newReviewNeedsPage, planNewReview } from './lib/newReview'
 import { useProductRound } from './hooks/useProductRound'
 import { RoundBar } from './components/RoundBar'
-import { OrchestraDashboard } from './components/OrchestraDashboard'
 import { useProjectActivity } from './terminal/agentActivity'
 import { OrchestraDock } from './components/OrchestraDock'
 import { currentDockGroup, groupDockTargets } from '@shared/dockGroups'
@@ -79,23 +77,36 @@ import type { ReviewData, ReviewSummary } from '@shared/review'
 import { ReviewFindings } from './components/ReviewFindings'
 import { errorMessage } from './lib/errors'
 import { useT } from './lib/i18n'
-import { SettingsPage, type CaptureSettings } from './components/SettingsPage'
+import type { CaptureSettings } from './components/SettingsPage'
+// 設定のページの部品は遅れて読むが、その CSS はフッターのポップオーバー・オンボーディング・ダッシュボードも使うので、先に読む（並びも前と同じ所）
+import './styles/cliTools.css'
+import './styles/settings.css'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from './lib/settingsSections'
 import { shouldShowOnboarding, type OnboardingPatch, type OnboardingState, type OnboardingStepId } from '@shared/onboarding'
-import { OnboardingFlow } from './onboarding/OnboardingFlow'
 import { reopenPatch } from './onboarding/onboardingFlowState'
 import { onShowOnboardingRequested } from './onboarding/showOnboardingEvent'
 import { notifySetupChanged } from './onboarding/useSetupChecklist'
 import { OnboardingStore } from './onboarding/onboardingStore'
 import { StarPromptHost } from './components/StarPrompt'
 import { FeedbackDialogHost } from './components/FeedbackDialog'
-import { MeetingImportDialog } from './components/MeetingImportDialog'
 import { OPEN_REVIEW_EVENT } from './lib/importedReview'
+import { setRecordingLevel } from './lib/recordingLevel'
 import { reportAnomaly, reportHandled } from '@shared/report'
 import type { SttLanguageCode } from '@shared/sttLanguages'
 
 /** エディタは重いので、起動の後で読む（起動時間 NF-5）。読み終わっていれば、開いたときに Suspense で待たせない */
 const { Component: FileEditor, preload: preloadFileEditor } = preloadable(() => import('./editor/FileEditor'))
+/**
+ * 開いたときだけ要る画面も、起動の JS から外す（設定のページは十数の節と CSS を持つ）。
+ * よく開く設定と全体のダッシュボードは、エディタと一緒に手が空いたときに先読みする
+ */
+/** 遅れて読む部品の props（型だけを読む） */
+type PropsOf<C> = C extends (props: infer P) => unknown ? P : never
+const { Component: SettingsPage, preload: preloadSettingsPage } = preloadable<PropsOf<typeof import('./components/SettingsPage').SettingsPage>>(() => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const { Component: OrchestraDashboard, preload: preloadOrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
+const { Component: OnboardingFlow } = preloadable<PropsOf<typeof import('./onboarding/OnboardingFlow').OnboardingFlow>>(() => import('./onboarding/OnboardingFlow').then((m) => ({ default: m.OnboardingFlow })))
+const { Component: MeetingImportDialog } = preloadable<PropsOf<typeof import('./components/MeetingImportDialog').MeetingImportDialog>>(() => import('./components/MeetingImportDialog').then((m) => ({ default: m.MeetingImportDialog })))
+const { Component: Gallery } = preloadable<PropsOf<typeof import('./gallery/Gallery').Gallery>>(() => import('./gallery/Gallery').then((m) => ({ default: m.Gallery })))
 /** 起動してからエディタを先読みするまでの待ち（起動直後の描画・Agent の起動と重ねない） */
 const EDITOR_PRELOAD_DELAY_MS = 2500
 
@@ -106,7 +117,11 @@ const EDITOR_PRELOAD_DELAY_MS = 2500
 function scheduleEditorPreload(): () => void {
   let idle: number | undefined
   const timer = window.setTimeout(() => {
-    const run = () => { void preloadFileEditor().then((m) => (m as typeof import('./editor/FileEditor')).preloadEditors()).catch(() => undefined) }
+    const run = () => {
+      void preloadFileEditor().then((m) => (m as typeof import('./editor/FileEditor')).preloadEditors()).catch(() => undefined)
+      void preloadSettingsPage().catch(() => undefined)
+      void preloadOrchestraDashboard().catch(() => undefined)
+    }
     idle = typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(run, { timeout: 5000 }) : window.setTimeout(run, 0)
   }, EDITOR_PRELOAD_DELAY_MS)
   return () => {
@@ -130,6 +145,11 @@ function noopRef(): void {}
 /** 部品見本は URL の #gallery で開く（E2Eからも開ける）*/
 function galleryRequested(): boolean {
   return window.location.hash === '#gallery'
+}
+
+/** 画面に出す部分（状態と経過の秒）が同じか */
+function sameShownStatus(a: RecordingStatus, b: RecordingStatus): boolean {
+  return a.state === b.state && Math.floor(a.elapsedMs / 1000) === Math.floor(b.elapsedMs / 1000)
 }
 
 export function App() {
@@ -273,7 +293,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const [showLiveTranscript, setShowLiveTranscript] = useState(true)
   const [language, setLanguage] = useState<SttLanguageCode>('auto')
   const [captureSystemAudio, setCaptureSystemAudio] = useState(false)
-  const [level, setLevel] = useState(0)
   /** フィードバック画面の帯に出す警告（トーストはビューに隠れるため） */
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimer = useRef<number | undefined>(undefined)
@@ -947,8 +966,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
 
   useEffect(() => {
     const offs = [
-      window.ade.on('recording:level', (data) => { if (data.source === 'mic') setLevel(data.rms) }),
-      window.ade.on('recording:status', setRecordStatus),
+      window.ade.on('recording:level', (data) => { if (data.source === 'mic') setRecordingLevel(data.rms) }),
+      // 250ms ごとに届くが、画面に出すのは状態と秒だけ。同じなら前のものを使い、画面全体を描き直さない
+      window.ade.on('recording:status', (next) => setRecordStatus((cur) => (sameShownStatus(cur, next) ? cur : next))),
       window.ade.on('recording:tracksChanged', setTracks),
       // ウインドウを映している間に URL を開くと、main が内蔵ブラウザへ戻す
       window.ade.on('capture:targetChanged', (target) => { captureTargetRef.current = target; setCaptureTarget(target) }),
@@ -1315,7 +1335,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 dashboard={isOrchestra}
               />
               {centerTab === 'dashboard' && isOrchestra ? (
-                <ErrorBoundary name="orchestra">
+                <ErrorBoundary name="orchestra"><Suspense fallback={<div className="editor-area" />}>
                   <OrchestraDashboard
                     projects={projects.projects}
                     onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)}
@@ -1324,9 +1344,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                     onRecordAll={recordAll}
                     onStartRound={() => void run(() => productRound.start())}
                   />
-                </ErrorBoundary>
+                </Suspense></ErrorBoundary>
               ) : centerTab === 'settings' && settingsOpen ? (
-                <ErrorBoundary name="settings">
+                <ErrorBoundary name="settings"><Suspense fallback={<div className="editor-area" />}>
                 <SettingsPage
               value={{ captureMic, micDeviceId, captureSystemAudio, language, transcription, keepDays, stayFeedbackOnStop, showLiveTranscript }}
               onChange={changeCaptureFromSettings}
@@ -1342,7 +1362,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
               onAgentPromptChange={changeAgentPrompt}
                   focus={settingsFocus}
                 />
-                </ErrorBoundary>
+                </Suspense></ErrorBoundary>
               ) : isFileTab(centerTab) ? (
                 files.activeFile && (
                   <ErrorBoundary name="editor">
@@ -1430,7 +1450,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onCaptureChange={changeCaptureFromFooter}
           micDevices={micDevices}
           available={available}
-          level={level}
           terminalDock={terminalDock}
           onTerminalDockChange={changeTerminalDock}
           onOpenSettings={() => openSettings()}
@@ -1469,7 +1488,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           recording={recording}
           elapsed={elapsed}
           tool={tool}
-          level={level}
           captureMic={captureMic}
           onToolChange={selectTool}
           color={annotationColor}
@@ -1584,7 +1602,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
       )}
       {quickOpenOpen && <QuickOpen onOpen={(path) => files.open(path)} onClose={() => setQuickOpenOpen(false)} />}
       {/* 取り込んだら、そのレビューの指摘（候補）を開く。人が確かめてから Agent へ送る */}
-      {meetingOpen && <MeetingImportDialog onClose={() => setMeetingOpen(false)} onImported={openImported} />}
+      {meetingOpen && <Suspense fallback={null}><MeetingImportDialog onClose={() => setMeetingOpen(false)} onImported={openImported} /></Suspense>}
       {files.pendingClose && <UnsavedChangesDialog name={files.pendingClose.name} onChoose={files.resolveClose} />}
       {addTrackOpen && recording && <CaptureTargetPicker
         value={{ kind: 'browser' }}
@@ -1602,7 +1620,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
         onStart={(target) => { chooseTarget(target); setTargetPickerOpen(false); toggleRecording() }}
         onClose={() => setTargetPickerOpen(false)}
       />}
-      {onboardingOpen && <OnboardingFlow
+      {onboardingOpen && <Suspense fallback={null}><OnboardingFlow
         onboarding={onboarding ?? null}
         onPersist={persistOnboarding}
         agents={agents}
@@ -1618,16 +1636,18 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onPickModel: () => void run(async () => { await window.ade.invoke('capture:model'); setAvailable(await window.ade.invoke('capture:availability')) }),
           onModelChanged: () => void window.ade.invoke('capture:availability').then(setAvailable).catch(() => undefined)
         }}
-      />}
+      /></Suspense>}
       {/* 部品見本。開発時だけ開く（表示メニュー → 部品見本、または #gallery）*/}
       {gallery && (
         <div className="app__gallery">
-          <Gallery
-            onClose={() => {
-              window.location.hash = ''
-              setGallery(false)
-            }}
-          />
+          <Suspense fallback={null}>
+            <Gallery
+              onClose={() => {
+                window.location.hash = ''
+                setGallery(false)
+              }}
+            />
+          </Suspense>
         </div>
       )}
     </div>

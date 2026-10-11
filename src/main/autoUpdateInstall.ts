@@ -286,8 +286,3 @@ export function runE2eQuitInstaller(script: string, method: InstallMethod, path:
   child.unref()
   return true
 }
-
-/** アプリを閉じるときに、Squirrel.Mac 用の手元のサーバーを閉じる */
-export function disposeAutoUpdateInstall(): void {
-  closeSquirrelServer()
-}

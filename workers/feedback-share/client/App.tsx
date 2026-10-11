@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Copy, ExternalLink, Film, Lock, Monitor, MousePointerClick, Play, Upload, X } from 'lucide-react'
 import { FeedbackToolbar, type AnnotationTool } from '../../../src/renderer/components/FeedbackToolbar'
 import { Button, IconButton } from '../../../src/renderer/ui'
+import { setRecordingLevel } from '../../../src/renderer/lib/recordingLevel'
 import { DEFAULT_ANNOTATION_COLOR, type AnnotationColor } from '../../../src/shared/annotation'
 import { SHARE_LIMITS, type ShareMemo, type ShareNote, type SharePublicRecording, type SharePublicView, type ShareRecordingMode, type ShareUrl } from '../../../src/shared/feedbackShare'
 import { openMemo, passwordProof } from '../../../src/shared/shareCrypto'
@@ -288,7 +289,6 @@ function RecordSession({ share, mode, url, name, password, onDone }: { share: Lo
   const [color, setColor] = useState<AnnotationColor>(DEFAULT_ANNOTATION_COLOR)
   const [history, setHistory] = useState({ canUndo: false, canRedo: false })
   const [elapsed, setElapsed] = useState(0)
-  const [level, setLevel] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
   const [noteCount, setNoteCount] = useState(0)
   const [nav, setNav] = useState({ loads: 0, back: 0, forward: 0 })
@@ -318,7 +318,7 @@ function RecordSession({ share, mode, url, name, password, onDone }: { share: Lo
     if (!recording) return
     const timer = window.setInterval(() => {
       setElapsed(recorderRef.current?.clock.now() ?? 0)
-      setLevel(meterRef.current?.level() ?? 0)
+      setRecordingLevel(meterRef.current?.level() ?? 0)
     }, 100)
     return () => window.clearInterval(timer)
   }, [recording])
@@ -452,7 +452,6 @@ function RecordSession({ share, mode, url, name, password, onDone }: { share: Lo
       state={browserState}
       recording={recording}
       elapsed={formatDuration(elapsed)}
-      level={level}
       captureMic
       tool={tool}
       onToolChange={(next) => { setTool(next); if (next !== 'none') setNoteMode(false) }}

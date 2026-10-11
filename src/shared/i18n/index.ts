@@ -170,7 +170,3 @@ export function formatTime(value: number | Date, options: Intl.DateTimeFormatOpt
 export function formatDateTime(value: number | Date, options?: Intl.DateTimeFormatOptions): string {
   return new Date(value).toLocaleString(intlLocale(), options)
 }
-
-export function formatNumber(value: number, options?: Intl.NumberFormatOptions): string {
-  return new Intl.NumberFormat(intlLocale(), options).format(value)
-}

@@ -32,6 +32,7 @@ import { UsageMeter } from './UsageMeter'
 import { FailoverStatus } from './FailoverStatus'
 import { ApiUsageMeter } from './ApiUsageMeter'
 import { useT, type TFunction } from '../lib/i18n'
+import { useRecordingLevel } from '../lib/recordingLevel'
 
 /**
  * 下部ステータスバー（24px）。
@@ -169,16 +170,16 @@ export function requestMicDevicesRefresh(): void {
   window.dispatchEvent(new CustomEvent(MIC_DEVICES_REFRESH_EVENT))
 }
 
-export function MicPopover({ value, onChange, recording, micDevices, available, level, onOpenSettings }: {
+export function MicPopover({ value, onChange, recording, micDevices, available, onOpenSettings }: {
   value: FooterCapture
   onChange: (patch: Partial<FooterCapture>) => void
   recording: boolean
   micDevices: Array<{ id: string; label: string }>
   available: SttAvailability
-  level: number
   onOpenSettings: () => void
 }) {
   const t = useT()
+  const level = useRecordingLevel()
   const probe = useMicLevel(!recording && value.captureMic, value.micDeviceId)
   // 開くたびにマイクの一覧を読み直す（あとからつないだ機器を出す）
   useEffect(() => requestMicDevicesRefresh(), [])
@@ -375,7 +376,6 @@ export function StatusBar({
   onCaptureChange,
   micDevices,
   available,
-  level,
   terminalDock,
   onTerminalDockChange,
   onOpenSettings,
@@ -394,8 +394,6 @@ export function StatusBar({
   onCaptureChange: (patch: Partial<FooterCapture>) => void
   micDevices: Array<{ id: string; label: string }>
   available: SttAvailability
-  /** 録画中のマイクのレベル（recording:level） */
-  level: number
   terminalDock: Dock
   onTerminalDockChange: (dock: Dock) => void
   onOpenSettings: () => void
@@ -480,19 +478,24 @@ export function StatusBar({
     setHiddenIds((cur) => (cur.length === next.length && cur.every((id, i) => id === next[i]) ? cur : next))
   }, [items])
 
-  useLayoutEffect(() => { evaluate() })
+  // 測るのは項目が変わったときと、大きさが変わったときだけ（毎回の描画で測るとレイアウトの計算が走る。録画中は1秒に十数回）
+  useLayoutEffect(() => { evaluate() }, [evaluate])
   useEffect(() => {
     const footer = footerRef.current
     if (!footer) return
     let frame = 0
-    const observer = new ResizeObserver(() => {
+    const schedule = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(evaluate)
-    })
+    }
+    const observer = new ResizeObserver(schedule)
     observer.observe(footer)
     // 項目の中身が変わって幅が変わったとき（使用量の読み込み・ページ名の変化など）も測り直す
     for (const el of footer.querySelectorAll(':scope > [data-fitem]')) observer.observe(el)
-    return () => { observer.disconnect(); cancelAnimationFrame(frame) }
+    // 隠した項目は大きさが 0 のままなので、中身の入れ替わりと「全部出したときの幅」の変化は別に見る
+    const mutations = new MutationObserver(schedule)
+    mutations.observe(footer, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-full-width', 'hidden'] })
+    return () => { observer.disconnect(); mutations.disconnect(); cancelAnimationFrame(frame) }
   }, [evaluate, items])
 
   /** 項目の入れ物。隠すときも外さない（ポップオーバーや中の状態を保つ） */
@@ -671,7 +674,7 @@ export function StatusBar({
       </Popover>}
       {open === 'mic' && <Popover anchor={micRef.current} fallback={moreRef.current} label={t('statusBar.micAndTranscription')} onClose={close}>
         <MicPopover value={settings} onChange={onCaptureChange} recording={recording} micDevices={micDevices}
-          available={available} level={level} onOpenSettings={openSettings} />
+          available={available} onOpenSettings={openSettings} />
       </Popover>}
       {open === 'update' && <Popover anchor={updateRef.current} fallback={moreRef.current} label={t('statusBar.update')} onClose={close}>
         <UpdatePopover version={version.version} packaged={version.packaged} status={updateStatus} />

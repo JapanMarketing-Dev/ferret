@@ -1672,7 +1672,25 @@ body[data-resizing='row'] * {
 }
 
 .sb-pop .st-row {
+  min-width: 0;
   min-height: 30px;
+}
+
+/* 選択欄は幅 200px のままだと、マイクの「読み直し」ボタンの分だけ 320px のポップオーバーからはみ出して横に流れていた */
+.sb-pop .st-row > .st-row__label {
+  flex: none;
+}
+
+.sb-pop .st-row > .rv-select,
+.sb-pop .st-mic-select {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.sb-pop .st-select {
+  width: 100%;
+  max-width: 200px;
 }
 
 .sb-pop .st-lock {

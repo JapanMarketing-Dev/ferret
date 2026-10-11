@@ -10,7 +10,7 @@ import { agentMailEnv, agentMailTerminalCreated, initAgentMail, revokeAgentMailS
 import { isAccountAgent } from '@shared/agentCatalog'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { SessionPaths } from './sessions/paths'
@@ -96,6 +96,7 @@ import { PROJECT_PAGE_SCHEME } from '@shared/htmlPreview'
 import { crashReportsActive, initCrashReporting, maybeSendTestEvent, reportMainError, sentryTestKinds, setTelemetryContext, noteQuitRequested, telemetryInstallId, trackIpc } from './telemetry'
 import { wrapIpcHandler } from '@shared/telemetry'
 import { flow, reportHandled } from '@shared/report'
+import { delay } from '@shared/delay'
 import { TerminalRestoreStore } from './terminalRestore'
 import { syntheticSystemAudio, systemAudioFeatures } from '@shared/systemAudio'
 
@@ -732,7 +733,6 @@ function applyExternalSettings(settings: Settings): void {
   // 判定モデルの中継（有効・接続先の変更）
   syncDecision()
   send('settings:changed', redactKeys(settings))
-  syncDecision()
 }
 
 /** 開いているのが SSH のプロジェクトか（Agent はリモートで動くので、feedback.md は中身を貼って送る） */
@@ -1111,8 +1111,24 @@ function windowIcon(): { icon?: string } {
 }
 
 /** アプリ自身の画面の置き場所（file: のアプリのフォルダと、開発サーバー） */
+let realAppPathCache: string | null | undefined
+function realAppPath(): string | null {
+  if (realAppPathCache !== undefined) return realAppPathCache
+  try {
+    const real = realpathSync(app.getAppPath())
+    realAppPathCache = real !== app.getAppPath() ? real : null
+  } catch {
+    realAppPathCache = null
+  }
+  return realAppPathCache ?? null
+}
+
 function appPageRoots(): string[] {
   const roots = [pathToFileURL(app.getAppPath()).href]
+  // リンクを通った場所から起動すると、ページの URL は実体のパスになる（macOS の /var → /private/var、/tmp → /private/tmp）。
+  // 実体のパスも認めないと、画面からの呼び出しを全部断ってしまう
+  const real = realAppPath()
+  if (real) roots.push(pathToFileURL(real).href)
   if (process.env.ELECTRON_RENDERER_URL) roots.push(process.env.ELECTRON_RENDERER_URL)
   return roots
 }
@@ -1635,7 +1651,7 @@ async function continueInterruptedWork(id: string): Promise<boolean> {
     if (!state) return false
     if (state.kind !== 'unknown' && state.state === 'idle') break
     if (state.state === 'blocked' || Date.now() > deadline) return false
-    await new Promise((done) => setTimeout(done, 2000))
+    await delay(2000)
   }
   const result = await terminals.sendReview(id, t('terminal.continueWork'))
   return result.ok
@@ -3318,6 +3334,12 @@ async function main(): Promise<void> {
   browser.onPageInput = (contents) => noteInputs.sawInput(contents)
   // ログインのポップアップ。録画中はその窓も録り、前に出たら書き込む先をそちらへ切り替える（recording/controller.ts）
   browser.onPopupWindow = (contents, url) => recording?.attachPopupWindow(contents, url)
+  // アプリの画面の読み込みは先に始める（拡張機能を待つ間〔最大 2 秒〕も JS を読む）。
+  // 画面から先に届いた内蔵ブラウザの問い合わせは、attach の前は空の状態を返し、attach のあとの browser:stateChanged で揃う
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL
+  const rendererLoad = rendererUrl ? mainWindow.loadURL(rendererUrl) : mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  // 失敗は下の await で投げる（待つ前に失敗しても、未処理の拒否にしない）
+  rendererLoad.catch(() => undefined)
   // 内蔵ブラウザの拡張機能。content script を最初のページにも効かせるため、ページを開く前に読み込む（待つのは少しだけ）
   await startBrowserExtensions(loadedSettings.browserExtensions)
   browser.setPartition(browserPartition(currentSettings().projects.find((p) => p.id === currentSettings().activeProjectId)?.browserProfile))
@@ -3330,12 +3352,7 @@ async function main(): Promise<void> {
   syncAgentSkillOnStart()
   syncAgentMailSkillNow()
 
-  const rendererUrl = process.env.ELECTRON_RENDERER_URL
-  if (rendererUrl) {
-    await mainWindow.loadURL(rendererUrl)
-  } else {
-    await mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  await rendererLoad
   mark('renderer:loaded')
   console.log(`[startup] renderer 読み込み完了 ${elapsedMs()}ms`)
 }

@@ -14,6 +14,7 @@
  * Electron に依存させない（純粋な関数。単体テストの対象）。
  */
 import type { DecisionPricing } from '@shared/decision'
+import { isRecord } from '@shared/guards'
 
 export const DECISION_REQUEST_LIMITS = {
   /** 質問の数 */
@@ -49,7 +50,6 @@ export type DecisionRequestCheck =
   | { ok: true; body: Buffer; inputTokens: number; outputTokens: number; images: number }
   | { ok: false; message: string }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** 依頼の本文を確かめ、model を設定のものにした本文と、トークン数の上限を返す */
 export function checkDecisionRequest(raw: Buffer, model: string): DecisionRequestCheck {

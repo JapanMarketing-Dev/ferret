@@ -7,10 +7,10 @@ import {
   findWindowsExecutable,
   parseWindowsCmdShim,
   pickWindowsWhereResult,
-  quoteWindowsCmdArgument,
   resolveSpawn,
   type WindowsFs
 } from '../../src/main/platform/windowsSpawn'
+import { quoteWindowsCmdArgument } from '../../src/shared/shellQuote'
 import { commonBinaryDirs } from '../../src/main/platform/binaryDirs'
 import { resolveWhisperBinary } from '../../src/main/pipeline/environment'
 import { DEV_APP_NAME, devHelperName, devPlistPatches } from '../../scripts/prepare-dev-electron.mjs'
@@ -302,5 +302,15 @@ describe('Mac で NSIS を作るときのパスの長さ（scripts/check-nsis-pa
     for (const line of nsisLines) expect(line).toContain('-c.directories.output="${NSIS_DIR}/out"')
     expect(script).toContain('NSIS_DIR="$(mktemp -d /tmp/fnsis.XXXXXX)"')
     expect(script.indexOf('check-nsis-paths.mjs')).toBeLessThan(script.indexOf('--win nsis'))
+  })
+})
+
+describe('Agent の起動の cmd.exe の引数も同じ書き方（以前は % の前の \\ を倍にせず a\\%b が a"%b になっていた）', () => {
+  it('quoteStartupArg の cmd は quoteWindowsCmdArgument と同じ', async () => {
+    const { quoteStartupArg } = await import('../../src/shared/agentLaunch')
+    for (const value of ['plain', 'c"d', 'e%F%g', 'C:\\dir\\', 'a\\%b', 'x\\\\"y', '']) {
+      expect(quoteStartupArg(value, 'cmd'), value).toBe(quoteWindowsCmdArgument(value))
+    }
+    expect(quoteStartupArg('a\\%b', 'cmd')).toBe('"a\\\\"^%"b"')
   })
 })

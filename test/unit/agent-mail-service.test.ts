@@ -118,6 +118,19 @@ describe('タブに渡す環境変数', () => {
 })
 
 describe('依頼を届ける・返事を返す', () => {
+  it('置かれた依頼は見張りの知らせですぐ読む（ゆっくりの読み直し 2 秒を待たない）', async () => {
+    tabs = [{ id: 'fast-from', cwd: project, title: 'claude', agent: 'claude', state: 'idle' }, { id: 'fast-to', cwd: project, title: 'codex', agent: 'codex', state: 'idle' }]
+    const env = await envFor('fast-from')
+    // 見張りが始まるまで（初めの1通の前に受け口を作る）
+    await new Promise((r) => setTimeout(r, 50))
+    const started = Date.now()
+    const status = await post(env, { kind: 'send', to: 'codex' }, 'check this')
+    expect(status).toMatch(/^ok/)
+    expect(Date.now() - started).toBeLessThan(1500)
+    // 貼り終えるまで待つ（次のテストの貼り付けに混ざらないように）
+    await until(() => pasted.some((p) => p.id === 'fast-to'))
+  })
+
   it('同じプロジェクトの Codex のタブへ貼り、Codex の返事を Claude Code のタブへ貼る。続けて頼むと同じタブへ', async () => {
     tabs = [
       { id: 'c1', cwd: project, title: 'Claude Code', agent: 'claude', state: 'working' },

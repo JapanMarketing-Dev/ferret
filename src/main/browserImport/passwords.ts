@@ -13,8 +13,8 @@
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile, rm } from 'node:fs/promises'
+import { savePrivateFile } from '../atomicFile'
 import type { WebContents } from 'electron'
 import { loginMatch, loginOrigin, type ImportedLogin, type PasswordCsvSource, type SavedLoginAccount } from '@shared/browserImport'
 import type { KeyCipher } from '../pipeline/stt/keys'
@@ -108,16 +108,8 @@ export class SavedLoginStore {
     }
     const data: StoredFile = { version: 1, logins }
     const encrypted = this.cipher.encrypt(JSON.stringify(data))
-    await mkdir(dirname(this.path), { recursive: true })
     // 一時ファイルに書いてから置き換える（途中で落ちても元か新しいほうが残る）
-    const tmp = `${this.path}.${process.pid}.tmp`
-    try {
-      await writeFile(tmp, encrypted, { mode: 0o600 })
-      await rename(tmp, this.path)
-    } catch (err) {
-      await rm(tmp, { force: true })
-      throw err
-    }
+    await savePrivateFile(this.path, encrypted)
     this.unreadable = false
   }
 

@@ -456,10 +456,12 @@ function useTreeOperations({
     if (!menu) return
     const close = (event: globalThis.MouseEvent) => { if (!(event.target as HTMLElement).closest('.explorer-menu')) setMenu(null) }
     const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') setMenu(null) }
+    const onBlur = () => setMenu(null)
     window.addEventListener('mousedown', close)
     window.addEventListener('keydown', onKey)
-    window.addEventListener('blur', () => setMenu(null), { once: true })
-    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onKey) }
+    window.addEventListener('blur', onBlur, { once: true })
+    // blur も外す（メニューを開くたびに、外されない blur の見張りが増えていた）
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', onKey); window.removeEventListener('blur', onBlur) }
   }, [menu])
 
   const entryOf = (path: string): FsEntry | undefined => rows.find((r) => r.entry.path === path)?.entry

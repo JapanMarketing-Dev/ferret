@@ -48,6 +48,7 @@ Ferret のクラッシュと未処理のエラーは Sentry（組織 `workspacep
     3. `.sym` の `FUNC <位置> <長さ> <引数> <名前>` の行から、`location`・`stack` の位置（16進）を含む関数を探す（`awk` で十分。`PUBLIC` の行は長さが無いので、位置以下で一番近いもの）
     4. `pty.node`・`conpty.node` は node-pty の版の PDB（`scripts/sentry-sourcemaps.mjs` が上げるもの）で同じように読む
   - それでも足りなければ、再現した手元の minidump（Electron の crashDumps のフォルダ。旧名のまま `%APPDATA%\ade-movie\Crashpad\reports` のこともある）を開発者が自分で読む（`minidump-stackwalk <dump> <symbols のフォルダ>`）
+- `crash.exe`: 落ちたプロセスの実行ファイルの名前（minidump のモジュールの一覧の先頭）。macOS では crashpad の受け口がターミナルから起動したプログラムにも引き継がれるので、Ferret（`ferret`・`ferret.exe`・dev の `electron`）以外の名前の報告は main 以外なら送らない（FERRET-1X の headless_shell。`shouldSendNativeCrash`）
 - node-pty の記号（`scripts/sentry-sourcemaps.mjs` が上げる）は、minidump を送らないので今は使われない
 
 ## 5. 落ちたときの状況

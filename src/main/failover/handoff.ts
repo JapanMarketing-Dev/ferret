@@ -13,8 +13,6 @@ import { t } from '@shared/i18n'
  */
 
 /** プロジェクトの中の決まった場所（.ferret/ は .git/info/exclude で git 管理外。sessions/gitexclude.ts） */
-export const HANDOFF_RELATIVE = '.ferret/handoff.md'
-
 export function handoffFilePath(projectDir: string): string {
   return join(projectDir, '.ferret', 'handoff.md')
 }

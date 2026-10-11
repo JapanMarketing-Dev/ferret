@@ -354,6 +354,11 @@ export function shouldReportLoadFailure(f: { ownPage: boolean; errorCode: number
   return f.ownPage
 }
 
+/** Ferret 自身の実行ファイルの名前か（配布版の ferret・ferret.exe、dev の electron。小文字で比べる） */
+export function isOwnExecutable(name: string): boolean {
+  return /^(ferret|electron)(\.exe)?$/.test(name.toLowerCase())
+}
+
 /** render-process-gone / child-process-gone を送るか。正常終了と、利用者が止めた（killed）ものは送らない */
 export function shouldReportProcessGone(reason: string): boolean {
   return reason !== 'clean-exit' && reason !== 'killed'
@@ -366,10 +371,17 @@ export function shouldReportProcessGone(reason: string): boolean {
  * main は前の起動の理由が分からない（unknown）ことが多いので、理由では捨てない。
  * 子のプロセスが dyld で読み込みの途中に外から止められた報告（例外なし crash.code 0x0・落ちた場所が dyld）も同じく送らない。
  * 次の起動で見つかった報告はプロセスと理由が分からない（unknown）ため、killed で捨てられずに「Native crash (unknown): dyld」になっていた（Sentry FERRET-1W。1V と同じ形）
+ *
+ * Ferret の外のプログラムの報告も送らない。macOS では crashpad の例外の受け口（mach の exception port）が子に引き継がれるため、
+ * ターミナルから起動したプログラム（Playwright の headless_shell など）が落ちても Ferret の報告になり、
+ * 「Native crash (unknown): headless_shell」として届いてクラッシュしなかった割合も下げていた（Sentry FERRET-1X・FERRET-Q）。
+ * 実行ファイルの名前（crash.exe）が分かって、Ferret（配布版の ferret・ferret.exe、dev の electron）でなければ捨てる。
+ * Ferret の helper（「Ferret Helper (Renderer)」など）は名前に空白が入り crash.exe が付かないので、これまでどおり送る
  */
 export function shouldSendNativeCrash(event: { tags?: object }): boolean {
   const tags = (event.tags ?? {}) as Record<string, unknown>
   if (tags['event.process'] === 'browser') return true
+  if (typeof tags['crash.exe'] === 'string' && !isOwnExecutable(tags['crash.exe'])) return false
   if (tags['crash.code'] === '0x0' && tags['crash.module'] === 'dyld') return false
   return typeof tags['exit.reason'] !== 'string' || shouldReportProcessGone(tags['exit.reason'])
 }
@@ -761,6 +773,8 @@ export function minimizeNativeCrash<E extends { tags?: object; contexts?: object
   if (code) tags['crash.code'] = code
   if (kind) tags['crash.kind'] = kind
   if (module) tags['crash.module'] = module
+  const exe = crashValue(dump?.executable)
+  if (exe) tags['crash.exe'] = exe
   const app = event.contexts?.app as Record<string, unknown> | undefined
   const os = event.contexts?.os as Record<string, unknown> | undefined
   const contexts: Record<string, unknown> = {

@@ -169,10 +169,11 @@ export async function listDirectory(root: string, relDir: string): Promise<FsEnt
   }
   await listed.finish()
   // フォルダが先、名前は自然順（file2 < file10）
-  return entries.sort((a, b) =>
-    a.kind !== b.kind ? (a.kind === 'directory' ? -1 : 1) : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-  )
+  return entries.sort((a, b) => (a.kind !== b.kind ? (a.kind === 'directory' ? -1 : 1) : NAME_ORDER.compare(a.name, b.name)))
 }
+
+/** 名前の自然順。比べるたびに localeCompare へ options を渡すと照合の表を毎回作るので、1つを使い回す */
+const NAME_ORDER = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
 // ─── 読み書き ─────────────────────────────────────────────
 

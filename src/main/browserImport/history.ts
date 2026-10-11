@@ -9,10 +9,11 @@
  * 取り込んだ履歴は「全プロジェクト共通の取り込み済み履歴」として userData/browser-import/history.json に持つ。
  * 内蔵ブラウザのふだんの履歴（プロジェクトごと。src/renderer/lib/urlHistory.ts）とは混ぜない。
  */
-import { copyFile, mkdtemp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, join } from 'node:path'
+import { savePrivateFile } from '../atomicFile'
 import { chromiumUserDataDirs, isChromiumProfileDir } from '@shared/browserExtensions'
 import {
   BROWSER_IMPORT_LIMITS,
@@ -145,15 +146,7 @@ export class ImportedHistoryStore {
       await rm(this.path, { force: true })
       return
     }
-    await mkdir(dirname(this.path), { recursive: true })
-    const tmp = `${this.path}.${process.pid}.tmp`
-    try {
-      await writeFile(tmp, JSON.stringify({ version: 1, entries }), { encoding: 'utf8', mode: 0o600 })
-      await rename(tmp, this.path)
-    } catch (err) {
-      await rm(tmp, { force: true })
-      throw err
-    }
+    await savePrivateFile(this.path, JSON.stringify({ version: 1, entries }))
   }
 
   async count(): Promise<number> {

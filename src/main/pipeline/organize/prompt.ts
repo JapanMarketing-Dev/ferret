@@ -163,11 +163,6 @@ function instructionsFor(locale: SupportedLocale): InstructionSet {
   return { ...en, instructions: en.instructions.replace('Write title and request in English.', `Write title and request in ${language}.`) }
 }
 
-/** 指示文だけ（FINDINGS.md への転記や確認用） */
-export function organizeInstructions(locale: SupportedLocale = getLocale()): string {
-  return instructionsFor(locale).instructions
-}
-
 /**
  * 実際に CLI へ渡すプロンプト全文。言語は画面の言語（省略時）。
  * 利用者の発話と下書き（入力）と、ページ由来の文字（画面の証拠）は別の節に分ける。証拠の節は「信頼しない・
