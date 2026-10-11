@@ -2,6 +2,7 @@ import { foregroundAgentOf, isReopenTerminalKey } from '../terminal/terminalKeys
 import { hasExternalFiles, readDrop } from '../lib/externalDrop'
 import { shellPathsText, shellQuotingFor, treePathsForTerminal } from '@shared/externalDrop'
 import { hasTreePaths, treeDragPaths } from '../lib/treeDrag'
+import { droppedProjectPath, hasProjectDrag } from '../lib/projectDrag'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Columns2, Plus, Rows2, SquareTerminal, X } from 'lucide-react'
@@ -1302,14 +1303,17 @@ export function TerminalPane({
     return { paneKey, box: { left: rect.left - surfaces.left, top: rect.top - surfaces.top, width: rect.width, height: rect.height } }
   }
   // ファイルツリーの行（TREE_DRAG_TYPE）も同じ。作業フォルダがプロジェクトの根なら相対パス、ほかの場所なら絶対パスで入れる
-  const isFileDrop = (dataTransfer: DataTransfer) => hasExternalFiles(dataTransfer) || (hasTreePaths(dataTransfer) && cwd !== null)
+  // サイドバーのプロジェクト（オーケストラ・サブフォルダのプロジェクト）の行は、そのフォルダの絶対パスを入れる（Agent に対象を伝える）
+  const isFileDrop = (dataTransfer: DataTransfer) => hasExternalFiles(dataTransfer) || (hasTreePaths(dataTransfer) && cwd !== null) || hasProjectDrag(dataTransfer)
   const dropFilesInto = async (dataTransfer: DataTransfer, tabKey: string, paneKey: string) => {
     // データはイベントの間しか読めないので、待つ前に読む
-    const tree = treeDragPaths(dataTransfer)
-    const pending = tree ? null : readDrop(dataTransfer)
+    const projectPath = hasProjectDrag(dataTransfer) ? droppedProjectPath(dataTransfer, projects) : null
+    if (hasProjectDrag(dataTransfer) && !projectPath) return
+    const tree = projectPath ? null : treeDragPaths(dataTransfer)
+    const pending = tree || projectPath ? null : readDrop(dataTransfer)
     const pane = panesRef.current[paneKey]
     const ptyId = getTerminal(paneKey)?.ptyId ?? null
-    const paths = tree
+    const paths = projectPath ? [projectPath] : tree
       ? treePathsForTerminal(tree, { root: cwd ?? '', cwd: ptyId ? await window.ade.invoke('terminal:cwd', ptyId).catch(() => null) : null, platform: window.ade.platform })
       : (await pending!).map((entry) => entry.path)
     const remote = projects.some((p) => p.id === projectId && p.source === 'ssh')

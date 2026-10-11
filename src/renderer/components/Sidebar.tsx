@@ -38,6 +38,7 @@ import { useProjectActivity } from '../terminal/agentActivity'
 import { dropPositionAt, stepAmongVisible, type DropPosition } from '@shared/reorder'
 import { PROJECT_SORTS, filterProjects, sanitizeProjectView, sortProjects, type ProjectListView } from '@shared/projectOrder'
 import { isOrchestra, orchestraIdOf, treeDrop, treeRows } from '@shared/orchestras'
+import { PROJECT_DRAG_TYPE } from '../lib/projectDrag'
 
 export { toReviewSession, type ReviewSession }
 
@@ -107,8 +108,6 @@ function loadCollapsedOrchestras(): Set<string> {
     return new Set()
   }
 }
-
-const PROJECT_DRAG_TYPE = 'application/x-ferret-project'
 
 export function Sidebar({
   projects,
@@ -413,7 +412,8 @@ export function Sidebar({
                       data-project-row={project.id}
                       onDragStart={(e) => {
                         e.dataTransfer.setData(PROJECT_DRAG_TYPE, project.id)
-                        e.dataTransfer.effectAllowed = 'move'
+                        // 並べ替え（move）と、ターミナルへのパスの挿入（copy）の両方を受ける
+                        e.dataTransfer.effectAllowed = 'copyMove'
                         setDragging(project.id)
                       }}
                       onDragEnd={endDrag}

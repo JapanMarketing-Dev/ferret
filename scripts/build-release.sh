@@ -75,6 +75,8 @@ if [[ -n "$(git -C "${REPO}" status --porcelain --untracked-files=normal 2>/dev/
 fi
 
 echo "== Ferret ${VERSION} を作ります（作業場所: ${WORK}）"
+# 記録する commit は写す時点のもの（ビルドの間に次の commit を積んでも、写した中身の commit を残す）
+SOURCE_COMMIT="$(git -C "${REPO}" rev-parse HEAD)$(git -C "${REPO}" diff --quiet HEAD -- 2>/dev/null || echo ' (uncommitted changes)')"
 mkdir -p "${SRC}"
 cd "${REPO}"
 for entry in $(ls -A); do
@@ -189,7 +191,7 @@ fi
 # どの commit と材料から作ったかと、できたものの sha256（release-github.mjs create はこのフォルダを自分でハッシュして署名する）
 {
   echo "version ${VERSION}"
-  echo "commit $(git -C "${REPO}" rev-parse HEAD)$(git -C "${REPO}" diff --quiet HEAD -- 2>/dev/null || echo ' (uncommitted changes)')"
+  echo "commit ${SOURCE_COMMIT}"
   echo "linux-image ${LINUX_IMAGE}"
   echo "debian-snapshot ${DEBIAN_SNAPSHOT}"
   echo "linux-pnpm ${PNPM_SPEC}"
