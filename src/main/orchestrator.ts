@@ -176,9 +176,9 @@ const syncQueues = new Map<string, Promise<unknown>>()
  * 同じフォルダへの呼び出しは1本の列に並べる。プロジェクトを消す・開くと「すべてのプロダクト」の合わせが同時に2回走り、
  * settings.local.json の読み書きが重なって一時ファイルの名前もぶつかっていた（Sentry FERRET-1T: EEXIST）
  */
-export function syncOrchestrator(folder: string, registered: Registered, enabled = true, members: readonly string[] = [], lang: GuideLanguage = 'en', rules?: OrchestraRules): Promise<OrchestratorSync> {
+export function syncOrchestrator(folder: string, registered: Registered, enabled = true, members: readonly string[] = [], lang: GuideLanguage = 'en', rules?: OrchestraRules, name?: string): Promise<OrchestratorSync> {
   const key = resolve(folder)
-  const run = () => syncOrchestratorNow(folder, registered, enabled, members, lang, rules)
+  const run = () => syncOrchestratorNow(folder, registered, enabled, members, lang, rules, name)
   const next = (syncQueues.get(key) ?? Promise.resolve()).then(run, run)
   // 失敗は呼び出し側へ返す。列には順番待ちのためだけに残し、終わったら外す（想定内）
   const tail = next.catch(() => undefined)
@@ -187,13 +187,13 @@ export function syncOrchestrator(folder: string, registered: Registered, enabled
   return next
 }
 
-async function syncOrchestratorNow(folder: string, registered: Registered, enabled: boolean, members: readonly string[], lang: GuideLanguage, rules?: OrchestraRules): Promise<OrchestratorSync> {
+async function syncOrchestratorNow(folder: string, registered: Registered, enabled: boolean, members: readonly string[], lang: GuideLanguage, rules?: OrchestraRules, name?: string): Promise<OrchestratorSync> {
   const claude = await claudeDir(folder)
   const managed = await readManaged(folder)
   const links = await syncMemberLinks(folder, registered, enabled ? members : [], managed.links)
   const children = enabled ? await findOrchestratorChildren(folder, registered, members, links) : []
   const agents = join(claude, 'agents')
-  const plan = planSubagents(await existingSubagents(agents), children.map((c) => ({ file: `${c.agent}.md`, text: renderSubagent(c, rules) })))
+  const plan = planSubagents(await existingSubagents(agents), children.map((c) => ({ file: `${c.agent}.md`, text: renderSubagent({ ...c, orchestraFolder: folder }, rules) })))
   if (plan.write.length) await mkdir(agents, { recursive: true, mode: 0o755 })
   for (const w of plan.write) await writeAtomic(agents, w.file, w.text)
   for (const file of plan.remove) await rm(join(agents, file), { force: true })
@@ -204,6 +204,9 @@ async function syncOrchestratorNow(folder: string, registered: Registered, enabl
   await syncGuide(folder, 'CLAUDE.md', enabled ? guide : null, rulesTemplate(children, lang))
   await syncGuide(folder, 'AGENTS.md', enabled ? guide : null, agentsTemplate(lang))
   await syncGuide(folder, 'README.md', enabled ? renderReadmeBlock(children, lang) : null, readmeTemplate(basename(folder), lang), 'before')
+  // フィードバックから学ぶプレイブック（feedback/playbook.md）。無いときだけ雛形を作り、あるものは上書きしない。
+  // 作れなくても（リンク・書けないフォルダ）ほかの同期は済んでいるので続ける
+  if (enabled) await (await import('./feedbackLog')).seedPlaybook(folder, name ?? basename(folder)).catch(() => false)
   return { children, written: plan.write.map((w) => w.file), removed: plan.remove, skipped: plan.skipped }
 }
 

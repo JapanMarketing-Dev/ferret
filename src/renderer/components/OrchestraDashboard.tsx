@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
-import { ExternalLink, FileText, ListChecks, Play, RefreshCw, Send, ShieldCheck, Sparkles, Video } from 'lucide-react'
+import { BookOpen, ExternalLink, FileText, History, ListChecks, Play, RefreshCw, Send, ShieldCheck, Sparkles, Video } from 'lucide-react'
 import type { Project } from '@shared/types'
 import { formatUsd, type CostPeriod } from '@shared/extraCost'
 import type { OrchestraOverview } from '@shared/orchestraOverview'
@@ -26,9 +26,12 @@ import { OrchestraCost, forecastUsd, periodUsd } from './OrchestraCost'
  * - 全プロダクトを1回の録画でフィードバック（帯のタブでプロダクトを切り替えると、指摘の宛先も切り替わる）・確認の巡回・Codex の監査
  * - Agent への依頼（雛形を選んで送る・まとめて送る・1回きりのものは隠す）
  * - プロジェクトの表：オーケストラの対象・対象外、Agent の動き、未対応・確認待ち、コスト（インフラなどを含む）
+ * - フィードバックの記録（feedback/log.md）とプレイブック（feedback/playbook.md）をエディタで開く（@shared/feedbackLog）
  */
-export function OrchestraDashboard({ projects, onOpenProject, onOpenUrl, onReviewChecklist, onRecordAll, onStartRound }: {
+export function OrchestraDashboard({ projects, onOpenProject, onOpenUrl, onReviewChecklist, onRecordAll, onStartRound, onOpenFile }: {
   projects: readonly Project[]
+  /** オーケストラのフォルダからの相対パスのファイルをエディタで開く */
+  onOpenFile?: (path: string) => void
   onOpenProject: (projectId: string) => void
   /** フィードバックの画面でそのページを開く（録画中なら録画を止めずに移る） */
   onOpenUrl: (url: string) => void
@@ -108,6 +111,13 @@ export function OrchestraDashboard({ projects, onOpenProject, onOpenUrl, onRevie
       .finally(() => setAsking(false))
   }
 
+  /** フィードバックの記録・プレイブックを（無ければ作ってから）エディタで開く */
+  const openFeedbackFile = (which: 'log' | 'playbook') => {
+    void window.ade.invoke('orchestra:feedbackFile', which)
+      .then((path) => onOpenFile?.(path))
+      .catch((err) => toast({ tone: 'warning', message: errorMessage(err) }))
+  }
+
   const builtin: Record<BuiltinSection, ReactNode> = {
     checklist: <>
     <section className="orchestra__section" data-testid="orchestra-checklist">
@@ -165,6 +175,8 @@ export function OrchestraDashboard({ projects, onOpenProject, onOpenUrl, onRevie
       <Button icon={<Video size={13} />} title={t('orchestra.recordAllHint')} onClick={onRecordAll} data-testid="orchestra-record-all">{t('orchestra.recordAll')}</Button>
       <Button icon={<ListChecks size={13} />} onClick={() => onStartRound('confirm')} data-testid="orchestra-round-confirm">{t('round.startConfirm')}</Button>
       <Button icon={<ShieldCheck size={13} />} title={t('orchestra.codexAuditHint')} onClick={() => requestAgentLaunch('codex', CODEX_AUDIT_PRESET)} data-testid="orchestra-codex-audit">{t('orchestra.codexAudit')}</Button>
+      {onOpenFile && <Button variant="ghost" icon={<History size={13} />} title={t('orchestra.feedbackLogHint')} onClick={() => openFeedbackFile('log')} data-testid="orchestra-feedback-log">{t('orchestra.feedbackLog')}</Button>}
+      {onOpenFile && <Button variant="ghost" icon={<BookOpen size={13} />} title={t('orchestra.playbookHint')} onClick={() => openFeedbackFile('playbook')} data-testid="orchestra-playbook">{t('orchestra.playbook')}</Button>}
     </div>
   </>,
     requests: <>

@@ -21,7 +21,8 @@ export function OrchestraComposer({ compact = false, product = null }: { compact
     const body = text.trim()
     if (!body || busy) return
     setBusy(true)
-    void window.ade.invoke('agent:sendText', orchestraMessage(body, getLocale() === 'ja' ? 'ja' : 'en', product))
+    // 人が打った文そのものはオーケストラのフィードバックの記録にも残す（feedback/log.md）
+    void window.ade.invoke('agent:sendText', orchestraMessage(body, getLocale() === 'ja' ? 'ja' : 'en', product), { text: body, ...(product ? { product: product.name } : {}) })
       .then((result) => {
         if (result.ok) { setText(''); toast({ tone: 'success', message: t('orchestra.composerSent') }) }
         else toast({ tone: 'warning', message: result.message })

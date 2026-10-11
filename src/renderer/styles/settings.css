@@ -552,3 +552,49 @@
   width: 200px;
   flex: none;
 }
+
+/* 設定の「スマホから操作」：ポート・QR コードとリンク */
+.remote-settings__port {
+  width: 120px;
+  flex: none;
+}
+
+.remote-settings__share {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+/* QR は読み取りやすいよう、どの配色でも白地に黒（周りの余白も QR の一部） */
+.remote-settings__qr {
+  width: 176px;
+  height: 176px;
+  flex: none;
+  border-radius: 8px;
+}
+
+.remote-settings__urls {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.remote-settings__urls li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.remote-settings__url {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-sm);
+  user-select: all;
+}

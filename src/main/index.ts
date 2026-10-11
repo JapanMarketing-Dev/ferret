@@ -7,7 +7,7 @@ import { programCopyText } from './terminalClipboard'
 import { showAgentNotification } from './agentNotify'
 import { failoverPrefs, initFailover, onUsageChanged, setFailoverPrefs, switchRunningAgents } from './failover/service'
 import { agentMailEnv, agentMailTerminalCreated, initAgentMail, revokeAgentMailSession, stopAgentMail, syncAgentMailSkill } from './agentMail'
-import { isAccountAgent } from '@shared/agentCatalog'
+import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { existsSync, realpathSync } from 'node:fs'
@@ -102,7 +102,8 @@ import { PREVIEW_SCHEME, stripPreviewGrant } from '@shared/preview'
 import { PROJECT_PAGE_SCHEME } from '@shared/htmlPreview'
 import { crashReportsActive, initCrashReporting, maybeSendTestEvent, reportMainError, sentryTestKinds, setTelemetryContext, noteQuitRequested, telemetryInstallId, trackIpc } from './telemetry'
 import { wrapIpcHandler } from '@shared/telemetry'
-import { flow, reportHandled } from '@shared/report'
+import { errorKind, flow, reportHandled } from '@shared/report'
+import { isValidPort } from '@shared/mobileRemote'
 import { delay } from '@shared/delay'
 import { TerminalRestoreStore } from './terminalRestore'
 import { syntheticSystemAudio, systemAudioFeatures } from '@shared/systemAudio'
@@ -189,6 +190,8 @@ let extensions: BrowserExtensions | null = null
 /** 直前に探した取り込みの候補（key → 写す元）。画面からはパスを受け取らず、この key だけを受ける */
 let installedExtensions = new Map<string, { id: string; dir: string }>()
 let terminals: TerminalManager | null = null
+/** スマホから操作（src/main/mobileRemote.ts）。入れたときに初めて読み込む */
+let mobileRemote: import('./mobileRemote').MobileRemoteService | null = null
 /** Resource Manager の集計。ターミナル・ブラウザ・プロジェクトは読むだけ */
 const resources = new ResourceCollector({
   terminals: () => terminals?.list() ?? [],
@@ -625,7 +628,11 @@ const fileWatcher = new ProjectWatcher((event) => {
   send('fs:changed', event)
   // 内蔵ブラウザで開いているプレビューは、読み直さずに中身だけ差し替える（録画中の書き込みを残す）
   for (const tab of browser?.allContents() ?? []) refreshPreviewIn(tab, event.paths)
-}, (ids) => send('review:progressChanged', ids))
+}, (ids) => {
+  send('review:progressChanged', ids)
+  // Agent が直した（human_review にした）ことを、オーケストラのフィードバックの記録に足す
+  recordProgressFromDisk(ids)
+})
 
 /** ファイルエディタの IPC が触ってよい根。未選択なら断る */
 function projectRoot(): string {
@@ -739,7 +746,41 @@ function applyExternalSettings(settings: Settings): void {
   void extensions?.sync(settings.browserExtensions)
   // 判定モデルの中継（有効・接続先の変更）
   syncDecision()
+  // スマホから操作（settings.json で入れた・切った・ポートを変えた）
+  syncMobileRemote()
   send('settings:changed', redactKeys(settings))
+}
+
+/** スマホから操作のサービス。最初に使うときに読み込んで作る */
+async function mobileRemoteService(): Promise<import('./mobileRemote').MobileRemoteService> {
+  if (mobileRemote) return mobileRemote
+  const { MobileRemoteService } = await import('./mobileRemote')
+  mobileRemote ??= new MobileRemoteService({
+    tokenFile: join(configDir(), 'mobile-remote-token'),
+    deps: {
+      terminals: () => terminals,
+      projects: () => currentSettings().projects,
+      agentLabel: (agent) => agentLabel(agent, currentSettings().agents),
+      locale: () => (getLocale() === 'ja' ? 'ja' : 'en'),
+      // 開いているオーケストラの human.md（読むだけ）
+      checklist: async () => {
+        const editor = openOrchestra()
+        return editor ? (await (await import('./orchestraOverview')).readChecklist(editor.folderPath)).items : []
+      },
+      // URL・合言葉・本文は渡さない（種類だけ）
+      onError: (err, op) => reportHandled(errorKind(err), { area: 'mobile-remote', op })
+    },
+    onChange: (state) => send('remote:changed', state)
+  })
+  return mobileRemote
+}
+
+/** 設定（mobileRemote）に合わせて開け閉めする。一度も入れていなければ読み込まない */
+function syncMobileRemote(): void {
+  const prefs = currentSettings().mobileRemote
+  if (!prefs?.enabled && !mobileRemote) return
+  void mobileRemoteService().then((service) => service.apply(prefs))
+    .catch((err: unknown) => reportHandled(errorKind(err), { area: 'mobile-remote', op: 'apply settings' }))
 }
 
 /** 開いているのが SSH のプロジェクトか（Agent はリモートで動くので、feedback.md は中身を貼って送る） */
@@ -763,7 +804,7 @@ function assertNotRecording(): void {
 function syncOrchestratorOnOpen(project: Project | null | undefined): void {
   if (!project?.orchestrator || project.source === 'ssh') return
   void import('./orchestrator')
-    .then(({ syncOrchestrator }) => syncOrchestrator(project.folderPath, currentSettings().projects, true, membersOf(project), guideLanguage(), currentSettings().orchestra))
+    .then(({ syncOrchestrator }) => syncOrchestrator(project.folderPath, currentSettings().projects, true, membersOf(project), guideLanguage(), currentSettings().orchestra, project.name))
     // .claude がリンクなのは利用者の置き方（書かないのが正しい）。Sentry へは送らない
     .catch((err: unknown) => { if ((err as Error)?.name !== 'SubagentLinkError') reportHandled(err, { area: 'agent-launch', op: 'sync orchestrator subagents' }) })
 }
@@ -870,7 +911,7 @@ async function setProjectOrchestrator(id: unknown, enabled: unknown): Promise<{ 
   if (current.source === 'ssh') throw new UserFacingError(t('errors.folderNotRegistered'))
   const on = enabled === true
   const { SubagentLinkError, syncOrchestrator } = await import('./orchestrator')
-  const result = await syncOrchestrator(current.folderPath, settings.projects, on, membersOf(current), guideLanguage(), currentSettings().orchestra).catch((err: unknown) => {
+  const result = await syncOrchestrator(current.folderPath, settings.projects, on, membersOf(current), guideLanguage(), currentSettings().orchestra, current.name).catch((err: unknown) => {
     if (err instanceof SubagentLinkError) throw new UserFacingError(t('orchestrator.linkRefused'))
     throw err
   })
@@ -1633,7 +1674,11 @@ async function sendAgentRequests(ids: unknown): Promise<{ ok: boolean; message: 
   const result = await sendAgentRequestsTo({
     resolveTarget: async (folder) => (terminals ? terminals.resolveSendTarget(null, folder) : null),
     send: (id, text) => terminals!.sendReview(id, text),
-    noAgentMessage: t('terminal.send.noAgent')
+    noAgentMessage: t('terminal.send.noAgent'),
+    // 送った依頼をオーケストラのフィードバックの記録に足す（待たない）
+    onSent: (picked) => recordFeedback(workspace.projectId, async (m, at) => m.recordFeedbackMessage(at.orchestra.folderPath, at.orchestra.name, {
+      product: at.product, channel: 'request', text: (await import('@shared/feedbackLog')).requestsFeedbackText(picked)
+    }))
   }, { ids, prefs: currentSettings().agentRequests, lang: guideLanguage(), project: currentSettings().projects.find((p) => p.id === workspace.projectId), folder: workspace.folderPath })
   if (result === 'empty') throw new UserFacingError(t('errors.emptyText'))
   return result
@@ -1740,6 +1785,83 @@ async function pendingAcross(): Promise<Array<{ projectId: string; reviewId: str
     for (const s of sessions) if ((s.humanReviewCount ?? 0) > 0) out.push({ projectId: project.id, reviewId: s.id, count: s.humanReviewCount ?? 0 })
   }
   return out
+}
+
+// ───────────── オーケストラのフィードバックの記録（<オーケストラ>/feedback/。@shared/feedbackLog・src/main/feedbackLog.ts） ─────────────
+
+/**
+ * 人が送ったフィードバックを、そのプロジェクトのオーケストラに記録する。オーケストラに属さないプロジェクトは記録しない。
+ * 送信を待たせない・失敗させない（結果を待たずに投げ、失敗は記録だけする）
+ */
+function recordFeedback(projectId: string | null | undefined, run: (m: typeof import('./feedbackLog'), target: { orchestra: Project; product: string }) => Promise<unknown>): void {
+  void (async () => {
+    const { feedbackTarget } = await import('@shared/feedbackLog')
+    const target = feedbackTarget(currentSettings().projects, projectId)
+    if (!target) return
+    await run(await import('./feedbackLog'), target)
+  })().catch((err: unknown) => reportHandled(err, { area: 'review', op: 'record orchestra feedback' }))
+}
+
+/**
+ * 送ったレビューを記録する。ふつうの送信は送った指摘ごとに1組（枠の描かれた画像・枠の位置・文）、
+ * 本文を差し替えた送信（確認への返答・NG の送り直し）はその本文を1件。全体で録ったものはプロダクトの名前を指摘の URL で分ける
+ */
+function recordSentReview(paths: SessionPaths, items: readonly import('./pipeline/types').FeedbackItem[], sendIds: readonly string[] | null, overrideText: string | undefined): void {
+  const projectId = workspace.projectId
+  recordFeedback(projectId, async (m, target) => {
+    const { folderPath, name } = target.orchestra
+    if (overrideText) return m.recordFeedbackMessage(folderPath, name, { product: target.product, channel: 'review', text: overrideText, reviewId: paths.id })
+    const wanted = new Set(sendIds ?? [])
+    const sent = items.filter((it) => it.include && wanted.has(it.id))
+    if (!sent.length) return
+    const names = new Map<number, string>()
+    const project = currentSettings().projects.find((p) => p.id === projectId)
+    if (project?.editorWorkspace) {
+      const { splitByProduct } = await import('@shared/productSplit')
+      const products = orchestraMembers(currentSettings().projects, project.id)
+      for (const share of splitByProduct(products, sent.map((it) => ({ index: it.index, t: it.t, url: it.context.url })))) {
+        const product = products.find((p) => p.id === share.projectId)
+        if (product) for (const index of share.indexes) names.set(index, product.name)
+      }
+    }
+    const events = await (await import('./sessions')).readEvents(paths).catch(() => [])
+    return m.recordReviewSent(folderPath, name, {
+      projectId: projectId ?? '', reviewId: paths.id, reviewDir: paths.dir, events,
+      items: sent.map((item) => ({ product: names.get(item.index) ?? target.product, item }))
+    })
+  })
+}
+
+/** 記録するオーケストラがあるときだけ、変える前の progress.json を読む（Agent の直しを、人の判断で消える前に残す） */
+async function progressBeforeChange(paths: SessionPaths): Promise<import('@shared/findingProgress').ProgressMap | null> {
+  const { feedbackTarget } = await import('@shared/feedbackLog')
+  if (!feedbackTarget(currentSettings().projects, workspace.projectId)) return null
+  return (await import('./sessions')).readProgress(paths).catch(() => null)
+}
+
+/** progress.json の値（変える前・後の順）から、Agent が直したこと・人の反応を記録する */
+function recordProgressFeedback(paths: SessionPaths, maps: ReadonlyArray<import('@shared/findingProgress').ProgressMap | null>, projectId = workspace.projectId): void {
+  recordFeedback(projectId, async (m, target) => {
+    for (const progress of maps) {
+      if (progress) await m.recordReviewProgress(target.orchestra.folderPath, target.orchestra.name, { projectId: projectId ?? '', reviewId: paths.id, reviewDir: paths.dir, progress })
+    }
+  })
+}
+
+/** Agent が progress.json を書いた（ファイルの見張りから）。開いているプロジェクトのレビューだけ */
+function recordProgressFromDisk(ids: readonly string[]): void {
+  const folder = workspace.folderPath
+  const projectId = workspace.projectId
+  if (!folder || !ids.length) return
+  void (async () => {
+    const { feedbackTarget } = await import('@shared/feedbackLog')
+    if (!feedbackTarget(currentSettings().projects, projectId)) return
+    const { readProgress, sessionPaths } = await import('./sessions')
+    for (const id of ids) {
+      const paths = sessionPaths(folder, id)
+      recordProgressFeedback(paths, [await readProgress(paths).catch(() => null)], projectId)
+    }
+  })().catch((err: unknown) => reportHandled(err, { area: 'review', op: 'record orchestra feedback' }))
 }
 
 /**
@@ -1924,12 +2046,18 @@ function registerIpc(): void {
       if (!isSafeExternalUrl(url)) throw new UserFacingError(t('errors.unsafeLink'))
       await shell.openExternal(url)
     },
-    'agent:sendText': async (text) => {
+    'agent:sendText': async (text, feedback) => {
       if (typeof text !== 'string' || !text.trim() || text.length > 8000) throw new UserFacingError(t('errors.emptyText'))
       // 宛先は「Agent へ送信」の auto と同じ（選んでいるターミナル → 同じプロジェクトの Agent）
       const target = terminals ? await terminals.resolveSendTarget(null, workspace.folderPath) : null
       if (!target) return { ok: false, message: t('terminal.send.noAgent'), noAgent: true }
       const { ok, message } = await terminals!.sendReview(target, text)
+      // 人が打ったフィードバック（feedback）だけを、オーケストラのフィードバックの記録に足す（設定の手順の依頼などは残さない）
+      if (ok && feedback && typeof feedback === 'object' && typeof feedback.text === 'string' && feedback.text.trim()) {
+        recordFeedback(workspace.projectId, (m, at) => m.recordFeedbackMessage(at.orchestra.folderPath, at.orchestra.name, {
+          product: typeof feedback.product === 'string' && feedback.product.trim() ? feedback.product : at.product, channel: 'text', text: feedback.text
+        }))
+      }
       return { ok, message }
     },
     'app:openUpdate': async () => {
@@ -2055,6 +2183,11 @@ function registerIpc(): void {
       const list = Array.isArray(entries) ? entries.slice(0, 500).filter((e): e is { key: string; answer: string } => !!e && typeof e === 'object' && typeof e.key === 'string' && typeof e.answer === 'string') : []
       return (await import('./orchestraOverview')).writeAnswers(editor.folderPath, list, guideLanguage())
     },
+    'orchestra:feedbackFile': async (which) => {
+      const editor = openOrchestra()
+      if (!editor || editor.source === 'ssh') throw new UserFacingError(t('errors.openProjectFolder'))
+      return (await import('./feedbackLog')).ensureFeedbackFile(editor.folderPath, editor.name, which === 'playbook' ? 'playbook' : 'log')
+    },
     'orchestra:sendAnswers': async () => {
       const editor = openOrchestra()
       if (!editor) return { ok: false, message: t('orchestra.answersNone') }
@@ -2065,6 +2198,11 @@ function registerIpc(): void {
       const target = terminals ? await terminals.resolveSendTarget(null, editor.folderPath) : null
       if (!target) return { ok: false, message: t('terminal.send.noAgent'), noAgent: true }
       const { ok, message } = await terminals!.sendReview(target, composeAnswersMessage(items, guideLanguage(), currentSettings().orchestra?.allowed))
+      if (ok) {
+        recordFeedback(editor.id, async (m, at) => m.recordFeedbackMessage(at.orchestra.folderPath, at.orchestra.name, {
+          product: at.product, channel: 'answers', text: (await import('@shared/feedbackLog')).answersFeedbackText(items)
+        }))
+      }
       return { ok, message: ok ? t('orchestra.answersSent', { count: items.filter((it) => it.answer).length }) : message }
     },
     'settings:orchestraAllowed': async (allowed) => {
@@ -2387,6 +2525,7 @@ function registerIpc(): void {
         const split = await sendSplitByProduct(paths, data.document.items, new Set(sendIds ?? []))
         if (split) {
           if (split.ok) {
+            recordSentReview(paths, data.document.items, sendIds, undefined)
             await (await import('./sessions')).updateLabel(paths, { sentAt: new Date().toISOString() }).catch((err: unknown) => reportHandled(err, { area: 'review', op: 'record sent label' }))
             await markSentInProgress(paths).catch((err: unknown) => reportHandled(err, { area: 'review', op: 'mark sent in progress' }))
             recordStarMoment('first-send')
@@ -2416,6 +2555,8 @@ function registerIpc(): void {
       // 本文を差し替えた送信（確認への返答で1件だけ送り直す）は、その指摘だけを renderer が review:progress で戻す
       if (result.ok && !request.text) await markSentInProgress(paths).catch((err: unknown) => reportHandled(err, { area: 'review', op: 'mark sent in progress' }))
       if (result.ok) recordStarMoment('first-send')
+      // オーケストラのフィードバックの記録（待たない・失敗しても送信の結果は変えない）
+      if (result.ok) recordSentReview(paths, data.document.items, sendIds, request.text ?? undefined)
       return result
     },
 
@@ -2439,6 +2580,21 @@ function registerIpc(): void {
       return { active: crashReportsActive(), enabled: s.crashReports !== false, noticeShown: s.crashReportsNoticeShown === true, packaged: IS_PACKAGED, test: sentryTestKinds() }
     },
     'telemetry:noticeShown': () => updateSettings({ crashReportsNoticeShown: true }),
+    'remote:state': async () => (await mobileRemoteService()).state(),
+    'remote:set': async (patch) => {
+      const before = currentSettings().mobileRemote ?? {}
+      const enabled = typeof patch?.enabled === 'boolean' ? patch.enabled : before.enabled === true
+      // 外から操作できる口を開くので、入れるのは利用者が押した直後だけ（切る・ポートの変更だけなら要らない）
+      if (enabled && before.enabled !== true && !gestures.consume('choice')) throw new UserFacingError(t('errors.needsUserAction'))
+      if (patch && 'port' in patch && patch.port !== undefined && !isValidPort(patch.port)) throw new UserFacingError(t('remote.portInvalid'))
+      const port = patch && 'port' in patch ? patch.port : before.port
+      updateSettings({ mobileRemote: { ...(enabled ? { enabled: true } : {}), ...(port !== undefined ? { port } : {}) } })
+      return (await mobileRemoteService()).apply(currentSettings().mobileRemote)
+    },
+    'remote:resetToken': async () => {
+      if (!gestures.consume('choice')) throw new UserFacingError(t('errors.needsUserAction'))
+      return (await mobileRemoteService()).resetToken()
+    },
     'agentSkill:status': async () => (await import('./agentSkill')).agentSkillStatus(agentSkillContext()),
     'agentSkill:install': async (agents) => {
       // Agent の設定のフォルダへ書くので、利用者が押した直後だけ
@@ -2742,12 +2898,22 @@ function registerIpc(): void {
     },
     'review:progress': async (id, patch) => {
       const r = await import('./review')
-      return r.setReviewProgress(r.checkedPaths(workspace.folderPath, id), patch ?? {})
+      const paths = r.checkedPaths(workspace.folderPath, id)
+      // 変える前の値（Agent の直し）と変えた後の値（人の判断）を、オーケストラのフィードバックの記録に足す
+      const before = patch ? await progressBeforeChange(paths) : null
+      const result = await r.setReviewProgress(paths, patch ?? {})
+      recordProgressFeedback(paths, [before, result])
+      return result
     },
     'review:verdict': async (id, itemId, verdict, text) => {
       const r = await import('./review')
       if (typeof itemId !== 'string' || (verdict !== 'ok' && verdict !== 'ng' && verdict !== 'comment')) throw new UserFacingError(t('review.errors.findingNotFound'))
-      return r.recordReviewVerdict(r.checkedPaths(workspace.folderPath, id), itemId, verdict, typeof text === 'string' ? text : undefined)
+      const paths = r.checkedPaths(workspace.folderPath, id)
+      // 人の判断で Agent のひとことが消える前に、直した記録を残す（オーケストラのフィードバックの記録）
+      const before = await progressBeforeChange(paths)
+      const result = await r.recordReviewVerdict(paths, itemId, verdict, typeof text === 'string' ? text : undefined)
+      recordProgressFeedback(paths, [before, result])
+      return result
     },
     'review:ngPrompt': async (id, itemIds) => {
       const r = await import('./review')
@@ -3368,6 +3534,8 @@ async function main(): Promise<void> {
   mainWindow.on('focus', () => void autoUpdater().checkIfStale(UPDATE_RECHECK_ON_FOCUS_MS)?.catch(() => undefined))
   // settings.json の外部の変更（利用者のエディタ・Claude Code など）をその場で反映する。壊れていれば画面に知らせるだけ
   watchSettings(applyExternalSettings, (error) => send('settingsFile:error', error))
+  // スマホから操作を入れていれば、ターミナルの用意ができたここで開く
+  syncMobileRemote()
   installMenu({
     onOpenFolder: () => void openFolderDialog(),
     // メニューの操作も利用者の操作（録画の開始など。⌘⇧R）
@@ -3499,6 +3667,8 @@ function beginShutdown(): boolean {
     return true
   }
   shuttingDown = true
+  // スマホからの入力を受けないよう、終了を始めたら口を閉じる
+  void mobileRemote?.stop()
   // ネイティブのクラッシュのイベントにも残るパンくず（終了のどの段階で落ちたかを追う。FERRET-1Q）
   if (shutdownPhase === 'running') {
     flow('quit begin', { terminals: terminals?.pendingCount() ?? 0 })
@@ -3627,6 +3797,7 @@ app.on('quit', (_event, exitCode) => {
   // Agent どうしの依頼の受け口（一時フォルダ）を消す
   stopAgentMail()
   publishBackground.stop()
+  void mobileRemote?.stop()
   if (exitCode === 0) autoUpdates?.installOnQuit()
 })
 

@@ -1339,6 +1339,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                     onReviewChecklist={startChecklistTour}
                     onRecordAll={recordAll}
                     onStartRound={() => void run(() => productRound.start())}
+                    onOpenFile={files.open}
                   />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'settings' && settingsOpen ? (

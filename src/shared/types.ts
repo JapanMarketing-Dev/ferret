@@ -421,6 +421,8 @@ export interface Settings {
   browserExtensions?: import('./browserExtensions').BrowserExtensionEntry[]
   /** GitHub のリポジトリを作るときの既定の置き場（src/shared/repoCreate.ts）。省略時は自分のアカウント */
   github?: import('./repoCreate').GithubPreferences
+  /** スマホから操作（同じ Wi‑Fi・Tailscale からターミナルを見て指示を送る HTTP の口）。省略時は閉じる（src/shared/mobileRemote.ts） */
+  mobileRemote?: import('./mobileRemote').MobileRemotePrefs
 }
 
 export interface FeedbackTargetsPrefs {

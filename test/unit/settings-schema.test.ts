@@ -39,6 +39,7 @@ const FULL = {
   crashReportsNoticeShown: true,
   github: { defaultOwner: 'acme-inc' },
   autoUpdate: false,
+  mobileRemote: { enabled: true, port: 50000 },
   browserExtensions: [{ path: '/Users/me/ext/picker' }, { path: '/Users/me/ext/off', enabled: false }],
   onboarding: { completedAt: '2026-10-03T00:00:00.000Z' }
 }

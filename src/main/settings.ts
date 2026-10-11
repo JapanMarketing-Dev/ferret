@@ -37,6 +37,7 @@ import { errorKind, reportHandled, timedSync } from '@shared/report'
 import type { SettingsFileError, SettingsFileInfo } from '@shared/types'
 import { SettingsFileStore, configDirOverride, legacyConfigDir, mergeSettings, migrateLegacyConfigDir, plaintextKeyPaths, relocateMisplacedDevConfig, resolveConfigDir, splitSettings } from './settingsFile'
 import { sanitizeBrowserProfile } from '@shared/browserProfile'
+import { sanitizeMobileRemotePrefs } from '@shared/mobileRemote'
 
 /**
  * 設定の読み書き。
@@ -221,6 +222,11 @@ export function sanitize(raw: unknown): Settings {
     ...(() => {
       const feedbackTargets = sanitizeFeedbackTargets(r.feedbackTargets)
       return feedbackTargets ? { feedbackTargets } : {}
+    })(),
+    // スマホから操作。既定（閉じる・既定のポート）なら書かない。合言葉は settings.json に入れない（src/main/mobileRemote.ts）
+    ...(() => {
+      const mobileRemote = sanitizeMobileRemotePrefs(r.mobileRemote)
+      return mobileRemote ? { mobileRemote } : {}
     })()
   }
 }

@@ -1,4 +1,4 @@
-import { composeAgentRequest, resolveAgentRequests, type AgentRequestPrefs, type RequestLanguage } from '@shared/agentRequests'
+import { composeAgentRequest, resolveAgentRequests, type AgentRequest, type AgentRequestPrefs, type RequestLanguage } from '@shared/agentRequests'
 import type { Project } from '@shared/types'
 
 /**
@@ -10,6 +10,8 @@ export interface AgentRequestSendDeps {
   resolveTarget: (folder: string | null) => Promise<string | null>
   send: (terminalId: string, text: string) => Promise<{ ok: boolean; message: string }>
   noAgentMessage: string
+  /** 送れたあとに、送った依頼を渡す（オーケストラのフィードバックの記録）。ここで投げても送信の結果は変えない */
+  onSent?: (picked: AgentRequest[]) => void
 }
 
 export async function sendAgentRequestsTo(
@@ -25,5 +27,8 @@ export async function sendAgentRequestsTo(
   const target = await deps.resolveTarget(input.folder)
   if (!target) return { ok: false, message: deps.noAgentMessage, noAgent: true }
   const { ok, message } = await deps.send(target, text)
+  if (ok && deps.onSent) {
+    try { deps.onSent(picked) } catch { /* 記録の失敗で送信を失敗にしない（想定内） */ }
+  }
   return { ok, message }
 }

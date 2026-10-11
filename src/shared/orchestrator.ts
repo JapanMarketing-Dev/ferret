@@ -7,6 +7,8 @@
  * Electron に依存しない純粋な処理だけを置く（書き込みは src/main/orchestrator.ts）。
  */
 
+import { FEEDBACK_LOG_PATH, PLAYBOOK_PATH } from './feedbackLog'
+
 export const SUBAGENT_PREFIX = 'ferret-'
 
 /** Ferret が書いた印。この行があるものだけを Ferret のものとして書き直す・消す */
@@ -41,6 +43,8 @@ export interface OrchestratorChild {
   name: string
   /** subagent の名前（ferret-<英数字>） */
   agent: string
+  /** オーケストラのフォルダ（feedback/playbook.md の置き場。subagent に絶対パスで教える） */
+  orchestraFolder?: string
 }
 
 /**
@@ -157,6 +161,18 @@ function rulesBlock(title: string, text: string | undefined): string[] {
   return body ? ['', title, '', body] : []
 }
 
+/**
+ * フィードバックから学ぶ・ベンチマークと細かく比べる・具体的に頼む、の指示（subagent 用。英語）。
+ * where はプレイブックの置き場の前置き（オーケストラのフォルダの絶対パス + / か、それが分からないときの言い方）
+ */
+function feedbackRules(where: string): string[] {
+  return [
+    `- Before you start on this product (especially when it is new), read \`${where}${PLAYBOOK_PATH}\` and apply it, so the human does not have to repeat feedback they already gave on other products. \`${where}${FEEDBACK_LOG_PATH}\` is the raw history with images of the human's frames, the agent's fixes and the human's reactions; learn most from the fixes the human rejected or corrected. Do not edit the log; report new recurring lessons to the orchestrator for the playbook.`,
+    '- Work as a tester inside the frame the human set (goals, value, scope, what "good" is): compare this product with its benchmark products (named in the rules or docs; if unknown, ask the orchestrator to put the question in human.md) in fine detail (screens, flows, copy, speed, edge cases), report concrete gaps with evidence (screenshots, URLs, steps) and fix them. Only frame-level decisions go to the human.',
+    '- When you hand a piece to a worker, state the exact target, the acceptance criteria and the benchmark to match, never a broad "make it better".'
+  ]
+}
+
 export function renderSubagent(child: OrchestratorChild, rules?: OrchestraRules): string {
   const abs = child.path
   const name = oneLine(child.name)
@@ -176,6 +192,7 @@ export function renderSubagent(child: OrchestratorChild, rules?: OrchestraRules)
     '- When the task is a Ferret review finding, the request names the review folder (`.ferret/reviews/<id>/`). Fix only the findings that belong to this project and record each one\'s status in that review\'s `progress.json` as the request describes.',
     '- Use the tools, connections and permissions this session already has (Claude in Chrome and other browser use, computer use, MCP servers, logins). Do not start a new connection or ask the user to approve again; if something is missing, report it to the orchestrator instead.',
     '- Browser work (Claude in Chrome, computer use) runs at the same time as the other products\' subagents: open your own tab or window for this product and never wait for another product to finish with the browser.',
+    ...feedbackRules(child.orchestraFolder ? `${child.orchestraFolder}/` : 'the orchestra folder\'s '),
     '- End with a short report: what you changed (files), how you checked it, and anything left for the orchestrator.',
     ...rulesBlock(ALLOWED_TITLE, rules?.allowed),
     ...rulesBlock('Shared rules for all products (set by the human in Ferret):', rules?.shared),
@@ -256,6 +273,9 @@ export function renderOrchestratorGuide(children: readonly OrchestratorChild[], 
     '8. Security, tests and anything else that must not be missed: run them for every included product in parallel, each with an independent second check, and treat an unchecked product as not done.',
     '9. Every request that reaches you here runs as parallel subagents, one per product, all started together, including browser use (Claude in Chrome, computer use): each subagent works in its own tab or window at the same time. Never run products one after another; a person who wants a serial run asks inside that product instead.',
     '10. Without subagents (for example Codex), do the same steps yourself, working in each product\'s folder in turn.',
+    `11. Learn from the human's feedback (Ferret keeps it in this folder). Before work on any product starts, especially a new one, read \`${PLAYBOOK_PATH}\` and tell every subagent to apply it, so the human never has to repeat the same feedback. \`${FEEDBACK_LOG_PATH}\` is the raw history Ferret writes: every piece of feedback the human sent, and for each review finding one set of the image with the human's frames (\`feedback/images/\`), what the human said, what the agent did to fix it (note and after screenshot) and how the human reacted (OK, NG with their words, reopened after OK). After a request that came with human feedback is done, distill the new recurring lessons from the log into the playbook, grouped by theme: what the human pointed out, how they phrased it, what the agent got wrong when the human rejected or corrected a fix and what the human wanted instead (learn most from these pairs; look at the images), the rule to apply next time, and which products it came from. Keep the playbook short and deduplicated; never edit the log.`,
+    '12. Roles: the human sets the critical frame (goals, value, scope, what "good" is). Agents work inside that frame as testers: compare each product against its benchmark products (named in the product rules or docs; if unknown, ask once in human.md) in fine detail (screens, flows, copy, speed, edge cases) and report concrete gaps with evidence (screenshots, URLs, steps), never vague summaries. Fix the gaps inside the frame yourselves; ask the human only about frame-level decisions.',
+    '13. Requests must be specific. When you hand work to a subagent (or a lead to a worker), state the exact target (screen, file, flow), the acceptance criteria and the benchmark to match, not a broad "make it better".',
     ...rulesBlock(`### ${ALLOWED_TITLE}`, rules?.allowed),
     ...rulesBlock('### Shared rules (set by the human in Ferret)', rules?.shared),
     ...children.flatMap((c) => rulesBlock(`### Rules only for ${oneLine(c.name)} (set by the human in Ferret)`, c.projectId ? rules?.products?.[c.projectId] : undefined)),

@@ -15,6 +15,8 @@ export const SETTINGS_SECTIONS = [
   'verify',
   // 全体（すべてのプロダクト）の共通のルールとプロダクトごとのルール
   'orchestra',
+  // スマホのブラウザから、ターミナルを見て Agent に指示を送る（既定は切）
+  'remote',
   'recording',
   'transcription',
   'organize',
@@ -42,6 +44,8 @@ const SECTION_KEYWORDS: Record<SettingsSectionId, readonly string[]> = {
   appearance: ['theme', 'color', 'dark', 'light', 'system', 'テーマ', '配色', 'ダーク', 'ライト', '外観'],
   language: ['language', 'locale', 'english', 'japanese', 'interface', '言語', '英語', '日本語', '表示言語'],
   layout: ['layout', 'panel', 'dock', 'footer', 'terminal', 'sidebar', 'files', 'position', '配置', 'パネル', 'フッター', 'ターミナル', 'サイドバー', 'レイアウト'],
+  remote: ['phone', 'mobile', 'remote', 'smartphone', 'iphone', 'android', 'tailscale', 'wi-fi', 'wifi', 'qr', 'lan', 'port', 'link',
+    'スマホ', '携帯', 'リモート', '外出', 'ポート', 'リンク', '遠隔'],
   recording: ['microphone', 'mic', 'audio', 'voice', 'system audio', 'device', 'マイク', '音声', '声', '録音', '録画', 'デバイス'],
   transcription: ['transcription', 'speech', 'whisper', 'model', 'openai', 'api key', 'key', 'base url', 'cost', 'limit', 'compatible', 'local',
     'live transcript', 'show', 'hide', 'warning',

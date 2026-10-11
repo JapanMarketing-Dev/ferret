@@ -12,6 +12,7 @@ import { starFromMenu } from './StarPrompt'
 import { useLocale, useT } from '../lib/i18n'
 import { AccountsSection } from './AccountsSection'
 import { OrchestraSection } from './OrchestraSection'
+import { RemoteSection } from './RemoteSection'
 import { AgentIcon } from './AgentIcon'
 import { AgentResourcesSection } from './AgentResourcesSection'
 import { CliToolsSection } from './CliToolsSection'
@@ -458,6 +459,10 @@ export function SettingsPage({
     orchestra: <PageSection key="orchestra" id="orchestra" title={titleOf('orchestra')}>
       {/* 全体の共通のルールとプロダクトごとのルール。読み込み・保存は自分で行う（src/renderer/components/OrchestraSection.tsx） */}
       <OrchestraSection />
+    </PageSection>,
+    remote: <PageSection key="remote" id="remote" title={titleOf('remote')}>
+      {/* スマホから操作。入れる・ポート・リンクと QR・作り直しは main が持つ（src/renderer/components/RemoteSection.tsx） */}
+      <RemoteSection />
     </PageSection>,
     accounts: <PageSection key="accounts" id="accounts" title={titleOf('accounts')} bare>
       {/* 外側の section・見出し・保存（IPC で即時）はアカウント欄が自分で持つ */}

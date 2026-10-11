@@ -1231,6 +1231,10 @@ export const en = {
   'orchestra.requestSend': "Send request",
   'orchestra.codexAudit': "Codex security audit",
   'orchestra.codexAuditHint': "Opens Codex with Daybreak Blue at Extra high and has it audit every product's app, infrastructure, database and more, reporting findings without fixing them",
+  'orchestra.feedbackLog': 'Feedback log',
+  'orchestra.feedbackLogHint': 'Every piece of feedback you sent in this orchestra: the framed image, what you said, how the agent fixed it and how you reacted (feedback/log.md)',
+  'orchestra.playbook': 'Playbook',
+  'orchestra.playbookHint': 'Lessons the agents distilled from your feedback; they read it before each product so you do not repeat yourself (feedback/playbook.md)',
   'orchestra.statCostMonth': "Infrastructure this month",
   'orchestra.costTitle': "Infrastructure cost",
   'orchestra.costMonth': "This month",
@@ -2782,7 +2786,24 @@ export const en = {
   'share.errors.passwordShort': "Use a password of at least {{min}} characters.",
   'share.errors.passwordLong': "Use a password of at most {{max}} characters.",
   'share.errors.tooLong': "The title or memo is too long.",
-  'share.errors.urls': "Enter at least one http(s) URL, one per line."
+  'share.errors.urls': "Enter at least one http(s) URL, one per line.",
+  'settings.section.remote': "Phone remote",
+  'remote.intro': "Watch the terminals and send instructions to your agents from a phone browser. The phone must be on the same Wi-Fi as this computer, or connected over Tailscale.",
+  'remote.enable': "Allow phone remote",
+  'remote.port': "Port",
+  'remote.portInvalid': "Use a port number from 1024 to 65535.",
+  'remote.running': "Listening on port {{port}}. Scan the QR code with your phone, or open one of the links.",
+  'remote.noAddress': "Listening, but this computer has no network address a phone can reach. Connect to Wi-Fi or Tailscale.",
+  'remote.error.portInUse': "Port {{port}} is already used by another app. Choose another port.",
+  'remote.error.permission': "The system did not allow Ferret to listen on port {{port}}. Choose another port, or allow Ferret in the firewall settings.",
+  'remote.error.failed': "Could not start the phone remote. Try again, or choose another port.",
+  'remote.qrLabel': "QR code of the phone link",
+  'remote.copy': "Copy link",
+  'remote.reset': "Reset link",
+  'remote.resetConfirm': "Make a new link? Phones that use the current link stop working until you scan the new QR code.",
+  'remote.resetDone': "Made a new link. Old links no longer work.",
+  'remote.warning': "Anyone who has this link can type into your terminals. Share it with no one, and use it only on networks you trust: the connection is plain HTTP, so on public Wi-Fi others nearby could read it. Over Tailscale it is encrypted.",
+  'remote.firewall': "On first use, macOS or Windows may ask whether Ferret can accept incoming connections. Allow it on private networks."
 } as const
 
 export type MessageKey = keyof typeof en

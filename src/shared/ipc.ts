@@ -123,8 +123,11 @@ export interface IpcRequests {
   'update:chooseVersion': (version: string) => AutoUpdateStatus
   /** 設定の案内のリンク（キーを作るページなど）を外部のブラウザで開く。https だけ（src/shared/setupGuide.ts） */
   'app:openExternal': (url: string) => void
-  /** 文を Agent のターミナルへ送る（Agent に設定を頼む指示文）。宛先は「Agent へ送信」と同じ選び方 */
-  'agent:sendText': (text: string) => { ok: boolean; message: string; noAgent?: boolean }
+  /**
+   * 文を Agent のターミナルへ送る（Agent に設定を頼む指示文）。宛先は「Agent へ送信」と同じ選び方。
+   * feedback は人が打ったフィードバックそのもの（あればオーケストラの feedback/ に記録する。@shared/feedbackLog）
+   */
+  'agent:sendText': (text: string, feedback?: { text: string; product?: string }) => { ok: boolean; message: string; noAgent?: boolean }
   /** Resource Manager。アプリ・内蔵ブラウザ・ターミナルの CPU と RSS */
   'resources:snapshot': () => ResourceSnapshot
   /** ターミナルを止める／内蔵ブラウザのページを閉じる（about:blank にする） */
@@ -200,6 +203,8 @@ export interface IpcRequests {
   'orchestra:answer': (entries: Array<{ key: string; answer: string }>) => import('./humanChecklist').ChecklistItem[]
   /** human.md の答えと「人の確認なしで進めてよい操作」をまとめて、全体の Agent に1回で送る */
   'orchestra:sendAnswers': () => { ok: boolean; message: string; noAgent?: boolean }
+  /** 開いているオーケストラのフィードバックの記録（log）・プレイブック（playbook）を用意して、オーケストラのフォルダからの相対パスを返す */
+  'orchestra:feedbackFile': (which: 'log' | 'playbook') => string
   /** 全体（すべてのプロダクト）の共通のルールとプロダクトごとのルール */
   'settings:orchestra': (rules: import('./orchestrator').OrchestraRules) => void
   /** 全体として人の確認なしで進めてよい操作だけを書き換える（ダッシュボード） */
@@ -407,6 +412,12 @@ export interface IpcRequests {
   'telemetry:state': () => { active: boolean; enabled: boolean; noticeShown: boolean; packaged: boolean; test: SentryTestKind[] }
   /** 初回の案内を閉じた */
   'telemetry:noticeShown': () => void
+  /** スマホから操作の今の状態（待ち受け・URL・QR・失敗の理由。src/main/mobileRemote.ts） */
+  'remote:state': () => import('./mobileRemote').MobileRemoteState
+  /** 入れる・切る・ポートを変える。入れるのは利用者が押した直後だけ。保存して開け閉めしたあとの状態を返す */
+  'remote:set': (patch: { enabled?: boolean; port?: number }) => import('./mobileRemote').MobileRemoteState
+  /** 合言葉を作り直す（古いリンクのスマホは使えなくなる）。利用者が押した直後だけ */
+  'remote:resetToken': () => import('./mobileRemote').MobileRemoteState
   /** 初回起動のセットアップの進み具合を保存する（null で項目を消す）。保存後の値を返す */
   'settings:onboarding': (patch: OnboardingPatch) => OnboardingState | null
   /** Ferret の設定を変える skill（Claude Code・Codex）を入れてあるか */
@@ -684,6 +695,8 @@ export interface IpcEvents {
   'settingsFile:error': (error: SettingsFileError | null) => void
   /** 裏での更新の状態が変わった（確認・ダウンロードの進み具合・準備ができた・失敗） */
   'update:status': (status: AutoUpdateStatus) => void
+  /** スマホから操作の状態が変わった（開いた・閉じた・開けなかった・合言葉を作り直した。settings.json の変更も） */
+  'remote:changed': (state: import('./mobileRemote').MobileRemoteState) => void
   /** 終了の確認で「保存して終了」: 未保存のファイルの中身を editor:quitSave で返して */
   'editor:saveForQuit': (requestId: string) => void
   /** 終了の確認で「プロジェクトを開く」: main がプロジェクトとエディタへ切り替えたので、このファイルのタブを開いて（error なら知らせるだけ） */
@@ -767,6 +780,7 @@ export const IPC_REQUEST_CHANNELS = [
   'orchestra:checklist',
   'orchestra:answer',
   'orchestra:sendAnswers',
+  'orchestra:feedbackFile',
   'settings:orchestra',
   'settings:orchestraAllowed',
   'accounts:list',
@@ -806,6 +820,7 @@ export const IPC_REQUEST_CHANNELS = [
   'settings:theme',
   'settings:locale',
   'settings:crashReports', 'telemetry:state', 'telemetry:noticeShown',
+  'remote:state', 'remote:set', 'remote:resetToken',
   'settings:onboarding', 'agentSkill:status', 'agentSkill:install', 'permissions:status', 'permissions:request',
   'recording:start',
   'recording:pause',
@@ -858,5 +873,6 @@ export const IPC_EVENT_CHANNELS = [
   'feedback:ask',
   'settings:changed', 'settingsFile:error',
   'update:status',
+  'remote:changed',
   'editor:saveForQuit', 'editor:revealUnsaved'
 ] as const satisfies readonly IpcEventChannel[]

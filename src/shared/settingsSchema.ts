@@ -11,6 +11,7 @@ import { STT_LANGUAGE_CODES } from './sttLanguages'
 import { DEFAULT_PROJECT_KIND, DEFAULT_TARGET_PURPOSE, PROJECT_KINDS, TARGET_PURPOSES } from './projectTargets'
 import { PROJECT_SOURCES } from './projectSource'
 import { DEFAULT_SPLIT_RATIO, MAX_SPLIT_RATIO, MIN_SPLIT_RATIO } from './types'
+import { MOBILE_REMOTE_DEFAULT_PORT, MOBILE_REMOTE_MAX_PORT, MOBILE_REMOTE_MIN_PORT } from './mobileRemote'
 
 /**
  * settings.json の JSON Schema（draft 2020-12）。
@@ -432,6 +433,15 @@ export const SETTINGS_SCHEMA: JsonSchema = {
     crashReports: bool('Send crash reports to Sentry. Reports never include API keys, file contents or recordings.', { default: true }),
     crashReportsNoticeShown: bool('The first-run crash report notice has been shown.'),
     autoUpdate: bool('Download new versions in the background, check each one against the signed SHA256SUMS, and install it the next time Ferret closes (Restart to update installs it right away). When off, nothing is downloaded or installed until you choose to.', { default: true }),
+    mobileRemote: {
+      type: 'object',
+      description: 'Phone remote: watch and steer the terminals from a phone browser on the same Wi-Fi or over Tailscale. When enabled, Ferret listens on all network interfaces and shows a link and QR code in Settings > Phone remote; the link carries a secret that Ferret keeps outside this file. Anyone with that link can type into your terminals, so turn it on only on networks you trust (traffic is plain HTTP; over Tailscale it is encrypted).',
+      additionalProperties: false,
+      properties: {
+        enabled: bool('Listen for the phone. Omit or false to keep it off.', { default: false }),
+        port: { type: 'integer', description: 'TCP port to listen on. If it is in use, Settings shows an error; pick another port.', minimum: MOBILE_REMOTE_MIN_PORT, maximum: MOBILE_REMOTE_MAX_PORT, default: MOBILE_REMOTE_DEFAULT_PORT }
+      }
+    },
     onboarding: {
       type: 'object',
       description: 'First-run setup progress. Remove this object to show the setup again.',

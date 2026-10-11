@@ -34,12 +34,16 @@ describe('設定の検索', () => {
 describe('左の一覧の並び', () => {
   it('一番上にセットアップのチェックリスト、その下に一般 → Agent → 判定モデル', () => {
     expect(SETTINGS_SECTIONS.slice(0, 4)).toEqual(['setup', 'general', 'agents', 'verify'])
-    expect(SETTINGS_SECTIONS).toEqual(['setup', 'general', 'agents', 'verify', 'orchestra', 'recording', 'transcription', 'organize', 'accounts',
+    expect(SETTINGS_SECTIONS).toEqual(['setup', 'general', 'agents', 'verify', 'orchestra', 'remote', 'recording', 'transcription', 'organize', 'accounts',
       'appearance', 'language', 'layout', 'extensions', 'browserProfiles', 'browserImport', 'cli', 'about'])
   })
 
   it('CLI の節は wrangler・ollama・インストールで引ける', () => {
     for (const word of ['wrangler', 'ollama', 'インストール', 'aws']) expect(filterSettingsSections(word, (id) => id)).toContain('cli')
+  })
+
+  it('スマホから操作の節は スマホ・tailscale・QR で引ける', () => {
+    for (const word of ['スマホ', 'tailscale', 'QR', 'phone']) expect(filterSettingsSections(word, (id) => id)).toContain('remote')
   })
 
   it('チェックリストは「setup」「チェックリスト」で引ける', () => {

@@ -155,7 +155,7 @@ export function renderAgentSkill(context: SkillContext): string {
 
   return `---
 name: ${AGENT_SKILL_NAME}
-description: Change settings of Ferret, the voice-and-annotation review app the user runs next to you (theme, language, layout, panels and footer, terminal, browser extensions, updates, crash reports, agents and usage-limit failover, recording, transcription, organizing, decision model, projects and their review targets such as URLs, launch commands and desktop/mobile/game windows) and drive its orchestra (the All products dashboard: the human.md list of what people must check, infrastructure costs (actual and estimated) in .ferret/costs.json, ready-made requests, products in or out of the orchestra, shared and per-product rules). Use when the user asks to configure, change, turn on/off, add or remove anything "in Ferret", to register a URL, app window, simulator or launch command for a project, or to update the orchestra dashboard, human.md or costs.
+description: Change settings of Ferret, the voice-and-annotation review app the user runs next to you (theme, language, layout, panels and footer, terminal, browser extensions, updates, crash reports, phone remote, agents and usage-limit failover, recording, transcription, organizing, decision model, projects and their review targets such as URLs, launch commands and desktop/mobile/game windows) and drive its orchestra (the All products dashboard: the human.md list of what people must check, infrastructure costs (actual and estimated) in .ferret/costs.json, ready-made requests, products in or out of the orchestra, shared and per-product rules). Use when the user asks to configure, change, turn on/off, add or remove anything "in Ferret", to register a URL, app window, simulator or launch command for a project, or to update the orchestra dashboard, human.md or costs.
 ---
 
 ${SKILL_MARKER}
@@ -208,6 +208,10 @@ When a project builds a Chrome extension, load it into Ferret's built-in browser
 - **Update to the latest build**: rebuild, then set that entry's \`reload\` to the current Unix time in seconds (any new number works). Ferret loads the extension again from the folder and reloads the open page. Ferret does not watch the folder by itself, so change \`reload\` after every rebuild you want to see.
 - **Turn off / remove**: set \`"enabled": false\` to keep it listed but unloaded, or delete the entry to remove it.
 - While Ferret is recording it reloads the extension but leaves the open page alone, so the recording is not interrupted. The result (name, version or a load error) shows in Ferret's Settings > Browser extensions.
+
+## Phone remote
+
+\`mobileRemote.enabled: true\` lets the user watch the terminals and send instructions to agents from a phone browser on the same Wi-Fi or over Tailscale (\`mobileRemote.port\`, default 47615, changes the port). Turn it on only when the user asks: it opens a port on every network interface. The link and its QR code are shown in Ferret's Settings > Phone remote; tell the user to scan it there. The link's secret is kept outside settings.json; never read, print or send it. To stop it, set \`enabled\` to false or remove \`mobileRemote\`.
 
 ## Orchestras (dashboards over several products)
 

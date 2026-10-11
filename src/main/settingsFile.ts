@@ -137,7 +137,7 @@ interface PersistedState {
 
 /** 上の階層の並び。人が読みやすい順に書く（無いものは飛ばす。残りは後ろへ） */
 const KEY_ORDER = ['$schema', 'theme', 'locale', 'projects', 'agents', 'agentPrompt', 'agentAccounts', 'capture', 'whisperModel', 'organizer',
-  'layout', 'splitRatio', 'feedbackTargets', 'browserExtensions', 'crashReports', 'crashReportsNoticeShown', 'autoUpdate', 'onboarding']
+  'layout', 'splitRatio', 'feedbackTargets', 'browserExtensions', 'crashReports', 'crashReportsNoticeShown', 'autoUpdate', 'mobileRemote', 'onboarding']
 
 /** 実行中の設定を、settings.json に書く設定と state.json に書く状態へ分ける */
 export function splitSettings(settings: Settings): { config: Record<string, unknown>; state: PersistedState } {
