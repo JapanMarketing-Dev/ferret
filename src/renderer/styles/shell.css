@@ -3379,9 +3379,57 @@ button.sb-more__row:hover {
   background: var(--color-bg-sidebar);
 }
 
-.rv-hub__actions {
-  display: grid;
-  padding: 0 var(--space-1);
+.rv-hub--closed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 右の上の帯：履歴の開け閉め・新しいレビュー・MTG の取り込み */
+.rv-hub__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  gap: var(--space-2);
+}
+
+.rv-hub__bar .sb-new-review {
+  width: auto;
+  margin: 0;
+}
+
+.rv-hub__toggle {
+  display: inline-flex;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+}
+
+.rv-hub__toggle:hover,
+.rv-hub__toggle[aria-expanded='true'] {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.rv-hub__content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.rv-hub__content > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .rv-hub__list {
@@ -3395,12 +3443,6 @@ button.sb-more__row:hover {
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  overflow: auto;
-}
-
-.rv-hub__main > * {
-  flex: 1;
-  min-height: 0;
 }
 
 @media (max-width: 760px) {
