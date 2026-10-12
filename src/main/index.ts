@@ -10,6 +10,7 @@ import { agentMailEnv, agentMailTerminalCreated, initAgentMail, revokeAgentMailS
 import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
+import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
 import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -19,7 +20,7 @@ import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
 import { captureTargetLabel, resolveCaptureTarget, sanitizeCaptureTarget, targetSourceIds } from '@shared/captureTarget'
 import { mirrorSourceParam } from '@shared/captureComposite'
 import { AGENT_SKILL_AGENTS, type AgentSkillAgent, type SkillContext } from '@shared/agentSkill'
-import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
+import { BrowserWindow, Menu, Notification, app, clipboard, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import type { IpcEventChannel, IpcEvents, IpcRequests } from '@shared/ipc'
 import type { AiVendor, LlmApiProvider, SttRemoteProvider } from '@shared/aiProviders'
@@ -2267,6 +2268,25 @@ function registerIpc(): void {
     },
     'browser:newTab': (url) => browser?.newTab(typeof url === 'string' ? url.slice(0, 8000) : '').then(() => undefined),
     'browser:closeTab': (id) => { if (typeof id === 'string') browser?.closeTab(id) },
+    'browser:tabMenu': (id, at) => {
+      const window = mainWindow
+      if (typeof id !== 'string' || !browser || !window || window.isDestroyed()) return
+      const ids = browser.tabIds()
+      if (!ids.includes(id)) return
+      const x = Number(at?.x)
+      const y = Number(at?.y)
+      const items: Electron.MenuItemConstructorOptions[] = BROWSER_TAB_CLOSE_ACTIONS.map((action) => {
+        const closing = browserTabsToClose(action, id, ids)
+        return {
+          label: t(`browser.tabs.menu.${action}`),
+          enabled: closing.length > 0,
+          click: () => browser?.closeTabs(closing, action === 'closeOthers' || action === 'closeRight' ? id : null)
+        }
+      })
+      // 先頭の「閉じる」と、まとめて閉じる項目の間に線を引く
+      items.splice(1, 0, { type: 'separator' })
+      Menu.buildFromTemplate(items).popup({ window, x: Math.round(Number.isFinite(x) ? x : 0), y: Math.round(Number.isFinite(y) ? y : 0) })
+    },
     'browser:activateTab': (id) => { if (typeof id === 'string') browser?.activateTab(id) },
     'browser:back': () => browser?.back(),
     'browser:forward': () => browser?.forward(),

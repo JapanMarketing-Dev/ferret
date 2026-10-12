@@ -3,7 +3,7 @@
  * 開く・閉じる・切り替える・キー・帯に出す名前を、Electron 抜きで確かめる
  */
 import { describe, expect, it } from 'vitest'
-import { MAX_BROWSER_TABS, browserTabKeyAction, canOpenTab, cycleTab, nextTabId, tabAfterClose, tabAtNumber, tabLabel, type TabKeyInput } from '../../src/shared/browserTabs'
+import { BROWSER_TAB_CLOSE_ACTIONS, MAX_BROWSER_TABS, browserTabKeyAction, browserTabsToClose, isBrowserTabCloseAction, canOpenTab, cycleTab, nextTabId, tabAfterClose, tabAtNumber, tabLabel, type TabKeyInput } from '../../src/shared/browserTabs'
 
 const key = (k: string, mods: Partial<TabKeyInput> = {}): TabKeyInput => ({ key: k, control: false, meta: false, alt: false, shift: false, ...mods })
 
@@ -104,5 +104,38 @@ describe('タブの帯に出す名前', () => {
     expect(tabLabel({ title: 'about:blank', url: 'about:blank' })).toBe('')
     expect(tabLabel({ title: '', url: '' })).toBe('')
     expect(tabLabel({ title: '', url: 'ade-preview://p/a.md' })).toBe('ade-preview://p/a.md')
+  })
+})
+
+describe('右クリックの閉じ方', () => {
+  const ids = ['t1', 't2', 't3', 't4']
+  it('閉じる・ほか・右側・すべて', () => {
+    expect(browserTabsToClose('close', 't2', ids)).toEqual(['t2'])
+    expect(browserTabsToClose('closeOthers', 't2', ids)).toEqual(['t1', 't3', 't4'])
+    expect(browserTabsToClose('closeRight', 't2', ids)).toEqual(['t3', 't4'])
+    expect(browserTabsToClose('closeAll', 't2', ids)).toEqual(ids)
+  })
+  it('端のタブ・1枚だけ', () => {
+    expect(browserTabsToClose('closeRight', 't4', ids)).toEqual([])
+    expect(browserTabsToClose('closeRight', 't1', ids)).toEqual(['t2', 't3', 't4'])
+    expect(browserTabsToClose('closeOthers', 't1', ['t1'])).toEqual([])
+    expect(browserTabsToClose('closeAll', 't1', ['t1'])).toEqual(['t1'])
+  })
+  it('知らないタブ・空の並びでは何も閉じない', () => {
+    for (const action of BROWSER_TAB_CLOSE_ACTIONS) {
+      expect(browserTabsToClose(action, 'x', ids)).toEqual([])
+      expect(browserTabsToClose(action, 't1', [])).toEqual([])
+    }
+  })
+  it('並びを書き換えない', () => {
+    const list = ['a', 'b']
+    browserTabsToClose('closeAll', 'a', list).push('z')
+    expect(list).toEqual(['a', 'b'])
+  })
+  it('項目の名前の検査', () => {
+    expect(BROWSER_TAB_CLOSE_ACTIONS).toEqual(['close', 'closeOthers', 'closeRight', 'closeAll'])
+    expect(isBrowserTabCloseAction('closeRight')).toBe(true)
+    expect(isBrowserTabCloseAction('closeSaved')).toBe(false)
+    expect(isBrowserTabCloseAction(1)).toBe(false)
   })
 })

@@ -645,6 +645,21 @@ export class EmbeddedBrowser {
     }
   }
 
+  /** タブの並び（右クリックのメニューで閉じるタブを決める） */
+  tabIds(): string[] {
+    return this.tabs.map((tab) => tab.id)
+  }
+
+  /**
+   * まとめて閉じる（右クリックの「ほかを閉じる・右側を閉じる・すべて閉じる」）。残るタブ（keep）があり、前に出ているタブを閉じるなら、
+   * 先に keep を前に出す（閉じる途中で、どうせ閉じる隣のタブへ次々に切り替わらないように）。全部閉じれば空のタブが1枚残る
+   */
+  closeTabs(ids: readonly string[], keep: string | null): void {
+    const closing = new Set(ids)
+    if (keep && !closing.has(keep) && closing.has(this.activeId)) this.activateTab(keep)
+    for (const id of ids) this.closeTab(id)
+  }
+
   /**
    * タブを閉じる。最後の1枚なら、空のタブに置き換える（内蔵ブラウザは空にしない）。
    * 録画がそのタブを録っている間は、中身を捨てずに残す（録画が終わったら releaseClosedTabs で閉じる）

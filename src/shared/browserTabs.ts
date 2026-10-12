@@ -42,6 +42,26 @@ export function tabAfterClose(ids: readonly string[], closing: string, active: s
   return rest[Math.min(at, rest.length - 1)]!
 }
 
+/** タブの右クリックのメニューの項目（中央のタブ列と同じ並び。保存済みはブラウザに無い） */
+export type BrowserTabCloseAction = 'close' | 'closeOthers' | 'closeRight' | 'closeAll'
+export const BROWSER_TAB_CLOSE_ACTIONS: readonly BrowserTabCloseAction[] = ['close', 'closeOthers', 'closeRight', 'closeAll']
+
+export function isBrowserTabCloseAction(value: unknown): value is BrowserTabCloseAction {
+  return typeof value === 'string' && (BROWSER_TAB_CLOSE_ACTIONS as readonly string[]).includes(value)
+}
+
+/** 右クリックしたタブ（target）に対して閉じるタブ。ids はタブの並び。知らないタブなら何も閉じない */
+export function browserTabsToClose(action: BrowserTabCloseAction, target: string, ids: readonly string[]): string[] {
+  const at = ids.indexOf(target)
+  if (at < 0) return []
+  switch (action) {
+    case 'close': return [target]
+    case 'closeOthers': return ids.filter((id) => id !== target)
+    case 'closeRight': return ids.slice(at + 1)
+    case 'closeAll': return [...ids]
+  }
+}
+
 /** ⌘1〜⌘8 はその番号、⌘9 は最後のタブ（Chrome と同じ）。無ければ null */
 export function tabAtNumber(ids: readonly string[], n: number): string | null {
   if (!Number.isInteger(n) || n < 1 || n > 9 || ids.length === 0) return null

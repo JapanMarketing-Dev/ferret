@@ -1,6 +1,6 @@
 {
   "name": "ade-movie",
-  "version": "0.6.25",
+  "version": "0.6.26",
   "private": true,
   "license": "MIT",
   "description": "画面を操作しながら喋って囲むだけでUIフィードバックをAgentへ渡すデスクトップADE",

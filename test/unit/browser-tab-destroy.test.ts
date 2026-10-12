@@ -143,6 +143,50 @@ describe('プロジェクトを切り替えたときの古いタブの片付け'
   })
 })
 
+describe('まとめて閉じる（右クリックのメニュー）', () => {
+  const ids = (browser: InstanceType<typeof EmbeddedBrowser>) => browser.tabIds()
+  const active = (browser: InstanceType<typeof EmbeddedBrowser>) => (browser as unknown as { activeId: string }).activeId
+
+  it('ほかを閉じると、残すタブが前に出て、ほかは閉じる', async () => {
+    const browser = attach()
+    const [first, second] = ids(browser)
+    browser.closeTabs([first!], second!)
+    expect(ids(browser)).toEqual([second])
+    expect(active(browser)).toBe(second)
+    await nextTick()
+  })
+
+  it('右側を閉じても、前に出ているタブが残るならそのまま', async () => {
+    const browser = attach()
+    const [first, second] = ids(browser)
+    expect(active(browser)).toBe(first)
+    browser.closeTabs([second!], first!)
+    expect(ids(browser)).toEqual([first])
+    expect(active(browser)).toBe(first)
+    await nextTick()
+  })
+
+  it('すべて閉じると空のタブが1枚残る', async () => {
+    const browser = attach()
+    const before = ids(browser)
+    browser.closeTabs(before, null)
+    const after = ids(browser)
+    expect(after).toHaveLength(1)
+    expect(before).not.toContain(after[0])
+    expect(active(browser)).toBe(after[0])
+    await nextTick()
+  })
+
+  it('知らない id・空の一覧では何も変わらない', async () => {
+    const browser = attach()
+    const before = ids(browser)
+    browser.closeTabs(['nope'], before[0]!)
+    browser.closeTabs([], null)
+    expect(ids(browser)).toEqual(before)
+    await nextTick()
+  })
+})
+
 describe('ほかのビューの片付けも同じ順序（FERRET-1Q）', () => {
   it('dispose は隠して外し、close は次のティック', async () => {
     const browser = attach()

@@ -9,6 +9,7 @@ import { useT } from '../lib/i18n'
 
 /**
  * 内蔵ブラウザのタブの帯（@shared/browserTabs）。押すと前に出るタブが変わり、× で閉じる、＋ で空のタブを開いて URL 欄へ焦点を移す。
+ * 右クリックで OS のメニュー（閉じる・ほかを閉じる・右側を閉じる・すべて閉じる。main の browser:tabMenu）。
  * エディタのブラウザのツールバーの上と、フィードバックモードの URL 欄の横に置く。
  *
  * ⌘1〜9 / Ctrl+Tab は、焦点がこの帯・URL 欄（data-browser-chrome の中）にあるときだけここで受ける。
@@ -58,7 +59,9 @@ export function BrowserTabs({
         const label = tabLabel(tab) || t('browser.tabs.new')
         const selected = tab.id === active
         return (
-          <div key={tab.id} className={`browser-tab${selected ? ' is-active' : ''}`} data-testid={`${testId}-tab-${index + 1}`} data-tab-id={tab.id} title={tab.url && tab.url !== 'about:blank' ? `${label}\n${tab.url}` : label}>
+          <div key={tab.id} className={`browser-tab${selected ? ' is-active' : ''}`} data-testid={`${testId}-tab-${index + 1}`} data-tab-id={tab.id}
+            onContextMenu={(event) => { event.preventDefault(); void window.ade.invoke('browser:tabMenu', tab.id, { x: event.clientX, y: event.clientY }) }}
+            title={tab.url && tab.url !== 'about:blank' ? `${label}\n${tab.url}` : label}>
             <button
               type="button"
               role="tab"

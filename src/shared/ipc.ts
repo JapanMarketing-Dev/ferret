@@ -241,6 +241,8 @@ export interface IpcRequests {
   /** 新しいタブを開いて前に出す。url を省けば空のタブ（上限・開けない URL なら断る） */
   'browser:newTab': (url?: string) => void
   'browser:closeTab': (id: string) => void
+  /** タブの右クリックのメニュー（OS のメニュー。ページの上にも出る）を出し、選んだ閉じ方で閉じる。at は窓の中の位置 */
+  'browser:tabMenu': (id: string, at: { x: number; y: number }) => void
   'browser:activateTab': (id: string) => void
   'browser:back': () => void
   'browser:forward': () => void
@@ -798,6 +800,7 @@ export const IPC_REQUEST_CHANNELS = [
   'browser:navigate',
   'browser:newTab',
   'browser:closeTab',
+  'browser:tabMenu',
   'browser:activateTab',
   'browser:back',
   'browser:forward',
