@@ -141,12 +141,20 @@ export function tightestUsageSection(p: ProviderRateLimits): UsageSection | null
   )
 }
 
-/** いちばん早く戻る枠までの「Resets in …」 */
-export function soonestResetLabel(p: ProviderRateLimits, now: number = Date.now()): string | null {
-  const resets = usageSections(p)
-    .map((s) => s.window.resetsAt)
-    .filter((r): r is number => typeof r === 'number' && Number.isFinite(r))
-  return resets.length > 0 ? formatResetCountdown(Math.min(...resets) - now) : null
+/**
+ * 5時間（日）の枠と週の枠の、それぞれが戻るまでの時間を並べる（例 "Resets 5h in 3h 59m · wk in 4d 23h"）。
+ * どちらも戻る時刻が分からなければ、ほかの枠（Fable・利用額）のうちいちばん早く戻るもの
+ */
+export function resetLabel(p: ProviderRateLimits, now: number = Date.now()): string | null {
+  const sections = usageSections(p).filter((s) => typeof s.window.resetsAt === 'number' && Number.isFinite(s.window.resetsAt))
+  const main = sections.filter((s) => s.key === 'session' || s.key === 'weekly')
+  if (main.length > 0) {
+    return `Resets ${main.map((s) => {
+      const duration = formatResetDuration(s.window.resetsAt! - now)
+      return duration === 'now' ? `${s.label} now` : `${s.label} in ${duration}`
+    }).join(' · ')}`
+  }
+  return sections.length > 0 ? formatResetCountdown(Math.min(...sections.map((s) => s.window.resetsAt!)) - now) : null
 }
 
 /** 取得できなかったときの短い状態（Orca の getProviderUsageStatusLabel の簡略版） */

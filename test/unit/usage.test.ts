@@ -8,7 +8,7 @@ import {
   formatResetCountdown,
   formatResetDuration,
   formatWindowChipLabel,
-  soonestResetLabel,
+  resetLabel,
   tightestUsageSection,
   usageSections,
   usageStatusLabel,
@@ -59,7 +59,23 @@ describe('表示用の書式（Orca と同じ）', () => {
     const p = ok({ fableWeekly: { usedPercent: 3, windowMinutes: 10080, resetsAt: null } })
     expect(usageSections(p).map((s) => s.label)).toEqual(['5h', 'wk', 'Fable'])
     expect(tightestUsageSection(p)?.key).toBe('session')
-    expect(soonestResetLabel(p, NOW)).toBe('Resets in 3h 5m')
+    expect(resetLabel(p, NOW)).toBe('Resets 5h in 3h 5m · wk in 4d')
+  })
+
+  it('戻りは5時間（日）と週の2つを出す', () => {
+    // Codex のように週だけ
+    expect(resetLabel(ok({ session: undefined }), NOW)).toBe('Resets wk in 4d')
+    // 5時間だけ
+    expect(resetLabel(ok({ weekly: undefined }), NOW)).toBe('Resets 5h in 3h 5m')
+    // 片方の時刻が分からなければ、分かる方だけ
+    expect(resetLabel(ok({ weekly: { usedPercent: 10, windowMinutes: 10080, resetsAt: null } }), NOW)).toBe('Resets 5h in 3h 5m')
+    // 過ぎていれば now
+    expect(resetLabel(ok({ session: { usedPercent: 1, windowMinutes: 300, resetsAt: NOW - 1 } }), NOW)).toBe('Resets 5h now · wk in 4d')
+    // 5時間・週の時刻が無ければ、ほかの枠のいちばん早い戻り
+    expect(resetLabel(ok({ session: undefined, weekly: undefined, fableWeekly: { usedPercent: 3, windowMinutes: 10080, resetsAt: NOW + 3_600_000 } }), NOW)).toBe('Resets in 1h')
+    // どれも分からない
+    expect(resetLabel(ok({ session: undefined, weekly: { usedPercent: 10, windowMinutes: 10080, resetsAt: Number.NaN } }), NOW)).toBeNull()
+    expect(resetLabel(ok({ session: undefined, weekly: undefined }), NOW)).toBeNull()
   })
 
   it('色の閾値は 60 / 80', () => {

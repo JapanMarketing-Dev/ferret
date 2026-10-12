@@ -4,7 +4,7 @@ import {
   clampUsedPercent,
   formatPlanLabel,
   formatWindowChipLabel,
-  soonestResetLabel,
+  resetLabel,
   tightestUsageSection,
   usageSections,
   usageStatusLabel,
@@ -236,7 +236,7 @@ function UsageRow({ p, agent, now }: { p: ProviderRateLimits | null; agent: Acco
   const t = useT()
   const sections = p ? usageSections(p) : []
   const plan = formatPlanLabel(p?.planType)
-  const reset = p && sections.length > 0 ? soonestResetLabel(p, now) : null
+  const reset = p && sections.length > 0 ? resetLabel(p, now) : null
   return (
     <span className="usage-row__body">
       <span className="usage-row__head">
@@ -327,7 +327,7 @@ function AccountBreakdown({ agent, onBack, onManage, onSwitched }: { agent: Acco
                 {row.active && <span className="usage-account__active">{t('accounts.selected')}</span>}
                 {/* アカウントごとの戻るまでの時間（主の行と同じ。Orca #5114 #21415） */}
                 {row.rateLimits && sections.length > 0 && (() => {
-                  const reset = soonestResetLabel(row.rateLimits, now)
+                  const reset = resetLabel(row.rateLimits, now)
                   return reset ? <span className="usage-row__reset">{reset}</span> : null
                 })()}
               </span>
