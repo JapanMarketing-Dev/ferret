@@ -11,6 +11,8 @@ import type { AccountAgent, TuiAgent } from '@shared/types'
  * 2. 優先順位（agentOrder）の先頭から、今の Agent 以外で使えるもの。
  *    Claude Code / Codex は、そのうち使えるアカウント（switchAccounts が切なら選択中のアカウントだけ）
  * どれも無ければ null（枠が戻るのを待つ）。
+ * 端末内・LAN のモデルで動く Agent（local。@shared/localModels の agentUsesLocalModel）は、提供元の上限が無いので
+ * 上限とみなさず、使用量のしきい値でも外さない（2026-10-12 本人の指摘「ローカルモデルなのに制限で使えなかった」）。
  */
 
 /** アカウントの1件。accountId が null ならシステムの既定アカウント */
@@ -46,6 +48,8 @@ export interface PlanInput {
   /** 上限とみなしている間（limitKey → この時刻まで）。ターミナルの知らせや使用量から */
   limited: ReadonlyMap<string, number>
   now: number
+  /** 端末内・LAN のモデルで動く Agent。上限・使用量のしきい値をかけない。省略時は無し */
+  local?: ReadonlySet<TuiAgent>
 }
 
 export function isAccountAgentId(agent: TuiAgent): agent is AccountAgent {
@@ -57,7 +61,8 @@ export function limitKey(target: FailoverTarget): string {
   return isAccountAgentId(target.agent) ? `${target.agent}:${target.accountId ?? 'system'}` : target.agent
 }
 
-function isLimited(input: Pick<PlanInput, 'limited' | 'now'>, target: FailoverTarget): boolean {
+function isLimited(input: Pick<PlanInput, 'limited' | 'now' | 'local'>, target: FailoverTarget): boolean {
+  if (input.local?.has(target.agent)) return false
   const until = input.limited.get(limitKey(target))
   return until !== undefined && until > input.now
 }
@@ -65,10 +70,12 @@ function isLimited(input: Pick<PlanInput, 'limited' | 'now'>, target: FailoverTa
 /** その Agent の使えるアカウントを、使用量の低い順に（分からないものは最後。同じなら選択中を先に） */
 export function usableAccounts(input: PlanInput, agent: AccountAgent, exclude: string | null | undefined = undefined): AccountCandidate[] {
   const threshold = input.prefs.thresholdPercent
+  // ローカルのモデルで動くなら、アカウントの使用量は関係ない
+  const local = input.local?.has(agent) === true
   return input.accounts[agent]
     .filter((a) => a.signedIn && (exclude === undefined || a.accountId !== exclude))
     .filter((a) => !isLimited(input, { agent, accountId: a.accountId }))
-    .filter((a) => a.usedPercent === null || a.usedPercent < threshold)
+    .filter((a) => local || a.usedPercent === null || a.usedPercent < threshold)
     .sort((a, b) => {
       if (Boolean(a.chrome) !== Boolean(b.chrome)) return a.chrome ? -1 : 1
       if (a.usedPercent === null && b.usedPercent !== null) return 1
@@ -91,6 +98,8 @@ function agentTarget(input: PlanInput, agent: TuiAgent): FailoverTarget | null {
 
 export function planFailover(input: PlanInput): FailoverTarget | null {
   const { from, prefs } = input
+  // ローカルのモデルで動く Agent は上限で止まらない（上限らしい行が出ても切り替えない）
+  if (input.local?.has(from.agent)) return null
   if (prefs.switchAccounts && isAccountAgentId(from.agent)) {
     const next = usableAccounts(input, from.agent, from.accountId ?? null)[0]
     if (next) return { agent: from.agent, accountId: next.accountId }
@@ -172,18 +181,22 @@ export interface RunningTab {
 /**
  * 上限の手前で引き継ぐタブ。使っているアカウントの使用量が handoffPercent 以上のタブで、
  * もう引き継ぎを始めた（started）ものと、同じフォルダで切り替えの途中（busy）のものは除く。
- * 同じフォルダのタブは1つだけ（切り替えはフォルダごとに1つずつ）。handoffPercent が 100 以上なら何もしない
+ * 同じフォルダのタブは1つだけ（切り替えはフォルダごとに1つずつ）。handoffPercent が 100 以上なら何もしない。
+ * 端末内・LAN のモデルで動く Agent（local）のタブは除く
  */
 export function nearLimitTabs(
   tabs: readonly RunningTab[],
   usedPercent: (agent: AccountAgent, accountId: string | null) => number | null,
   handoffPercent: number,
   started: ReadonlySet<string>,
-  busy: ReadonlySet<string>
+  busy: ReadonlySet<string>,
+  local: ReadonlySet<TuiAgent> = new Set()
 ): RunningTab[] {
   if (handoffPercent >= 100) return []
   const out: RunningTab[] = []
   for (const tab of tabs) {
+    // ローカルのモデルで動く Agent は、アカウントの使用量で引き継がない
+    if (local.has(tab.agent)) continue
     if (started.has(tab.id) || busy.has(tab.cwd) || out.some((t) => t.cwd === tab.cwd)) continue
     const used = usedPercent(tab.agent, tab.accountId)
     if (used !== null && used >= handoffPercent) out.push(tab)

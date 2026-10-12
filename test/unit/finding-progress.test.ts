@@ -16,7 +16,11 @@ import {
   progressChangedIds,
   PROGRESS_NOTE_MAX,
   sentPatch,
-  serializeProgress
+  serializeProgress,
+  lastShownEvent,
+  parseVerdictLog,
+  verdictLogOf,
+  withVerdictLog
 } from '@shared/findingProgress'
 import { NG_TOTAL_MAX, REPLY_MAX, renderAgentPrompt, renderNgPrompt } from '@shared/agentPrompt'
 import { fitsSingleWrite, sanitizePastePayload } from '../../src/main/agent/sanitize'
@@ -163,6 +167,32 @@ describe('progress.json の読み書きと一覧の完了数', () => {
     expect(await readProgress(p)).toEqual({})
     const [summary] = await listSessions(project)
     expect(summary?.doneCount).toBe(0)
+  })
+
+  it('OK のあと Agent が progress.json を丸ごと書き直しても、OK は消えず完了のまま', async () => {
+    const { p, r } = await saved()
+    const [a, b] = r.document.items
+    await updateProgressWith(p, (cur) => ({ ...cur, [a!.id]: applyVerdict(cur[a!.id], 'ok', undefined, '2026-10-12T01:00:00.000Z') }))
+    expect(JSON.parse(await readFile(p.verdictsJson, 'utf8'))).toEqual({ [a!.id]: [{ at: '2026-10-12T01:00:00.000Z', verdict: 'ok' }] })
+    // Agent が history を落として確認待ちに書き戻す
+    await writeFile(p.progressJson, JSON.stringify({ [a!.id]: 'human_review', [b!.id]: 'human_review' }))
+    const read = await readProgress(p)
+    expect(read[a!.id]?.status).toBe('done')
+    expect(read[b!.id]?.status).toBe('human_review')
+    // 次に Ferret が書くとき、progress.json にも OK を書き戻す
+    await updateProgress(p, { [b!.id]: 'in_progress' })
+    expect(JSON.parse(await readFile(p.progressJson, 'utf8'))[a!.id]).toEqual({ status: 'done', history: [{ at: '2026-10-12T01:00:00.000Z', verdict: 'ok' }] })
+    // 一覧の完了数にも入る
+    const [summary] = await listSessions(project)
+    expect(summary?.doneCount).toBe(1)
+  })
+
+  it('壊れた verdicts.json は無いものとして読む', async () => {
+    const { p, r } = await saved()
+    const [a] = r.document.items
+    await writeFile(p.progressJson, JSON.stringify({ [a!.id]: 'human_review' }))
+    await writeFile(p.verdictsJson, '{ broken')
+    expect((await readProgress(p))[a!.id]?.status).toBe('human_review')
   })
 
   it('利用者の変更は Agent の書いた分を消さずに重ねる', async () => {
@@ -544,3 +574,95 @@ describe('progress.json をリンクにされても、フォルダの外へ読�
   })
 })
 
+
+describe('一度 OK にしたら、もう確認待ちに戻らない（2026-10-12）', () => {
+  const ok = { at: '2026-10-12T01:00:00.000Z', verdict: 'ok' as const }
+  const ng = { at: '2026-10-12T00:00:00.000Z', verdict: 'ng' as const, text: '色が違う' }
+
+  it('Agent が OK 済みのものを human_review・in_progress・todo に書き戻しても done', () => {
+    for (const status of ['human_review', 'in_progress', 'todo', 'needs_human']) {
+      expect(parseProgress({ a: { status, history: [ng, ok] } }).a?.status, status).toBe('done')
+    }
+  })
+
+  it('OK 済みなら queued も外す', () => {
+    expect(parseProgress({ a: { status: 'in_progress', queued: true, history: [ok] } }).a).toEqual({ status: 'done', history: [ok] })
+  })
+
+  it('OK のあとに NG なら、OK は最後の判断ではない', () => {
+    const later = { ...ng, at: '2026-10-12T02:00:00.000Z' }
+    expect(parseProgress({ a: { status: 'human_review', history: [ok, later] } }).a?.status).toBe('human_review')
+  })
+
+  it('OK のあとの Comment は判断ではないので、done のまま', () => {
+    const comment = { at: '2026-10-12T02:00:00.000Z', verdict: 'comment' as const, text: 'メモ' }
+    expect(parseProgress({ a: { status: 'human_review', history: [ok, comment] } }).a?.status).toBe('done')
+  })
+
+  it('人が画面で完了から戻すと reopen を足して開き直す。その後は Agent の確認待ちに従う', () => {
+    const done = parseProgress({ a: { status: 'done', history: [ok] } })
+    const back = applyProgress(done, { a: 'todo' }, '2026-10-12T03:00:00.000Z')
+    expect(back.a?.status).toBe('todo')
+    expect(back.a?.history?.at(-1)).toEqual({ at: '2026-10-12T03:00:00.000Z', verdict: 'reopen' })
+    expect(lastVerdict(back.a)).toBeNull()
+    // ファイルに書いて読み直しても開いたまま
+    expect(parseProgress(serializeProgress(back)).a?.status).toBe('todo')
+    // Agent が直して確認待ちにすれば、また確認待ちに出る
+    expect(parseProgress({ a: { status: 'human_review', history: back.a!.history } }).a?.status).toBe('human_review')
+    // 画面に出す直近の判断に reopen は出さない
+    expect(lastShownEvent(back.a)?.verdict).toBe('ok')
+  })
+
+  it('完了以外どうしの切り替えでは reopen を足さない', () => {
+    const cur = parseProgress({ a: { status: 'human_review', history: [ng] } })
+    expect(applyProgress(cur, { a: 'in_progress' }).a?.history).toEqual([ng])
+  })
+
+  it('開き直したあと、もう一度 OK すれば done', () => {
+    const back = applyProgress(parseProgress({ a: { status: 'done', history: [ok] } }), { a: 'in_progress' }, '2026-10-12T03:00:00.000Z')
+    const again = applyVerdict(back.a, 'ok', undefined, '2026-10-12T04:00:00.000Z')
+    expect(again.status).toBe('done')
+    expect(parseProgress({ a: { status: 'human_review', history: again.history } }).a?.status).toBe('done')
+  })
+
+  it('reopen は history として読める。知らない値は捨てる', () => {
+    const map = parseProgress({ a: { status: 'todo', history: [ok, { at: '2026-10-12T03:00:00.000Z', verdict: 'reopen' }, { at: 'x', verdict: 'ok' }, { at: '2026-10-12T03:00:00.000Z', verdict: 'maybe' }] } })
+    expect(map.a?.history?.map((e) => e.verdict)).toEqual(['ok', 'reopen'])
+  })
+
+  it('次に送るときのコメントに OK・reopen は入らない', () => {
+    const entry = { status: 'in_progress' as const, history: [ng, ok, { at: '2026-10-12T03:00:00.000Z', verdict: 'reopen' as const, text: 'x' }] }
+    expect(recentComments(entry)).toEqual([ng])
+  })
+})
+
+describe('Ferret だけが書く判断の記録（verdicts.json）', () => {
+  const ok = { at: '2026-10-12T01:00:00.000Z', verdict: 'ok' as const }
+  const ng = { at: '2026-10-12T00:00:00.000Z', verdict: 'ng' as const, text: '色' }
+
+  it('Agent が history を消して human_review に書き戻しても、記録から OK を戻す', () => {
+    const fromAgent = parseProgress({ a: 'human_review', b: { status: 'human_review', note: '直した' } })
+    const merged = withVerdictLog(fromAgent, { a: [ng, ok] })
+    expect(merged.a).toEqual({ status: 'done', history: [ng, ok] })
+    expect(merged.b?.status).toBe('human_review')
+  })
+
+  it('progress.json から消えた指摘も、記録があれば戻す。知らない指摘は戻さない', () => {
+    expect(withVerdictLog({}, { a: [ok] }).a?.status).toBe('done')
+    expect(withVerdictLog({}, { gone: [ok] }, ['a'])).toEqual({})
+  })
+
+  it('記録より新しい判断が progress.json にあれば残す（記録を書く前の版で付けたもの）', () => {
+    const later = { at: '2026-10-12T05:00:00.000Z', verdict: 'ng' as const, text: 'まだ' }
+    const merged = withVerdictLog(parseProgress({ a: { status: 'in_progress', history: [ok, later] } }), { a: [ok] })
+    expect(merged.a?.history).toEqual([ok, later])
+    expect(merged.a?.status).toBe('in_progress')
+  })
+
+  it('記録の読み書き。壊れた値は空、history の無い指摘は書かない', () => {
+    expect(parseVerdictLog(null)).toEqual({})
+    expect(parseVerdictLog([ok])).toEqual({})
+    expect(parseVerdictLog({ a: 'x', b: [{ verdict: 'ok' }], c: [ok] })).toEqual({ c: [ok] })
+    expect(verdictLogOf({ a: { status: 'in_progress' }, b: { status: 'done', history: [ok] } })).toEqual({ b: [ok] })
+  })
+})

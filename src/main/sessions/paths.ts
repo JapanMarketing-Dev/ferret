@@ -46,6 +46,8 @@ export interface SessionPaths {
   summaryJson: string
   /** 指摘ごとの進み具合。Agent が作業しながら書く（progress.ts） */
   progressJson: string
+  /** 人の判断（OK / NG / Comment / 開き直し）の記録。Ferret だけが書く（Agent が progress.json を書き直しても OK を失わない） */
+  verdictsJson: string
   recording: string
   /** 何もない時間を削った版（trim.ts）。元の recording.webm と同じく保存期間で消える */
   trimmedRecording: string
@@ -139,6 +141,7 @@ export function sessionPaths(projectDir: string, id: string, base?: string): Ses
     labelJson: join(dir, 'label.json'),
     summaryJson: join(dir, 'summary.json'),
     progressJson: join(dir, 'progress.json'),
+    verdictsJson: join(dir, 'verdicts.json'),
     recording: join(dir, 'recording.webm'),
     trimmedRecording: join(dir, 'recording.trimmed.webm'),
     workDir,

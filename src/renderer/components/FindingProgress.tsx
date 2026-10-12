@@ -1,6 +1,6 @@
 import { useState, type Ref } from 'react'
 import { Check, CheckCircle2, Circle, CircleDot, Eye, ListFilter, MessageSquare, Send, X } from 'lucide-react'
-import { countProgress, lastVerdict, type FindingProgress, type ProgressEntry, type ProgressMap, type ReviewVerdict } from '@shared/findingProgress'
+import { countProgress, lastShownEvent, lastVerdict, type FindingProgress, type ProgressEntry, type ProgressMap, type ReviewVerdict } from '@shared/findingProgress'
 import { REPLY_MAX } from '@shared/agentPrompt'
 import { verdictKeySends } from '@shared/verdictKeys'
 import type { TranslationKey } from '@shared/i18n'
@@ -115,7 +115,9 @@ export function VerdictPanel({ n, entry, busy, onVerdict, inputRef }: {
 }) {
   const t = useT()
   const [body, setBody] = useState('')
-  const last = entry.history?.at(-1)
+  // 開き直した（reopen）あとの古い OK は出さない（今の確認とは別の判断なので）
+  const shown = lastShownEvent(entry)
+  const last = shown && !(shown.verdict === 'ok' && lastVerdict(entry) !== 'ok') ? shown as typeof shown & { verdict: ReviewVerdict } : undefined
   const submit = (verdict: ReviewVerdict, sendNow?: boolean) => void onVerdict(verdict, verdict === 'ok' ? body.trim() || undefined : body.trim(), sendNow).then((ok) => ok && setBody(''))
   return <div className="rv-verdict" role="group" aria-label={t('review.verdict.title')} data-testid={`review-verdict-${n}`}>
     <p className="rv-verdict__title"><Eye size={14} strokeWidth={2.25} aria-hidden="true" />{t('review.verdict.title')}</p>

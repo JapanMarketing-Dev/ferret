@@ -97,7 +97,8 @@ export interface FindingReactionEvent {
   /** 人が判断した時刻（history の at） */
   at: string
   key: string
-  verdict: 'ok' | 'ng' | 'comment'
+  /** reopen は人が完了から戻した印（@shared/findingProgress） */
+  verdict: 'ok' | 'ng' | 'comment' | 'reopen'
   text?: string
 }
 
@@ -294,7 +295,7 @@ export function parseFeedbackEvent(raw: unknown): FeedbackEvent | null {
     return { v: 1, type: 'fix', at: e.at, key: e.key, status: e.status, ...(isStr(e.note) ? { note: e.note } : {}), ...(isSafeImagePath(e.after) ? { after: e.after } : {}) }
   }
   if (e.type === 'reaction') {
-    if (!isStr(e.key) || (e.verdict !== 'ok' && e.verdict !== 'ng' && e.verdict !== 'comment')) return null
+    if (!isStr(e.key) || (e.verdict !== 'ok' && e.verdict !== 'ng' && e.verdict !== 'comment' && e.verdict !== 'reopen')) return null
     return { v: 1, type: 'reaction', at: e.at, key: e.key, verdict: e.verdict, ...(isStr(e.text) ? { text: e.text } : {}) }
   }
   if (e.type === 'message') {
@@ -325,7 +326,7 @@ export function parseFeedbackEvents(text: string): FeedbackEvent[] {
 export type TimelineStep =
   | { kind: 'sent'; at: string }
   | { kind: 'fix'; at: string; status: 'human_review' | 'done'; note?: string; after?: string }
-  | { kind: 'reaction'; at: string; verdict: 'ok' | 'ng' | 'comment'; text?: string }
+  | { kind: 'reaction'; at: string; verdict: 'ok' | 'ng' | 'comment' | 'reopen'; text?: string }
 
 export interface FindingRecord {
   kind: 'finding'
@@ -434,7 +435,7 @@ export function progressChanges(state: FeedbackState, projectId: string, reviewI
 
 /** 指摘の今の結果（人の反応から） */
 export function findingOutcome(record: FindingRecord): string {
-  const verdicts = record.timeline.filter((s): s is Extract<TimelineStep, { kind: 'reaction' }> => s.kind === 'reaction' && s.verdict !== 'comment')
+  const verdicts = record.timeline.filter((s): s is Extract<TimelineStep, { kind: 'reaction' }> => s.kind === 'reaction' && s.verdict !== 'comment' && s.verdict !== 'reopen')
   const rejections = verdicts.filter((v) => v.verdict === 'ng').length
   const last = verdicts.at(-1)
   const reopened = verdicts.some((v, i) => v.verdict === 'ng' && verdicts.slice(0, i).some((p) => p.verdict === 'ok'))
@@ -485,7 +486,7 @@ function renderFinding(record: FindingRecord, offsetMinutes?: number): string[] 
       out.push(`- ${time(step.at)} agent fixed (${step.status})${step.note ? `: ${oneLine(step.note, 600)}` : ''}${step.after ? '' : ' — no after screenshot'}`)
       if (step.after) out.push(`  ![after fix](${step.after})`)
     } else {
-      const label = step.verdict === 'ok' ? 'human OK' : step.verdict === 'ng' ? 'human NG (rejected the fix)' : 'human comment'
+      const label = step.verdict === 'ok' ? 'human OK' : step.verdict === 'ng' ? 'human NG (rejected the fix)' : step.verdict === 'reopen' ? 'human reopened it (moved it back from done)' : 'human comment'
       out.push(`- ${time(step.at)} ${label}${step.text ? `: “${oneLine(step.text, 600)}”` : ''}`)
     }
   }

@@ -17,6 +17,11 @@
  * - 古いファイル・古い指示の Agent が書いた needs_human は human_review として読む（note は Agent のひとことのまま見せる）
  * - history: 人の判断（OK / NG / Comment）の記録。Ferret が書き、Agent には残すよう頼む
  * - queued: NG を付けたが、まだ Agent へ送り直していない（「NG をまとめて送る」の対象）
+ * - 人の OK は最後の判断（2026-10-12 本人指示「一度 OK にしたらもう出ないように」）。history の最後の判断が OK なら、
+ *   Agent が human_review・in_progress・todo を書き戻しても done として読む。人が画面で完了から戻したときだけ、
+ *   Ferret が reopen を history に足して開き直す
+ * - history の正本は Ferret だけが書く verdicts.json（同じフォルダ）。Agent が progress.json を書き直して history を消しても、
+ *   読むときに verdicts.json の history で置き換える（withVerdictLog）
  *
  * 値は文字列だけの形（"in_progress"）と、オブジェクトの形のどちらでもよい。利用者が画面で切り替えた値も同じファイルに書く。
  * 書かれていない指摘は未対応。壊れた JSON・知らない値は無視する（Agent が書くので崩れることがある）。
@@ -28,10 +33,13 @@ export type FindingProgress = 'todo' | 'in_progress' | 'human_review' | 'done'
 /** 人の判断。OK で完了、NG で直し直し、Comment は判断せずに残す */
 export type ReviewVerdict = 'ok' | 'ng' | 'comment'
 
-interface ReviewEvent {
+/** history に残る出来事。reopen は人が完了から戻した印（判断ではない。画面には出さない） */
+export type ReviewEventKind = ReviewVerdict | 'reopen'
+
+export interface ReviewEvent {
   /** ISO8601 */
   at: string
-  verdict: ReviewVerdict
+  verdict: ReviewEventKind
   text?: string
 }
 
@@ -85,7 +93,7 @@ function parseHistory(raw: unknown): ReviewEvent[] | undefined {
   const out = raw.flatMap((e): ReviewEvent[] => {
     if (!e || typeof e !== 'object') return []
     const r = e as Record<string, unknown>
-    const verdict = r.verdict === 'ok' || r.verdict === 'ng' || r.verdict === 'comment' ? r.verdict : null
+    const verdict = r.verdict === 'ok' || r.verdict === 'ng' || r.verdict === 'comment' || r.verdict === 'reopen' ? r.verdict : null
     if (!verdict || typeof r.at !== 'string' || Number.isNaN(Date.parse(r.at))) return []
     const body = text(r.text)
     return [{ at: r.at, verdict, ...(body ? { text: body } : {}) }]
@@ -93,28 +101,45 @@ function parseHistory(raw: unknown): ReviewEvent[] | undefined {
   return out.length ? out : undefined
 }
 
-/** 人の最後の判断（OK / NG。Comment は判断ではないので飛ばす） */
+/** 人の最後の判断（OK / NG。Comment は判断ではないので飛ばす。最後が開き直し（reopen）なら判断なし） */
 export function lastVerdict(entry: ProgressEntry | undefined): 'ok' | 'ng' | null {
   const last = entry?.history?.filter((e) => e.verdict !== 'comment').at(-1)
-  return last ? last.verdict as 'ok' | 'ng' : null
+  return last && last.verdict !== 'reopen' ? last.verdict as 'ok' | 'ng' : null
+}
+
+/** 画面に出す最後の判断（OK / NG / Comment。開き直しの印は出さない） */
+export function lastShownEvent(entry: ProgressEntry | undefined): ReviewEvent | undefined {
+  return entry?.history?.filter((e) => e.verdict !== 'reopen').at(-1)
+}
+
+/**
+ * 人の OK は最後の判断。最後の判断が OK なら、Agent が何を書いても done（queued も外す）。
+ * OK の無い done は人の確認待ち（done にできるのは人だけ）
+ */
+function settle(entry: ProgressEntry): ProgressEntry {
+  const verdict = lastVerdict(entry)
+  if (verdict === 'ok' && (entry.status !== 'done' || entry.queued)) {
+    const { queued: _queued, ...rest } = entry
+    return { ...rest, status: 'done' }
+  }
+  if (entry.status === 'done' && verdict !== 'ok') return { ...entry, status: 'human_review' }
+  return entry
 }
 
 /** 1件の値を読む（文字列の形・オブジェクトの形）。読めない値・何も持たない todo は null */
 function parseEntry(value: unknown): ProgressEntry | null {
   const obj = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
-  let status = normalizeProgress(obj ? obj.status : value)
+  const status = normalizeProgress(obj ? obj.status : value)
   if (!status) return null
   const note = obj ? text(obj.note) : undefined
   const after = obj ? sanitizeAfterPath(obj.after) : undefined
   const score = obj ? sanitizeDecisionScore(obj.score) : undefined
   const history = obj ? parseHistory(obj.history) : undefined
   const queued = obj?.queued === true
-  const entry: ProgressEntry = { status, ...(note ? { note } : {}), ...(after ? { after } : {}),
-    ...(score ? { score } : {}), ...(history ? { history } : {}), ...(queued ? { queued: true as const } : {}) }
-  // done にできるのは人だけ。人の OK が無い done は、人の確認待ちとして読む
-  if (status === 'done' && lastVerdict(entry) !== 'ok') status = entry.status = 'human_review'
+  const entry = settle({ status, ...(note ? { note } : {}), ...(after ? { after } : {}),
+    ...(score ? { score } : {}), ...(history ? { history } : {}), ...(queued ? { queued: true as const } : {}) })
   // 何も持たない todo は「書かれていない」と同じ
-  if (status === 'todo' && !history) return null
+  if (entry.status === 'todo' && !history) return null
   return entry
 }
 
@@ -134,26 +159,30 @@ export function parseProgress(raw: unknown, knownIds?: Iterable<string>): Progre
   return out
 }
 
-/** 変更を1件重ねる（純粋）。status の決まりは ProgressPatchValue のとおり */
-function mergeEntry(current: ProgressEntry | undefined, value: ProgressPatchValue): ProgressEntry | null {
+/**
+ * 変更を1件重ねる（純粋）。status の決まりは ProgressPatchValue のとおり。
+ * Ferret の画面からの変更（人の操作）だけがここを通る。OK 済みのものを完了以外へ戻すときは、開き直し（reopen）を history に足す
+ */
+function mergeEntry(current: ProgressEntry | undefined, value: ProgressPatchValue, at: string): ProgressEntry | null {
   const obj = typeof value === 'object' && value ? value : null
   const status = normalizeProgress(obj ? obj.status : value)
   if (!status) return current ?? null
   const note = obj ? text(obj.note) : undefined
   const after = obj?.after !== undefined ? sanitizeAfterPath(obj.after) : status === 'todo' ? undefined : current?.after
   const score = obj?.score !== undefined ? sanitizeDecisionScore(obj.score) : status === 'todo' ? undefined : current?.score
-  const history = current?.history
+  const reopen = status !== 'done' && lastVerdict(current) === 'ok'
+  const history = reopen ? [...(current?.history ?? []), { at, verdict: 'reopen' as const }].slice(-HISTORY_MAX) : current?.history
   const next: ProgressEntry = { status, ...(note ? { note } : {}), ...(after ? { after } : {}),
     ...(score ? { score } : {}), ...(history ? { history } : {}), ...(obj?.queued ? { queued: true as const } : {}) }
   return status === 'todo' && !history ? null : next
 }
 
 /** 変更を重ねる。何も持たない todo はファイルから消す */
-export function applyProgress(current: ProgressMap, patch: Record<string, ProgressPatchValue>): ProgressMap {
+export function applyProgress(current: ProgressMap, patch: Record<string, ProgressPatchValue>, at: string = new Date().toISOString()): ProgressMap {
   const out: ProgressMap = { ...current }
   for (const [id, value] of Object.entries(patch)) {
     if (!id) continue
-    const next = mergeEntry(out[id], value)
+    const next = mergeEntry(out[id], value, at)
     if (next) out[id] = next
     else delete out[id]
   }
@@ -173,6 +202,44 @@ export function applyVerdict(current: ProgressEntry | undefined, verdict: Review
   return verdict === 'ok' ? { ...kept, status: 'done' } : { ...kept, status: 'in_progress', queued: true }
 }
 
+/** Ferret だけが書く判断の記録（verdicts.json）。指摘のID → history */
+export type VerdictLog = Record<string, ReviewEvent[]>
+
+/** verdicts.json の中身を読む（純粋）。壊れた値は空 */
+export function parseVerdictLog(raw: unknown): VerdictLog {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: VerdictLog = {}
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    const history = id ? parseHistory(value) : undefined
+    if (history) out[id] = history
+  }
+  return out
+}
+
+/** 書く判断の記録（history のある指摘だけ） */
+export function verdictLogOf(map: ProgressMap): VerdictLog {
+  return Object.fromEntries(Object.entries(map).flatMap(([id, e]) => e.history?.length ? [[id, e.history]] : []))
+}
+
+/**
+ * progress.json の読みに、Ferret の判断の記録を重ねる（純粋）。記録のある指摘は記録の history を正とし（Agent が消しても戻す）、
+ * Agent の書いた history に記録より新しい判断があればそれも残す（記録を書く前の版の Ferret が書いたもの）。
+ * progress.json から消えた指摘も、記録があれば戻す。knownIds を渡すと、そのレビューに無い指摘は戻さない
+ */
+export function withVerdictLog(map: ProgressMap, log: VerdictLog, knownIds?: Iterable<string>): ProgressMap {
+  const known = knownIds ? new Set(knownIds) : null
+  const out: ProgressMap = { ...map }
+  for (const [id, saved] of Object.entries(log)) {
+    if (known && !known.has(id)) continue
+    const current = out[id]
+    const newest = saved.at(-1)?.at ?? ''
+    const extra = (current?.history ?? []).filter((e) => e.at > newest)
+    const history = [...saved, ...extra].slice(-HISTORY_MAX)
+    out[id] = settle({ ...(current ?? { status: 'todo' as const }), history })
+  }
+  return out
+}
+
 /** ファイルへ書く形。状態のほかに何も無ければ文字列だけ（Agent が読み書きしやすいように） */
 export function serializeProgress(map: ProgressMap): Record<string, ProgressEntry | ProgressEntry['status']> {
   return Object.fromEntries(Object.entries(map).map(([id, e]) => [id, Object.keys(e).length > 1 ? e : e.status]))
@@ -189,7 +256,7 @@ export function nextProgress(p: FindingProgress): FindingProgress {
 
 /** 直近の人のコメント（NG・Comment の本文）。次に送るとき Agent に渡す（新しい順に count 件） */
 export function recentComments(entry: ProgressEntry | undefined, count = 3): ReviewEvent[] {
-  return (entry?.history ?? []).filter((e) => e.verdict !== 'ok' && e.text).slice(-count).reverse()
+  return (entry?.history ?? []).filter((e) => (e.verdict === 'ng' || e.verdict === 'comment') && e.text).slice(-count).reverse()
 }
 
 interface ProgressCount {

@@ -33,7 +33,7 @@ import { UserFacingError } from '@shared/errors'
 import { readBoundedJson, readErrorText } from '../../boundedResponse'
 import type { TranscriptSegment } from '../types'
 import { SttHttpError, type SttEngine, type TranscribeChunkInput, type TranscribeResult } from './engine'
-import { exceedsCostLimit, normalizeBaseUrl } from './endpoint'
+import { costLimitForEndpoint, exceedsCostLimit, normalizeBaseUrl } from './endpoint'
 import { recordedSttFetch } from './usage'
 import { OPENAI_MAX_BYTES, OpenAiSttEngine, UNKNOWN_PRICE_PER_MINUTE_USD, describeHttpFailure, redact } from './openai'
 import { wavDurationMs, writeWavFile } from './wav'
@@ -268,7 +268,8 @@ export function createSttEngine(spec: SttEngineSpec): SttEngine {
   const ep = resolveEndpoint(preset, spec.endpoint)
   if (preset.keyRequired && !spec.apiKey) throw new UserFacingError(t('stt.errors.keyMissing', { label: providerLabel(preset, t) }))
   if (!ep.model) throw new UserFacingError(t('stt.check.noModel'))
-  const common = { language: spec.language, maxCostUsd: spec.maxCostUsd, headers: ep.headers, pricePerMinuteUsd: preset.pricePerMinuteUsd,
+  // 端末内・LAN のサーバーには費用の上限をかけない（費用がかからない。costLimitForEndpoint）
+  const common = { language: spec.language, maxCostUsd: costLimitForEndpoint(ep.baseUrl, spec.maxCostUsd), headers: ep.headers, pricePerMinuteUsd: preset.pricePerMinuteUsd,
     authScheme: spec.endpoint?.authScheme, authHeader: spec.endpoint?.authHeader, provider: spec.provider }
   if (preset.kind === 'openai-transcriptions') {
     return new OpenAiSttEngine({ ...common, model: ep.model, baseUrl: ep.baseUrl, apiKey: spec.apiKey, keyOptional: !preset.keyRequired,

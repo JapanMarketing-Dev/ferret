@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import { DECISION_ENV, LEGACY_DECISION_ENV, decisionAuthHeader, resolveDecision, type DecisionPreferences } from '@shared/decision'
 import type { ApiCallRecord } from '@shared/apiUsage'
 import { t } from '@shared/i18n'
+import { isLocalModelEndpoint } from '@shared/localModels'
 import { checkDecision, type DecisionTestResult } from './check'
 import { DecisionRelay, RelayConfigError, type RelayTokenMeta, type RelayUpstream } from './relay'
 import type { ProjectUsageStore } from './projectLedger'
@@ -78,7 +79,10 @@ export class DecisionService {
     const fingerprint = createHash('sha256').update(JSON.stringify(prefs)).digest('hex')
     if (this.prefsFingerprint !== null && this.prefsFingerprint !== fingerprint) this.relay?.revokeAll()
     this.prefsFingerprint = fingerprint
-    if (!this.relay) this.relay = new DecisionRelay({ upstream: () => this.upstream(), onCall: this.deps.onCall, ...(this.deps.ledger ? { ledger: this.deps.ledger } : {}), ...(this.deps.fetch ? { fetch: this.deps.fetch } : {}) })
+    if (!this.relay) {
+      this.relay = new DecisionRelay({ upstream: () => this.upstream(), localUpstream: () => this.localUpstream(), onCall: this.deps.onCall,
+        ...(this.deps.ledger ? { ledger: this.deps.ledger } : {}), ...(this.deps.fetch ? { fetch: this.deps.fetch } : {}) })
+    }
     await this.relay.start()
   }
 
@@ -158,6 +162,15 @@ export class DecisionService {
       },
       close: () => relay.revoke(token)
     }
+  }
+
+  /**
+   * 今の設定の接続先が端末内・LAN のモデル（Ollama の clef / clef-flash など）か。中継はそのとき回数・費用の枠をかけない
+   * （@shared/localModels の isLocalModelEndpoint。Cloudflare などで動かす clef はクラウドなので枠を残す）
+   */
+  private localUpstream(): boolean {
+    const prefs = this.enabledPrefs()
+    return prefs !== null && isLocalModelEndpoint(resolveDecision(prefs, this.deps.getEnv).url)
   }
 
   /** 中継が送る先。依頼のたびに設定を読み直す（キーだけは覚えておく） */

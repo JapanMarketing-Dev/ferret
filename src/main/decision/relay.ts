@@ -17,6 +17,10 @@
  *   - 本文は System One の形だけを受け付け、model を設定のものに書き換え、1回で使いうる量の上限（requestBound.ts）を
  *     送る前にまるごと予約する。残りの枠に収まらなければ送らない。単価の分からない接続先も費用の枠で数える（security-7 [7]）
  *   - 接続先が OpenAI の Decisions API（/v1/decisions）なら、System One の形を写して送り、応答を System One の形へ戻す（openaiDecisions.ts）
+ *   - 接続先が端末内・LAN のモデル（Ollama の clef / clef-flash など。@shared/localModels の isLocalModelEndpoint）なら、
+ *     上の回数・1分あたり・トークン・費用・プロジェクトの1日の枠をかけない（提供元の上限も費用も無い。2026-10-12 本人の指摘）。
+ *     量の分からない応答（Ollama は量を返さない）を予約の分で数えると、16回ほどで合言葉を使い切っていた。
+ *     同時の数だけは、本文（最大 32MB）でメモリを使い切らないための RELAY_MAX_CONCURRENT_LOCAL で絞る
  * Ferret が自分から判定モデルを呼ぶことはない。利用者の支払いも今までどおりプロバイダへ直接。
  *
  * Electron に依存させない（単体テストでローカルの偽の接続先に向けるため）。
@@ -30,6 +34,7 @@ import { estimateCost, extractUsage } from './callLog'
 import type { ProjectLedgerEntry, ProjectUsageStore } from './projectLedger'
 import { AI_RESPONSE_MAX_BYTES, ResponseTooLargeError, readBoundedBytes } from '../boundedResponse'
 import { budgetPricing, checkDecisionRequest, costOf } from './requestBound'
+import { isLocalModelEndpoint } from '@shared/localModels'
 import { decisionWireFor, fromOpenAiDecisions, toOpenAiDecisions } from './openaiDecisions'
 
 /** 画像を2枚含むので大きめ */
@@ -58,6 +63,11 @@ export interface RelayTokenMeta {
 
 /** 1つの合言葉で同時に送れる依頼の数 */
 export const RELAY_MAX_CONCURRENT_PER_TOKEN = 4
+/**
+ * 接続先が端末内・LAN のモデルのときの、1つの合言葉で同時に送れる依頼の数。回数の枠ではなく、
+ * 受け取り途中の本文（1件 32MB まで）でメモリを使い切らないための上限（ふだんの判定は1件ずつなので届かない）
+ */
+export const RELAY_MAX_CONCURRENT_LOCAL = 16
 /** 出してからこの時間で無効にする（長い作業でも、ターミナルを開き直せば新しい合言葉になる） */
 export const RELAY_TOKEN_MAX_AGE_MS = 24 * 60 * 60 * 1000
 /** 依頼の本文を受け取り終えるまでの上限（127.0.0.1 なので 32MB でも数秒。途中で止めた依頼で予約を持ち続けさせない。security-6 [2]） */
@@ -157,6 +167,11 @@ interface DecisionRelayOptions {
   bodyTimeoutMs?: number
   /** プロジェクトのその日の量を残す先（security-6 [8]）。省略時はメモリだけ（テスト用） */
   ledger?: ProjectUsageStore
+  /**
+   * 今の設定の接続先が端末内・LAN のモデルか（同期で分かる値。DecisionService が設定の URL から決める）。
+   * true なら枠を予約せずに受け付け、接続先を決めたあと URL でもう一度確かめる（クラウドなら、そこで予約する）。省略時は false
+   */
+  localUpstream?: () => boolean
   fetch?: typeof fetch
   now?: () => Date
 }
@@ -464,17 +479,30 @@ export class DecisionRelay {
       req.resume()
       return sendJson(res, 401, relayError('Missing or invalid Ferret relay token. Use $FERRET_DECISION_URL exactly as given.', 'relay_unauthorized'))
     }
+    // 端末内・LAN のモデルなら、回数・費用の枠をかけない（提供元の上限が無い）。読めない・例外はクラウドとみなす
+    let local = false
+    try {
+      local = this.opt.localUpstream?.() === true
+    } catch {
+      // 設定を読めない（想定内）。枠をかける側に倒す
+      local = false
+    }
     // 1つの合言葉で同時に送れる数を絞る（写し取った合言葉で並べて呼び、費用やメモリを膨らませない）
     const inflight = this.inflight.get(token) ?? 0
-    if (inflight >= RELAY_MAX_CONCURRENT_PER_TOKEN) {
+    const maxConcurrent = local ? RELAY_MAX_CONCURRENT_LOCAL : RELAY_MAX_CONCURRENT_PER_TOKEN
+    if (inflight >= maxConcurrent) {
       req.resume()
-      return sendJson(res, 429, relayError(`Too many decision requests at once (max ${RELAY_MAX_CONCURRENT_PER_TOKEN}). Wait for the previous ones to finish.`, 'relay_too_many'))
+      return sendJson(res, 429, relayError(`Too many decision requests at once (max ${maxConcurrent}). Wait for the previous ones to finish.`, 'relay_too_many'))
     }
-    // 総量の枠を送る前に予約する（security-5 [4]）
-    const reservation = this.reserve(token, issued)
-    if ('refused' in reservation) {
-      req.resume()
-      return sendJson(res, 429, this.refusalBody(reservation.refused))
+    // 総量の枠を送る前に予約する（security-5 [4]）。ローカルなら予約しない（接続先を決めたあとクラウドと分かれば forward で予約する）
+    const held: { r: Reservation | null } = { r: null }
+    if (!local) {
+      const reservation = this.reserve(token, issued)
+      if ('refused' in reservation) {
+        req.resume()
+        return sendJson(res, 429, this.refusalBody(reservation.refused))
+      }
+      held.r = reservation
     }
     this.inflight.set(token, inflight + 1)
     // 合言葉を無効にしたら、この依頼も切る（本文の途中でも、接続先の応答待ちでも。security-6 [2]）
@@ -483,10 +511,10 @@ export class DecisionRelay {
     controller.signal.addEventListener('abort', () => { req.destroy(); res.destroy() }, { once: true })
     let outcome: Outcome = NOT_SENT
     try {
-      outcome = await this.forward(req, res, issued, controller.signal, reservation)
+      outcome = await this.forward(req, res, token, issued, controller.signal, held)
     } finally {
       issued.active.delete(controller)
-      this.settle(token, reservation, outcome)
+      if (held.r) this.settle(token, held.r, outcome)
       const left = (this.inflight.get(token) ?? 1) - 1
       if (left > 0) this.inflight.set(token, left)
       else this.inflight.delete(token)
@@ -494,7 +522,7 @@ export class DecisionRelay {
   }
 
   /** 送って応答を返す。精算のために、使ったトークン数と費用（分かった分）を返す */
-  private async forward(req: IncomingMessage, res: ServerResponse, issued: IssuedToken, signal: AbortSignal, reservation: Reservation): Promise<Outcome> {
+  private async forward(req: IncomingMessage, res: ServerResponse, tokenKey: string, issued: IssuedToken, signal: AbortSignal, held: { r: Reservation | null }): Promise<Outcome> {
     const meta = issued.meta
     const none = NOT_SENT
     // 無効にした合言葉の依頼は、ここから先へ進めない（接続先とキーを決めない・送らない。security-6 [2]）
@@ -520,10 +548,21 @@ export class DecisionRelay {
       return none
     }
     const price = budgetPricing(upstream.url, upstream.pricing)
-    const refused = this.raise(reservation, checked.inputTokens + checked.outputTokens, costOf({ input: checked.inputTokens, output: checked.outputTokens }, price))
-    if (refused) {
-      sendJson(res, 429, this.refusalBody(refused))
-      return none
+    // 端末内・LAN のモデルには枠をかけない。受け付けたときはローカルだったのに、実際の接続先がクラウドなら、ここで予約する（同期で数える）
+    if (!isLocalModelEndpoint(upstream.url)) {
+      if (!held.r) {
+        const reservation = this.reserve(tokenKey, issued)
+        if ('refused' in reservation) {
+          sendJson(res, 429, this.refusalBody(reservation.refused))
+          return none
+        }
+        held.r = reservation
+      }
+      const refused = this.raise(held.r, checked.inputTokens + checked.outputTokens, costOf({ input: checked.inputTokens, output: checked.outputTokens }, price))
+      if (refused) {
+        sendJson(res, 429, this.refusalBody(refused))
+        return none
+      }
     }
     // OpenAI の Decisions API へは、System One の形を写して送る（応答は System One の形へ戻す。openaiDecisions.ts）
     const wire = decisionWireFor(upstream.url)

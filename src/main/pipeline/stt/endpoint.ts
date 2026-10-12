@@ -1,4 +1,5 @@
 import { sanitizeHeaders, type AiEndpointConfig } from '@shared/aiProviders'
+import { isLocalModelEndpoint } from '@shared/localModels'
 
 /**
  * 文字起こしの接続先と費用上限の小さな判定。
@@ -32,6 +33,14 @@ export function normalizeBaseUrl(raw: string | undefined): string | null {
 export function exceedsCostLimit(reservedUsd: number, costUsd: number, limitUsd: number | null | undefined): boolean {
   if (limitUsd === null) return false
   return reservedUsd + costUsd > (limitUsd ?? DEFAULT_COST_LIMIT_USD)
+}
+
+/**
+ * 接続先に使う費用の上限。端末内・LAN のサーバー（互換の whisper サーバー・LM Studio など）は費用がかからないので上限なし（null）。
+ * 単価の分からない互換サーバーは高めの概算で数えるため、ローカルでも数分で「費用の上限」に当たっていた（2026-10-12 本人の指摘）
+ */
+export function costLimitForEndpoint(baseUrl: string | undefined, limitUsd: number | null | undefined): number | null | undefined {
+  return isLocalModelEndpoint(baseUrl) ? null : limitUsd
 }
 
 /**

@@ -4,7 +4,8 @@ import { stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { promisify } from 'node:util'
 import { accountDisplayName } from '@shared/accounts'
-import { agentLabel } from '@shared/agentCatalog'
+import { agentLabel, BUILTIN_AGENTS } from '@shared/agentCatalog'
+import { agentUsesLocalModel } from '@shared/localModels'
 import { DEFAULT_LIMIT_FAILOVER, sanitizeLimitFailover, type FailoverLaunchRequest, type FailoverNotice, type LimitFailoverPrefs } from '@shared/failover'
 import type { AccountAgent, TuiAgent } from '@shared/types'
 import type { UsageState } from '@shared/usage'
@@ -57,6 +58,9 @@ import {
  * - 上限の手前（handoffPercent。既定 98%）: 動いているタブのアカウントがそこまで来たら、上限の知らせを待たずに、
  *   手が空いたところで今の Agent に進み具合を引き継ぎのファイルへまとめさせて閉じ、次の優先順位で新しいタブを開いて続ける
  *   （人がいない夜間も、上限で止まったまま・新しいセッションを人が押すのを待つことにならないように）
+ * - 端末内・LAN のモデルで動く Agent（起動の設定が `ollama launch …`・Codex の --oss・ローカルの URL など。
+ *   @shared/localModels の agentUsesLocalModel）には、上限の知らせ・使用量・上限の手前の引き継ぎのどれでも切り替えをかけない
+ *   （提供元の上限が無い。2026-10-12 本人の指摘）
  */
 
 /** 上限の知らせを見てから、画面の末尾で確かめるまで（描き直しの途中の誤検出を避ける） */
@@ -127,6 +131,13 @@ export function setFailoverPrefs(next: unknown): LimitFailoverPrefs {
   syncReturnTimer()
   syncNearLimitTimer()
   return prefs
+}
+
+/** 端末内・LAN のモデルで動く Agent（組み込みとカスタムの起動の設定、Ferret が受け継いだ接続先の環境変数から） */
+function localAgents(): Set<TuiAgent> {
+  const prefs = currentSettings().agents
+  const all: TuiAgent[] = [...BUILTIN_AGENTS, ...(Array.isArray(prefs?.customAgents) ? prefs.customAgents.map((c) => c.id) : [])]
+  return new Set(all.filter((agent) => agentUsesLocalModel(agent, prefs, process.env)))
 }
 
 function activeAccountId(agent: AccountAgent): string | null {
@@ -205,6 +216,8 @@ async function onLimitSeen(id: string): Promise<void> {
   const state = await terminals.agentState(id)
   const agent = state.agent
   if (!agent || state.kind === 'unknown') return
+  // ローカルのモデルで動く Agent には提供元の上限が無い。上限らしい行が出ても切り替えない
+  if (localAgents().has(agent)) return
   if (!limitOnScreen(agent, terminals.screenText(id))) return
   const from: FailoverTarget = isAccountAgentId(agent) ? { agent, accountId: launchedAccount.get(id) ?? activeAccountId(agent) } : { agent }
   flow('failover limit', { agent: isAccountAgentId(agent) ? agent : 'other' })
@@ -239,7 +252,7 @@ async function planInput(from: FailoverTarget): Promise<PlanInput> {
   const chrome = await claudeChromeAccounts().catch(() => new Set<string | null>())
   candidates.claude = candidates.claude.map((c) => (chrome.has(c.accountId) ? { ...c, chrome: true } : c))
   const available = new Set(options.filter((o) => o.installed && o.enabled).map((o) => o.id))
-  return { prefs, from, accounts: candidates, available, limited, now: Date.now() }
+  return { prefs, from, accounts: candidates, available, limited, now: Date.now(), local: localAgents() }
 }
 
 function markLimited(target: FailoverTarget, until: number): void {
@@ -492,7 +505,10 @@ async function waitIdleForSwitch(id: string, agent: AccountAgent, accountId: str
 export function onUsageChanged(state: UsageState): void {
   const prefs = failoverPrefs()
   if (!prefs.enabled) return
+  const local = localAgents()
   for (const agent of ['claude', 'codex'] as const) {
+    // ローカルのモデルで動くなら、アカウントの使用量でアカウントを切り替えない
+    if (local.has(agent)) continue
     const limits = state[agent]
     if (limits?.status !== 'ok') continue
     const used = maxUsedPercent(limits)
@@ -603,7 +619,7 @@ export async function checkNearLimit(): Promise<void> {
     if (!tabs.some((tab) => tab.agent === agent)) continue
     for (const row of await getAccountUsage(agent).catch(() => [])) used.set(limitKey({ agent, accountId: row.accountId }), maxUsedPercent(row.rateLimits))
   }
-  const due = nearLimitTabs(tabs, (agent, accountId) => used.get(limitKey({ agent, accountId })) ?? null, prefs.handoffPercent, nearLimitStarted, busy)
+  const due = nearLimitTabs(tabs, (agent, accountId) => used.get(limitKey({ agent, accountId })) ?? null, prefs.handoffPercent, nearLimitStarted, busy, localAgents())
   for (const tab of due) {
     nearLimitStarted.add(tab.id)
     flow('failover near limit', { agent: tab.agent })

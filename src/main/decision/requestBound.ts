@@ -7,7 +7,7 @@
  *   - model は Ferret の設定のモデルに書き換える（Agent が高いモデルを選べない）
  *   - 入力のトークン数は、文字のバイト数（1トークンは1バイト以上）＋画像1枚あたりの上限＋接続先が足す分で上から押さえ、
  *     出力は質問の数で上から押さえる（System One の答えは質問ごとの短い値）
- *   - 費用は、単価を設定していればその単価、ローカル（127.0.0.1・localhost）なら 0、
+ *   - 費用は、単価を設定していればその単価、ローカル（127.0.0.1・localhost・LAN。@shared/localModels）なら 0、
  *     それ以外の単価の分からない接続先は高めの既定の単価（FALLBACK_PRICING）で見込む（費用の枠を素通りさせない）
  * 中継はこの上限をまるごと予約してから送り、収まらなければ送らずに断る。
  *
@@ -15,6 +15,7 @@
  */
 import type { DecisionPricing } from '@shared/decision'
 import { isRecord } from '@shared/guards'
+import { isLocalModelEndpoint } from '@shared/localModels'
 
 export const DECISION_REQUEST_LIMITS = {
   /** 質問の数 */
@@ -107,14 +108,12 @@ export function checkDecisionRequest(raw: Buffer, model: string): DecisionReques
   }
 }
 
-/** ローカルの接続先（Ollama など。費用はかからない） */
+/**
+ * ローカルの接続先（Ollama・LM Studio・LAN の GPU の PC など。費用はかからない）。
+ * 判定は @shared/localModels の isLocalModelEndpoint に揃える（中継が枠をかけない接続先と同じ）
+ */
 export function isLocalEndpoint(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase()
-    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host.endsWith('.localhost')
-  } catch {
-    return false
-  }
+  return isLocalModelEndpoint(url)
 }
 
 /** 費用の見込みに使う単価。設定した単価 > ローカルは 0 > 高めの既定 */
