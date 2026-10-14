@@ -144,7 +144,7 @@ export function resolveRememberedTarget(saved: SendTarget | null, agentOptions: 
  * ここに無い Agent（カスタムを含む）は、貼り付けるだけで Enter を押さない。
  * 入力欄の作りが分からないまま Enter を送ると、貼った本文が途中で送られたり、別の操作になったりするため
  */
-const SUBMITS_PASTE: ReadonlySet<BuiltinAgent> = new Set<BuiltinAgent>(['claude', 'codex', 'gemini', 'cursor', 'copilot', 'opencode'])
+const SUBMITS_PASTE: ReadonlySet<BuiltinAgent> = new Set<BuiltinAgent>(['claude', 'codex', 'gemini', 'cursor', 'copilot', 'opencode', 'antigravity'])
 
 export function agentSubmitsPaste(agent: TuiAgent | null): boolean {
   return agent !== null && SUBMITS_PASTE.has(agent as BuiltinAgent)
