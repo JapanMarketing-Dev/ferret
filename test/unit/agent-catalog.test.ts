@@ -30,10 +30,13 @@ const prefsWithCustom: AgentPreferences = {
 
 describe('カタログ（Orca の既定値）', () => {
   it('主要なものを含み、公式ドキュメント（2026-10）どおりの検出コマンドと権限確認を省く引数を持つ', () => {
-    for (const agent of ['gemini', 'opencode', 'cursor', 'copilot', 'devin', 'aider', 'grok', 'qwen-code', 'amp', 'droid', 'kiro'] as const) {
+    for (const agent of ['antigravity', 'gemini', 'opencode', 'cursor', 'copilot', 'devin', 'aider', 'grok', 'qwen-code', 'amp', 'droid', 'kiro'] as const) {
       expect(BUILTIN_AGENTS).toContain(agent)
     }
     expect(AGENT_CATALOG.gemini).toMatchObject({ detectCmd: 'gemini', yoloArgs: '--approval-mode=yolo' })
+    // Gemini CLI の個人ログインの終了で、Google の Agent は Antigravity（agy 1.3.4 の --help で確認）を主要に置く
+    expect(AGENT_CATALOG.antigravity).toMatchObject({ detectCmd: 'agy', yoloArgs: '--dangerously-skip-permissions', popular: true })
+    expect(AGENT_CATALOG.gemini.popular).toBeUndefined()
     // Cursor の CLI は agent に改名（旧名 cursor-agent も見つける）
     expect(AGENT_CATALOG.cursor).toMatchObject({ detectCmd: 'agent', aliases: ['cursor-agent'], yoloArgs: '--force' })
     expect(AGENT_CATALOG.devin).toMatchObject({ detectCmd: 'devin', yoloArgs: '--permission-mode bypass --respect-workspace-trust false' })
@@ -65,7 +68,7 @@ describe('カタログ（Orca の既定値）', () => {
       expect(typeof entry.yoloArgs).toBe('string')
     }
     // 主要なものは先頭にまとまっている
-    expect(BUILTIN_AGENTS.slice(0, 10)).toEqual(['claude', 'codex', 'gemini', 'cursor', 'copilot', 'devin', 'opencode', 'amp', 'droid', 'kiro'])
+    expect(BUILTIN_AGENTS.slice(0, 10)).toEqual(['claude', 'codex', 'antigravity', 'cursor', 'copilot', 'devin', 'opencode', 'amp', 'droid', 'kiro'])
   })
 
   it('Orca の README「Supported Agents」のすべてに項目があり、表示名も揃っている', () => {

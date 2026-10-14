@@ -38,6 +38,7 @@ interface TerminalKeyContext {
  *       claude   https://code.claude.com/docs/en/interactive-mode （Multiline input: Ctrl+J は設定なしで全端末）
  *       codex    openai/codex codex-rs/tui/src/keymap.rs（insert_newline の既定に ctrl-j）
  *       gemini   google-gemini/gemini-cli packages/cli/src/ui/key/keyBindings.ts（NEWLINE に ctrl+j）
+ *       antigravity https://antigravity.google/docs/cli/reference （Shift+Enter か Ctrl+J で改行）
  *       qwen     QwenLM/qwen-code packages/cli/src/ui/components/shared/text-buffer.ts（input === '\n' で改行）
  *       cursor   https://cursor.com/docs/cli/reference/terminal-setup （Ctrl+J は全端末で改行）
  *       crush    charmbracelet/crush internal/ui/model/keys.go（Newline に ctrl+j。alt+enter は無い）
@@ -48,7 +49,7 @@ interface TerminalKeyContext {
  *       aider    aider/io.py（escape, enter で改行。LF は prompt_toolkit が Enter として送信する）
  *       そのほか・利用者が登録した Agent: 確かめた10本のうち crush 以外すべてで改行になる、最も広く効くもの
  */
-const LF_NEWLINE_AGENTS: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'qwen-code', 'cursor', 'crush', 'kimi'])
+const LF_NEWLINE_AGENTS: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'antigravity', 'qwen-code', 'cursor', 'crush', 'kimi'])
 
 /** Shift+Enter で送るキー列。Agent が前面にいなければ Enter と同じ CR（シェルでは実行） */
 export function agentNewlineData(agent: TuiAgent | null): string {

@@ -32,7 +32,7 @@ export const DEFAULT_LIMIT_FAILOVER: LimitFailoverPrefs = {
   enabled: true,
   thresholdPercent: 95,
   switchAccounts: true,
-  agentOrder: ['claude', 'codex', 'gemini'],
+  agentOrder: ['claude', 'codex', 'antigravity'],
   returnToPreferred: false,
   handoffPercent: 98
 }

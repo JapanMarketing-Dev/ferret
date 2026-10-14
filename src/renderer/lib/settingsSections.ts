@@ -56,7 +56,7 @@ const SECTION_KEYWORDS: Record<SettingsSectionId, readonly string[]> = {
     '判定', '検証', '完了', 'キー'],
   orchestra: ['orchestra', 'orchestrator', 'all products', 'shared rules', 'per-product', 'infrastructure', 'tags', 'instances', 'common',
     'オーケストラ', '全体', '共通', '個別', 'ルール', 'インフラ', 'タグ', 'インスタンス', 'プロダクト'],
-  agents: ['agent', 'claude', 'codex', 'gemini', 'opencode', 'cursor', 'copilot', 'aider', 'grok', 'qwen', 'amp', 'custom', 'install',
+  agents: ['agent', 'claude', 'codex', 'antigravity', 'agy', 'gemini', 'opencode', 'cursor', 'copilot', 'aider', 'grok', 'qwen', 'amp', 'custom', 'install',
     'command', 'args', 'arguments', 'prompt', 'instruction', 'startup', 'エージェント', 'カスタム', 'インストール', 'コマンド', '引数', '指示', 'プロンプト', '起動'],
   accounts: ['account', 'login', 'sign in', 'usage', 'manage', 'limit', 'failover', 'switch', 'アカウント', 'ログイン', '使用量', '管理', '上限', '切り替え'],
   extensions: ['extension', 'extensions', 'chrome', 'add-on', 'addon', 'plugin', 'browser', 'popup', 'crx', 'edge', 'brave',

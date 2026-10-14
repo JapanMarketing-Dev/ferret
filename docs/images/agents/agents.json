@@ -206,12 +206,6 @@
       "icon": "docs/images/agents/rovo.png"
     },
     {
-      "id": "gemini",
-      "name": "Gemini CLI",
-      "homepageUrl": "https://github.com/google-gemini/gemini-cli",
-      "icon": "docs/images/agents/gemini.png"
-    },
-    {
       "id": "aider",
       "name": "Aider",
       "homepageUrl": "https://aider.chat/docs/install.html",
@@ -234,6 +228,12 @@
       "name": "ForgeCode",
       "homepageUrl": "https://forgecode.dev/docs/",
       "icon": null
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "homepageUrl": "https://github.com/google-gemini/gemini-cli",
+      "icon": "docs/images/agents/gemini.png"
     },
     {
       "id": "junie",

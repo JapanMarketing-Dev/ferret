@@ -305,7 +305,7 @@ async function handle(mail: AgentMail, status: (line: string) => Promise<void>):
 async function handleSend(mail: AgentMail, from: TerminalView, status: (line: string) => Promise<void>): Promise<void> {
   const prefs = currentSettings().agents
   const agent = normalizeAgentTarget(mail.to, prefs.customAgents)
-  if (!agent) return status(`error: unknown agent "${mail.to}". Use an agent name such as codex, claude or gemini.`)
+  if (!agent) return status(`error: unknown agent "${mail.to}". Use an agent name such as codex, claude or antigravity.`)
   if (prefs.disabledAgents.includes(agent)) return status(`error: ${agentLabel(agent, prefs)} is turned off in Ferret (Settings > Agents).`)
   const label = agentLabel(agent, prefs)
   const number = ++counter

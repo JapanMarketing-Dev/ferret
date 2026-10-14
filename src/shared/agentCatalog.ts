@@ -66,7 +66,7 @@ interface AgentCatalogEntry {
 export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'claude',
   'codex',
-  'gemini',
+  'antigravity',
   'cursor',
   'copilot',
   'devin',
@@ -76,7 +76,6 @@ export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'kiro',
   'aider',
   'ante',
-  'antigravity',
   'aug',
   'autohand',
   'blackbox',
@@ -89,6 +88,7 @@ export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'dsh',
   'forge',
   'freebuff',
+  'gemini',
   'goose',
   'grok',
   'hermes',
@@ -134,14 +134,15 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     verified: true,
     popular: true
   },
+  // 2026-10 から個人の Google アカウントでのログインが使えなくなり（「This client is no longer supported for Gemini
+  // Code Assist for individuals」）、Antigravity への移行を案内される。API キー・Vertex AI では動くので一覧には残す
   gemini: {
     label: 'Gemini CLI',
     detectCmd: 'gemini',
     yoloArgs: '--approval-mode=yolo',
     install: 'npm install -g @google/gemini-cli',
     homepageUrl: 'https://github.com/google-gemini/gemini-cli',
-    verified: true,
-    popular: true
+    verified: true
   },
   cursor: {
     label: 'Cursor',
@@ -227,13 +228,17 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     homepageUrl: 'https://aider.chat/docs/install.html',
     verified: true
   },
+  // Gemini CLI の後継（Google の Agent）。agy 1.3.4 の --help と公式の資料で確かめた（2026-10）
   antigravity: {
     label: 'Antigravity',
     detectCmd: 'agy',
     yoloArgs: '--dangerously-skip-permissions',
     install: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    // 公式の Windows CMD の手順（antigravity.google/docs/cli/install、2026-10 確認）
+    installWindows: 'curl -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd',
     homepageUrl: 'https://antigravity.google/docs/cli/install',
-    verified: true
+    verified: true,
+    popular: true
   },
   ante: {
     label: 'Ante',

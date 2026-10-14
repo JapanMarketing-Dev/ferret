@@ -358,7 +358,7 @@ function planInput(overrides: Partial<PlanInput> = {}): PlanInput {
       ],
       codex: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }]
     },
-    available: new Set(['claude', 'codex', 'gemini']),
+    available: new Set(['claude', 'codex', 'antigravity']),
     limited: new Map(),
     now: 1_000_000,
     ...overrides
@@ -367,18 +367,18 @@ function planInput(overrides: Partial<PlanInput> = {}): PlanInput {
 
 describe('上限での自動切り替え: ローカルのモデルで動く Agent は上限で外さない', () => {
   it('ローカルの Agent が上限らしい知らせを出しても、切り替え先を選ばない', () => {
-    expect(planFailover(planInput())).toEqual({ agent: 'gemini' })
+    expect(planFailover(planInput())).toEqual({ agent: 'antigravity' })
     expect(planFailover(planInput({ local: new Set(['claude']) }))).toBeNull()
   })
 
   it('切り替え先がローカルの Agent なら、使用量のしきい値・上限とみなした時刻で外さない', () => {
-    const limited = new Map([[limitKey({ agent: 'codex', accountId: null }), 2_000_000], [limitKey({ agent: 'gemini' }), 2_000_000]])
-    // クラウドのままなら codex（100%・上限中）も gemini（上限中）も選べない
+    const limited = new Map([[limitKey({ agent: 'codex', accountId: null }), 2_000_000], [limitKey({ agent: 'antigravity' }), 2_000_000]])
+    // クラウドのままなら codex（100%・上限中）も antigravity（上限中）も選べない
     expect(planFailover(planInput({ limited, accounts: { claude: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }], codex: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }] } }))).toBeNull()
     expect(planFailover(planInput({ limited, local: new Set(['codex']), accounts: { claude: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }], codex: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }] } })))
       .toEqual({ agent: 'codex', accountId: null })
-    expect(planFailover(planInput({ limited, local: new Set(['gemini']), accounts: { claude: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }], codex: [] } })))
-      .toEqual({ agent: 'gemini' })
+    expect(planFailover(planInput({ limited, local: new Set(['antigravity']), accounts: { claude: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }], codex: [] } })))
+      .toEqual({ agent: 'antigravity' })
   })
 
   it('usableAccounts: ローカルでもログインしていないアカウントは使わない', () => {

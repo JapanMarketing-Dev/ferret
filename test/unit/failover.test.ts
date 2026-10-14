@@ -78,7 +78,7 @@ function input(overrides: Omit<Partial<PlanInput>, 'prefs'> & { prefs?: Partial<
       ],
       codex: [{ accountId: null, signedIn: true, usedPercent: 5, active: true }]
     },
-    available: new Set(['claude', 'codex', 'gemini']),
+    available: new Set(['claude', 'codex', 'antigravity']),
     limited: new Map(),
     now: 1_000_000,
     ...overrides,
@@ -125,11 +125,11 @@ describe('切り替え先の選び方', () => {
 
   it('優先順位の順に、インストール済みで上限でない Agent を選ぶ。一覧に無い Agent は使わない', () => {
     const accounts = { claude: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }], codex: [{ accountId: null, signedIn: true, usedPercent: 99, active: true }] }
-    expect(planFailover(input({ accounts }))).toEqual({ agent: 'gemini' })
+    expect(planFailover(input({ accounts }))).toEqual({ agent: 'antigravity' })
     expect(planFailover(input({ accounts, available: new Set(['claude', 'codex']) }))).toBeNull()
     expect(planFailover(input({ accounts, prefs: { agentOrder: ['claude', 'codex'] } }))).toBeNull()
-    expect(planFailover(input({ accounts, limited: new Map([['gemini', 2_000_000]]) }))).toBeNull()
-    expect(planFailover(input({ accounts, prefs: { agentOrder: ['gemini', 'claude', 'codex'] } }))).toEqual({ agent: 'gemini' })
+    expect(planFailover(input({ accounts, limited: new Map([['antigravity', 2_000_000]]) }))).toBeNull()
+    expect(planFailover(input({ accounts, prefs: { agentOrder: ['antigravity', 'claude', 'codex'] } }))).toEqual({ agent: 'antigravity' })
   })
 
   it('Codex が上限なら、先頭の Claude Code の枠が戻っていればそちらへ（今の Agent は飛ばす）', () => {
@@ -142,7 +142,7 @@ describe('切り替え先の選び方', () => {
       claude: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }],
       codex: [{ accountId: null, signedIn: true, usedPercent: 100, active: true }, { accountId: 'k', signedIn: true, usedPercent: 0, active: false }]
     }
-    expect(planFailover(input({ accounts, prefs: { switchAccounts: false } }))).toEqual({ agent: 'gemini' })
+    expect(planFailover(input({ accounts, prefs: { switchAccounts: false } }))).toEqual({ agent: 'antigravity' })
     expect(planFailover(input({ accounts }))).toEqual({ agent: 'codex', accountId: 'k' })
   })
 
@@ -267,9 +267,9 @@ describe('直前の入力', () => {
 
 
 describe('設定', () => {
-  it('既定は入・95%・アカウントを先に・Claude Code → Codex → Gemini CLI・戻さない', () => {
+  it('既定は入・95%・アカウントを先に・Claude Code → Codex → Antigravity・戻さない', () => {
     expect(sanitizeLimitFailover(undefined)).toEqual(DEFAULT_LIMIT_FAILOVER)
-    expect(DEFAULT_LIMIT_FAILOVER).toEqual({ enabled: true, thresholdPercent: 95, switchAccounts: true, agentOrder: ['claude', 'codex', 'gemini'], returnToPreferred: false, handoffPercent: 98 })
+    expect(DEFAULT_LIMIT_FAILOVER).toEqual({ enabled: true, thresholdPercent: 95, switchAccounts: true, agentOrder: ['claude', 'codex', 'antigravity'], returnToPreferred: false, handoffPercent: 98 })
   })
 
   it('壊れた値は直す（しきい値は 50〜100、知らない Agent・重複は除く）', () => {

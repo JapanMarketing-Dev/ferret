@@ -393,7 +393,7 @@ export interface Settings {
   agents: AgentPreferences
   /** Claude Code / Codex のアカウント切り替え。省略時はどちらもシステムの既定アカウント */
   agentAccounts?: AgentAccountsSettings
-  /** 上限での自動切り替え（src/shared/failover.ts）。省略時は既定（入・95%・Claude Code → Codex → Gemini CLI） */
+  /** 上限での自動切り替え（src/shared/failover.ts）。省略時は既定（入・95%・Claude Code → Codex → Antigravity） */
   limitFailover?: LimitFailoverPrefs
   /** Agentへ渡す1行の指示のテンプレート（{{path}} = feedback.md の絶対パス、{{relpath}} = 相対パス）。未設定・空なら既定文 */
   agentPrompt?: string

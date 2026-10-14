@@ -113,6 +113,8 @@ const TARGET_ALIASES: Record<string, string> = {
   claudecode: 'claude',
   cc: 'claude',
   'gemini-cli': 'gemini',
+  agy: 'antigravity',
+  'antigravity-cli': 'antigravity',
   'copilot-cli': 'copilot',
   'cursor-agent': 'cursor',
   'github-copilot': 'copilot'
@@ -263,7 +265,7 @@ set -u
 usage() {
   cat >&2 <<'EOF'
 usage:
-  ferret-agent send <agent> [--file <path>] [message...]    ask another agent (codex, claude, gemini, ...)
+  ferret-agent send <agent> [--file <path>] [message...]    ask another agent (codex, claude, antigravity, ...)
   ferret-agent reply <number> [--file <path>] [message...]  send your result back for request #<number>
 The message can also come from stdin. Ferret pastes it into the other agent's terminal and submits it.
 EOF
@@ -401,7 +403,7 @@ export function renderAgentMailSkill(version: string): string {
   const cli = 'ferret-agent'
   return `---
 name: ${AGENT_MAIL_SKILL_NAME}
-description: Ask another coding agent (Codex, Claude Code, Gemini CLI, or any agent Ferret can start) that runs in a visible Ferret terminal to do a task — security check, code review, testing, verification, investigation, implementation — and get its result back as a file, then keep going back and forth. Use when the user asks you to have another agent do something ("have Codex check this", "ask Claude Code to…", "get a second opinion from Codex", "Codexにセキュリティチェックしてもらって", "Codexに頼んで"), and when a message starting with "[Ferret agent mail" arrives. Works only inside Ferret terminals (the ferret-agent command is on PATH there).
+description: Ask another coding agent (Codex, Claude Code, Antigravity, or any agent Ferret can start) that runs in a visible Ferret terminal to do a task — security check, code review, testing, verification, investigation, implementation — and get its result back as a file, then keep going back and forth. Use when the user asks you to have another agent do something ("have Codex check this", "ask Claude Code to…", "get a second opinion from Codex", "Codexにセキュリティチェックしてもらって", "Codexに頼んで"), and when a message starting with "[Ferret agent mail" arrives. Works only inside Ferret terminals (the ferret-agent command is on PATH there).
 ---
 
 ${AGENT_MAIL_SKILL_MARKER}
@@ -419,7 +421,7 @@ Ferret puts the \`ferret-agent\` command on PATH in its terminals. If \`command 
 ${cli} send codex "Run a security review of the changes in src/auth (git diff main). List concrete issues with file:line and a fix for each."
 \`\`\`
 
-- The recipient is an agent name: \`codex\`, \`claude\`, \`gemini\`, \`cursor\`, \`copilot\`, … (the same agent as you also works: it goes to another terminal).
+- The recipient is an agent name: \`codex\`, \`claude\`, \`antigravity\`, \`cursor\`, \`copilot\`, … (the same agent as you also works: it goes to another terminal).
 - For a long request, write it to a file and pass \`--file <path>\` (any message after it is sent too). The message can also come from stdin.
 - The command prints whether Ferret delivered it and the request number (#N).
 - Then do not wait, poll or sleep for the answer. Continue with work that does not depend on it, or end your turn. The reply arrives in your terminal as a new message that starts with \`[Ferret agent mail #N reply]\`, with the path of a result file. Read that file and continue.
