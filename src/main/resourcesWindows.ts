@@ -27,6 +27,14 @@ const CIM_TIMEOUT_MS = 15_000
 const CIM_MAX_FAILURES = 4
 /** typeperf も続けて失敗したら、この回数で取得をやめる（Resource Manager はアプリの行だけになる） */
 const TYPEPERF_MAX_FAILURES = 3
+/*
+ * typeperf の時間切れ。CPU が絞られている（powerMonitor の speed-limit-change が続く）・重い処理の最中は、
+ * 1秒の計測でも5秒を超えることがある（FERRET-1Z: ferret@0.6.28、Windows で3回続けて時間切れ）。
+ * CIM と同じく長めにし、時間切れは混んでいるだけとみなして、やめずに間を空けて試し直す（送らない）
+ */
+const TYPEPERF_TIMEOUT_MS = 15_000
+const TYPEPERF_RETRY_AFTER_MS = 30_000
+const TYPEPERF_RETRY_MAX_MS = 10 * 60_000
 const QUERY_MAX_BUFFER = 10 * 1024 * 1024
 const CPU_MIN_SAMPLE_MS = 250
 /** 取得は ResourceCollector が 15 秒に1回までに絞るので、それより長い間（スリープ・閉じていた）だけを古いとみなす */
@@ -215,7 +223,7 @@ export function resetReportedProbeFailuresForTest(): void {
 /**
  * Windows のプロセス一覧を取る係。CPU% は前回との累積CPU時間の差から出すので、前回の値を持つ。
  * CIM が失敗したら typeperf（メモリだけ）に切り替え、30秒後にまた CIM を試す。続けて失敗するたびに間を倍にし
- * （最長10分）、CIM_MAX_FAILURES 回でやめる。typeperf も TYPEPERF_MAX_FAILURES 回続けて失敗したら取得をやめる。
+ * （最長10分）、CIM_MAX_FAILURES 回でやめる。typeperf も TYPEPERF_MAX_FAILURES 回続けて失敗したら取得をやめる（時間切れは数えず、間を空けて試し直す）。
  * 失敗は種類だけを、その取得方法をやめるとき（続けて失敗したとき）に、1回の起動で1度だけ送る（reportProbeFailure）。
  */
 export class WindowsProcessCollector {
@@ -224,6 +232,9 @@ export class WindowsProcessCollector {
   private retryCimAtMs = 0
   private cimFailures = 0
   private typeperfFailures = 0
+  /** typeperf が続けて時間切れになった回数と、次に試す時刻（時間切れは止めずに間を空ける） */
+  private typeperfTimeouts = 0
+  private retryTypeperfAtMs = 0
   /** 直前の CIM の失敗の種類（やめるときに送る） */
   private lastCimFailure: ReturnType<typeof execFailureKind> = 'other'
 
@@ -277,14 +288,22 @@ export class WindowsProcessCollector {
 
   private async viaTypeperf(): Promise<ProcRow[]> {
     if (this.typeperfFailures >= TYPEPERF_MAX_FAILURES) return []
+    if (this.now() < this.retryTypeperfAtMs) return []
     try {
-      const rows = parseTypeperfProcessOutput(await this.exec('typeperf.exe', [...TYPEPERF_COUNTERS, '-sc', '1', '-si', '0']))
+      const rows = parseTypeperfProcessOutput(await this.exec('typeperf.exe', [...TYPEPERF_COUNTERS, '-sc', '1', '-si', '0'], { timeoutMs: TYPEPERF_TIMEOUT_MS }))
       this.typeperfFailures = 0
+      this.typeperfTimeouts = 0
       return rows
     } catch (err) {
       const kind = execFailureKind(err)
-      this.typeperfFailures += 1
       console.warn(`[resources] typeperf でプロセスを取れませんでした（${kind}）`)
+      if (kind === 'timeout') {
+        // 混んでいるだけ（FERRET-1Z）。やめず・送らず、続くほど間を空けて試し直す
+        this.typeperfTimeouts += 1
+        this.retryTypeperfAtMs = this.now() + Math.min(TYPEPERF_RETRY_MAX_MS, TYPEPERF_RETRY_AFTER_MS * 2 ** (this.typeperfTimeouts - 1))
+        return []
+      }
+      this.typeperfFailures += 1
       if (this.typeperfFailures === TYPEPERF_MAX_FAILURES) reportProbeFailure(new ResourceProbeError('typeperf', kind))
       return []
     }

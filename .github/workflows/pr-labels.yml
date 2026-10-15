@@ -1,5 +1,5 @@
 # PR の変更したパスからラベルを付ける（設定: .github/labeler.yml）。
-# pull_request_target は PR を受け取る側（develop / main）の workflow で動き、フォークからの PR にもラベルを付けられる。
+# pull_request_target は PR を受け取る側（main）の workflow で動き、フォークからの PR にもラベルを付けられる。
 # そのため PR のコードは取ってこない（checkout しない）。labeler は API で変更したファイルの名前だけを見る。secrets は使わない。
 name: PR labels
 

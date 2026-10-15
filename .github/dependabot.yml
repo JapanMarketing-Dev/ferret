@@ -1,5 +1,5 @@
 # Adapted from Orca's .github/dependabot.yml (MIT, Copyright 2026 Lovecast Inc.).
-# 依存の更新の PR を develop へ出す（main はリリース専用）。
+# 依存の更新の PR を main へ出す（ブランチは main だけ）。
 # - GitHub Actions: 週1回、まとめて1つの PR。uses は SHA 固定のまま、版のコメントも Dependabot が書き換える
 #   （test/unit/release-policy.test.ts が形を確かめる）
 # - npm（pnpm-lock.yaml）: 月1回、minor / patch をまとめて1つの PR。major（Electron など）は手で上げる
@@ -8,7 +8,7 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    target-branch: develop
+    target-branch: main
     schedule:
       interval: weekly
     cooldown:
@@ -23,7 +23,7 @@ updates:
 
   - package-ecosystem: npm
     directory: /
-    target-branch: develop
+    target-branch: main
     schedule:
       interval: monthly
     cooldown:

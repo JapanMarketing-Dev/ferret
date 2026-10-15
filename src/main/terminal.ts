@@ -465,6 +465,7 @@ export class TerminalManager {
   /** extraArgs は main だけが渡す（決まった起動の preset。renderer からは渡せない） */
   async create(options: TerminalCreateOptions, internal: { extraArgs?: readonly string[] } = {}): Promise<TerminalTabInfo> {
     const { size, agent } = options
+    if (this.disposed) throw new UserFacingError(t('terminal.errors.shuttingDown'))
     this.lastSize = { cols: size.cols, rows: size.rows }
     const nodePty = await loadNodePty()
     // アカウントのログインは、プロジェクトではないフォルダで動かす（プロジェクトに置かれた同じ名前のコマンドを拾わない。security-4 [1]）
@@ -567,6 +568,13 @@ export class TerminalManager {
       reportHandled(err, { area: 'terminal', op: 'prepare decision env' })
       return {}
     }) : {}
+    // 待っている間（実行ファイルを探す・フォルダの信頼を書く・判定モデルの環境）に終了が始まった：起動しない。
+    // 終了の後始末はその時点の PTY しか待たないので、ここで起動すると Node の環境の解体中に PTY の終了通知が届き、
+    // main がネイティブに落ちる（FERRET-20：起動時にタブを戻している途中で閉じた Windows の cpp-exception）
+    if (this.disposed) {
+      this.onSessionClosed?.(id)
+      throw new UserFacingError(t('terminal.errors.shuttingDown'))
+    }
     let pty: ReturnType<typeof nodePty.spawn>
     try {
       pty = nodePty.spawn(shell.file, shell.args, {

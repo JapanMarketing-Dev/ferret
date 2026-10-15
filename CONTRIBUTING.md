@@ -7,7 +7,7 @@ Issues and pull requests are welcome. Japanese or English is fine.
 - Report bugs and ideas in Issues. Steps to reproduce, your OS and the MOVIE-ADE version (shown in the footer) help a lot.
 - Before attaching recordings, screenshots or logs, check that they show no API keys, tokens, or personal or customer information.
 - For large changes, open an issue first to discuss the approach.
-- Open pull requests against `develop`. `develop` is the development branch; `main` holds releases only.
+- Open pull requests against `main`. `main` is the only branch.
 
 ## Setup
 

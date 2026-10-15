@@ -5,7 +5,7 @@ name: CodeQL
 
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
   pull_request:
   schedule:
     # 毎週月曜（新しく見つかった種類の問題を、変更が無くても拾う）

@@ -5,12 +5,23 @@
  * 3つのOSで利用できるが、取得できない場合はモジュール読み込み時刻へ退避する。
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { uptime as osUptime } from 'node:os'
 import { dirname } from 'node:path'
 import { reportPerf } from '@shared/report'
 import { SLOW_STARTUP_MS } from '@shared/telemetry'
 import { slowStartupReport, startupBreakdown } from '@shared/startupBreakdown'
 
 const moduleLoadedAt = Date.now()
+
+/** OS を起動してからの ms。取れなければ null */
+function systemUptime(): number | null {
+  try {
+    const seconds = osUptime()
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : null
+  } catch {
+    return null
+  }
+}
 
 function processCreationTime(): number | null {
   try {
@@ -99,8 +110,10 @@ export function reportInteractive(): { totalMs: number; marks: Record<string, nu
     // 目標を大きく超えたら Sentry へ warning を1件（1回の起動で1度だけ。内訳の名前と時間だけを付ける）。
     // JS より後の遅れだけを slow-startup として数え、JS より前（Gatekeeper の検査・dyld など）で超えたものは slow-pre-js に分ける
     const timing = startupBreakdown({ totalMs, origin, moduleLoadedAt, originSource: creationTime === null ? 'module' : 'process', marks: marksSnapshot() })
-    const slow = slowStartupReport(timing, SLOW_STARTUP_MS, { firstLaunchOfVersion })
-    if (slow) reportPerf(slow.perf, slow.ms, { tags: { ...startupTags, ...timing.tags }, context: timing.context })
+    // OS を起動した直後（ログイン項目と取り合う）は Ferret の外の遅れ（FERRET-K）。分からなければ数える
+    const systemUptimeMs = systemUptime()
+    const slow = slowStartupReport(timing, SLOW_STARTUP_MS, { firstLaunchOfVersion, systemUptimeMs })
+    if (slow) reportPerf(slow.perf, slow.ms, { tags: { ...startupTags, ...timing.tags }, context: { ...timing.context, app: timing.appMs === null ? 'unknown' : `${timing.appMs}ms`, first_launch_of_version: String(firstLaunchOfVersion), system_uptime: systemUptimeMs === null ? 'unknown' : `${Math.round(systemUptimeMs / 60_000)}min` } })
   }
   return { totalMs, marks: marksSnapshot() }
 }

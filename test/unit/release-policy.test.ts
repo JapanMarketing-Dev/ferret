@@ -187,12 +187,12 @@ describe('workflow 全体の決まり（Orca を参考に足した workflow に�
     expect(text).not.toMatch(/github\.event\.pull_request\.head|github\.head_ref/)
   })
 
-  it('Dependabot は develop へ出し、actions と npm を見て、出たばかりの版は待つ', () => {
+  it('Dependabot は main へ出し、actions と npm を見て、出たばかりの版は待つ', () => {
     const text = read('.github/dependabot.yml')
     const updates = text.split(/\n(?= {2}- package-ecosystem:)/).slice(1)
     expect(updates.map((u) => /package-ecosystem:\s*(\S+)/.exec(u)![1]).sort()).toEqual(['github-actions', 'npm'])
     for (const u of updates) {
-      expect(u).toMatch(/target-branch:\s*develop/)
+      expect(u).toMatch(/target-branch:\s*main/)
       expect(u).toMatch(/cooldown:\n\s+default-days:\s*[1-9]\d*/)
     }
   })
@@ -265,5 +265,23 @@ describe('スクリプトの外の道具の起動', () => {
     // relative は OS の区切り（Windows は \）で返すので / にそろえて比べる
     expect(scriptFiles.map((f) => relative(root, join(root, f)).split(sep).join('/'))).toEqual(expect.arrayContaining(['scripts/release-r2.mjs', 'scripts/release-github.mjs', 'scripts/release-tools.mjs', 'scripts/sentry-sourcemaps.mjs', 'scripts/sentry-release.mjs', 'scripts/dev.mjs', 'scripts/install-app-deps.mjs']))
     expect(workflows).toEqual(expect.arrayContaining([`${workflowDir}/release.yml`, `${workflowDir}/cross-platform.yml`]))
+  })
+})
+
+describe('ブランチは main だけ（develop は 2026-10-15 に廃止）', () => {
+  it('workflow・Dependabot・公開の手順が develop ブランチを前提にしない', () => {
+    for (const f of [...workflows, '.github/dependabot.yml', 'scripts/release-ci.mjs', 'CONTRIBUTING.md']) {
+      expect(read(f), f).not.toMatch(/\bdevelop\b/)
+    }
+    expect(read('.github/workflows/cross-platform.yml')).toMatch(/branches:\s*\[main\]/)
+    expect(read('.github/workflows/codeql.yml')).toMatch(/branches:\s*\[main\]/)
+  })
+
+  it('公開の squash は main だけを push し、既定の元も main', () => {
+    const text = read('scripts/publish-squash.sh')
+    expect(text).toContain('SOURCE_REF="${1:-main}"')
+    const push = /^PUSH_CMD="(.*)"$/m.exec(text)![1]
+    expect(push).toBe('git push $REMOTE $COMMIT:refs/heads/$BRANCH')
+    expect(push).not.toMatch(/develop/)
   })
 })

@@ -9,8 +9,9 @@
  * 再生は index.ts の ade-media（Range 付き）から読む。ページも同じ ade-media に置き、動画と同じ出どころにする
  * （出どころが違うと、canvas が汚れて録れず、音声も無音になる）。
  */
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, powerSaveBlocker } from 'electron'
 import { dirname } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { openNewFileContained, removeContained } from './sessions/containment'
 import type { TrimCut } from '@shared/trim'
 
@@ -20,6 +21,33 @@ export const TRIM_HOST_HTML = '<!doctype html><meta charset="utf-8"><title>trim<
 
 /** ページから一度に受け取る大きさ（base64 にする前のバイト数） */
 const PULL_BYTES = 2 * 1024 * 1024
+
+/** 時間切れを見張る間隔と、これより長く空いたら止められていた（スリープ・App Nap）とみなす間 */
+const DEADLINE_TICK_MS = 1000
+const DEADLINE_FROZEN_GAP_MS = 5000
+
+/**
+ * 動いていた時間だけで数える時間切れ。
+ * 裏に回ったアプリは macOS の App Nap でタイマーも再生もほとんど止まり、スリープ中も進まない。
+ * 時計だけで数えると、止められていた間に時間切れになって、戻った瞬間に失敗として送っていた（FERRET-1Y: ferret@0.6.27、
+ * メインウィンドウを隠して6分後に trim timed out）。見張りの間が DEADLINE_FROZEN_GAP_MS より空いた分は数えない
+ */
+export class AwakeDeadline {
+  private spentMs = 0
+  private lastMs: number
+
+  constructor(private readonly timeoutMs: number, startMs: number, private readonly frozenGapMs = DEADLINE_FROZEN_GAP_MS) {
+    this.lastMs = startMs
+  }
+
+  /** 見張りの1回。時間切れなら true */
+  tick(nowMs: number): boolean {
+    const gap = nowMs - this.lastMs
+    this.lastMs = nowMs
+    if (gap > 0 && gap <= this.frozenGapMs) this.spentMs += gap
+    return this.spentMs >= this.timeoutMs
+  }
+}
 
 /**
  * 元の動画（sourceUrl）から残す区間（kept、ms）だけをつないだ動画を outPath に書く。
@@ -49,11 +77,16 @@ async function renderOnce(sourceUrl: string, outPath: string, kept: TrimCut[], o
   })
   // 再生の音はスピーカーへ出さない（WebAudio で取り出す音声には入る）
   window.webContents.setAudioMuted(true)
+  // 削っている間は App Nap で止められないようにする（裏に回すと実時間で再生できず時間切れになる。FERRET-1Y）
+  const blocker = startAppNapBlocker()
   let timer: NodeJS.Timeout | undefined
   try {
     await window.loadURL(TRIM_HOST_URL)
     const work = window.webContents.executeJavaScript(`(${PAGE_SCRIPT})(${JSON.stringify(sourceUrl)}, ${JSON.stringify(kept)})`, true) as Promise<number>
-    const size = await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('trim timed out')), timeoutMs) })])
+    const deadline = new AwakeDeadline(timeoutMs, performance.now())
+    const size = await Promise.race([work, new Promise<never>((_, reject) => {
+      timer = setInterval(() => { if (deadline.tick(performance.now())) reject(new Error('trim timed out')) }, Math.min(DEADLINE_TICK_MS, Math.max(1, timeoutMs)))
+    })])
     if (!Number.isFinite(size) || size <= 0) throw new Error('trim produced no data')
     // 排他で作る（既にある名前・リンクには書かない）。親を開いて持ったまま作る
     const file = await openNewFileContained(outPath)
@@ -68,9 +101,14 @@ async function renderOnce(sourceUrl: string, outPath: string, kept: TrimCut[], o
     // ページから来た失敗が Error でなければ包む（記録に理由が残るように）
     throw err instanceof Error ? err : new Error(`trim failed: ${describeValue(err)}`)
   } finally {
-    if (timer) clearTimeout(timer)
+    if (timer) clearInterval(timer)
+    if (blocker !== null && powerSaveBlocker.isStarted(blocker)) powerSaveBlocker.stop(blocker)
     if (!window.isDestroyed()) window.destroy()
   }
+}
+
+function startAppNapBlocker(): number | null {
+  try { return powerSaveBlocker.start('prevent-app-suspension') } catch { return null }
 }
 
 /**
@@ -163,7 +201,11 @@ const PAGE_SCRIPT = `async (src, kept) => {
   await new Promise((resolve, reject) => {
     let last = video.currentTime
     let stalledSince = Date.now()
+    let tickedAt = Date.now()
     const tick = () => {
+      // 止められていた（スリープ・App Nap）あとは、止まっていた間を詰まりに数えない
+      if (Date.now() - tickedAt > 2000) stalledSince = Date.now()
+      tickedAt = Date.now()
       if (recorderError) return reject(recorderError)
       if (recorder.state === 'inactive') return reject(new Error('recorder stopped unexpectedly'))
       const ms = video.currentTime * 1000

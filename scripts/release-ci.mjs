@@ -9,7 +9,7 @@ export const REQUIRED_WORKFLOWS = ['Cross-platform']
 
 /**
  * runs（GitHub API の workflow_runs）から、その commit の判定を返す。
- * 同じワークフローが複数あれば一番新しいものを見る（main と develop の両方への push で2回動くことがある）
+ * 同じワークフローが複数あれば一番新しいものを見る（同じ commit を再実行したときなど）
  */
 export function ciVerdict(runs, sha, required = REQUIRED_WORKFLOWS) {
   const pending = []

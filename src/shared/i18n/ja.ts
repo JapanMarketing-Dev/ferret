@@ -2000,6 +2000,7 @@ export const ja: Messages = {
   'terminal.errors.nodePty': 'node-pty を読み込めませんでした。Electron 向けの再ビルドが必要です（pnpm rebuild:native）。',
   'terminal.errors.launch': '{{agent}} の{{error}}',
   'terminal.errors.unknownAgent': '{{agent}} は登録されていません。設定のエージェントの節を確認してください。',
+  'terminal.errors.shuttingDown': 'Ferret を終了しているため、ターミナルを開きませんでした。',
   'terminal.send.openTerminal': 'ターミナルを開いてください。',
   'terminal.send.busy': '送信処理中です。',
   'terminal.send.noAgent': 'このターミナルでCodexまたはClaude Codeを起動してください。',

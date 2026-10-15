@@ -178,6 +178,11 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     folderName: null
   })
   const [projects, setProjects] = useState<ProjectsState>({ projects: [], activeProjectId: null })
+  /**
+   * 起動の読み込みより後に projects:changed が届いたか。届いていれば、起動の読み込み（それより古い一覧）で上書きしない。
+   * 起動の読み込みは内蔵ブラウザの状態なども待つので、その間に変わった一覧を古いもので戻していた（issue #5）
+   */
+  const projectsFromEventRef = useRef(false)
   const [agents, setAgents] = useState<AgentPreferences>(DEFAULT_AGENT_PREFERENCES)
   /** Agentへ渡す指示のテンプレート。空なら既定文 */
   const [agentPrompt, setAgentPrompt] = useState('')
@@ -1050,7 +1055,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     ]).then(([settings, ws, state]) => {
       if (cancelled) return
       setSplitRatio(settings.splitRatio)
-      setProjects({ projects: settings.projects, activeProjectId: settings.activeProjectId })
+      if (!projectsFromEventRef.current) setProjects({ projects: settings.projects, activeProjectId: settings.activeProjectId })
       // 古い形の設定（main が古いまま動いているときなど）でも描画が落ちないよう、ここでも整える
       setAgents(sanitizeAgentPreferences(settings.agents))
       setAgentPrompt(settings.agentPrompt ?? '')
@@ -1076,6 +1081,12 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           console.log(`[startup] 操作可能まで ${timing.totalMs}ms`, timing.marks)
         })
       })
+    }).catch((err: unknown) => {
+      // どれか1つが失敗しても（画面の読み込み直しの途中など）、プロジェクトとオーケストラの一覧だけは出す（issue #5）
+      console.warn('[startup] 最初の読み込みに失敗しました', err)
+      void window.ade.invoke('project:list').then((state) => {
+        if (!cancelled && !projectsFromEventRef.current && state) setProjects(state)
+      }).catch(() => undefined)
     })
     return () => {
       cancelled = true
@@ -1087,7 +1098,10 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     // 内蔵ブラウザからの短い知らせ（タブの上限など）。フィードバックモードでは帯の案内の枠にも出る（Toast の置き先）
     const offBrowserNotice = window.ade.on('browser:notice', (message) => toast({ tone: 'warning', message }))
     const offWorkspace = window.ade.on('workspace:changed', setWorkspace)
-    const offProjects = window.ade.on('projects:changed', setProjects)
+    const offProjects = window.ade.on('projects:changed', (state) => {
+      projectsFromEventRef.current = true
+      setProjects(state)
+    })
     const offMode = window.ade.on('mode:changed', (next) => { modeRef.current = next; setMode(next) })
     return () => {
       offBrowser()

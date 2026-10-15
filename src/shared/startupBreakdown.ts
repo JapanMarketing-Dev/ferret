@@ -6,6 +6,11 @@
 
 /** JS より前の時間が全体のこの割合を超えたら pre-js とみなす */
 const PRE_JS_SHARE = 0.5
+/**
+ * OS を起動してからこれより短いうちの起動は、ログイン項目などと取り合って全体が遅いので、Ferret の外の遅れとみなす
+ * （更新直後の初回と同じ扱い。FERRET-K）
+ */
+export const BOOT_SETTLE_MS = 5 * 60_000
 /** 内訳に載せる節目の数の上限 */
 export const MAX_STARTUP_MARKS = 20
 
@@ -31,6 +36,8 @@ interface StartupBreakdown {
   preJsMs: number | null
   /** モジュールの読み込みから操作可能まで */
   jsMs: number
+  /** Electron の準備ができて（app:ready）から操作可能まで＝アプリ自身の処理。節目が無ければ分からない（null） */
+  appMs: number | null
   phase: StartupPhase
   tags: Record<string, string>
   context: Record<string, string>
@@ -40,6 +47,8 @@ export function startupBreakdown(t: StartupTiming): StartupBreakdown {
   const totalMs = Math.max(0, Math.round(t.totalMs))
   const preJsMs = t.originSource === 'process' ? Math.min(totalMs, Math.max(0, Math.round(t.moduleLoadedAt - t.origin))) : null
   const jsMs = totalMs - (preJsMs ?? 0)
+  const readyAt = t.marks['app:ready']
+  const appMs = typeof readyAt === 'number' && Number.isFinite(readyAt) ? Math.min(totalMs, Math.max(0, totalMs - Math.round(readyAt))) : null
   const phase: StartupPhase = preJsMs === null ? 'unknown' : preJsMs > totalMs * PRE_JS_SHARE ? 'pre-js' : 'js'
   const marks = Object.entries(t.marks)
     .filter(([name, ms]) => MARK_NAME.test(name) && Number.isFinite(ms))
@@ -50,6 +59,7 @@ export function startupBreakdown(t: StartupTiming): StartupBreakdown {
   return {
     preJsMs,
     jsMs,
+    appMs,
     phase,
     tags: { 'startup.phase': phase, 'startup.origin': t.originSource },
     context: {
@@ -62,16 +72,28 @@ export function startupBreakdown(t: StartupTiming): StartupBreakdown {
 }
 
 /**
- * どの名前で報告するか。JS より後の遅れが閾値を超えたときだけ slow-startup として数える。
- * 全体は超えたが JS より後は超えていない（JS より前の遅れで超えた）ときは slow-pre-js として別に数える。
- * その版の初めての起動（firstLaunchOfVersion）では slow-pre-js を出さない
+ * どの名前で報告するか。JS より後の遅れが閾値を超えたら slow-startup、JS より前の遅れだけで閾値を超えたら slow-pre-js。
+ * どちらも、その部分だけで閾値を超えたときに数える（足すと超えるだけの、前も後も目標内の起動は数えない。
+ * FERRET-1C: Windows で JS より前 3.6 秒＋後 1.9 秒の 5.5 秒）。
+ *
+ * その版の初めての起動（入れた・更新した直後。OS が新しい実行ファイルを検査し、app.asar も冷えた状態から読む）と、
+ * OS を起動した直後（ログイン項目と取り合う）は、Electron の準備ができる（app:ready）までの遅れを数えず、
+ * アプリ自身の処理（app:ready から操作可能まで）だけで判断する。
+ * FERRET-K（0.6.22 の macOS）: JS より前 11 秒・モジュールの読み込みから app:ready まで 7 秒、アプリ自身は 1.3 秒だった
  */
-export function slowStartupReport(b: StartupBreakdown, thresholdMs: number, options: { firstLaunchOfVersion?: boolean } = {}): { perf: 'slow-startup' | 'slow-pre-js'; ms: number } | null {
-  const totalMs = b.jsMs + (b.preJsMs ?? 0)
+export function slowStartupReport(
+  b: StartupBreakdown,
+  thresholdMs: number,
+  options: { firstLaunchOfVersion?: boolean; systemUptimeMs?: number | null } = {}
+): { perf: 'slow-startup' | 'slow-pre-js'; ms: number } | null {
+  const uptime = options.systemUptimeMs
+  const justBooted = typeof uptime === 'number' && Number.isFinite(uptime) && uptime >= 0 && uptime < BOOT_SETTLE_MS
+  if (options.firstLaunchOfVersion || justBooted) {
+    // Ferret では直せない遅れ。アプリ自身の処理だけを見る（節目が無ければ JS より後の全体で）
+    const own = b.appMs ?? b.jsMs
+    return own > thresholdMs ? { perf: 'slow-startup', ms: own } : null
+  }
   if (b.jsMs > thresholdMs) return { perf: 'slow-startup', ms: b.jsMs }
-  // 入れた・更新した直後の初回は、OS が新しい実行ファイルを検査する（Windows Defender・Gatekeeper）ので JS より前が遅い。
-  // Ferret では直せないので数えない（Sentry FERRET-1C: 更新直後の Windows で 5.7 秒）
-  if (options.firstLaunchOfVersion) return null
-  if (totalMs > thresholdMs) return { perf: 'slow-pre-js', ms: totalMs }
+  if (b.preJsMs !== null && b.preJsMs > thresholdMs) return { perf: 'slow-pre-js', ms: b.preJsMs }
   return null
 }

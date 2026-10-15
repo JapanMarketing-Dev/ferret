@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
@@ -159,6 +160,9 @@ export function splitSettings(settings: Settings): { config: Record<string, unkn
   }
 }
 
+/** 書きかけの settings.json を読んだときの読み直しの間隔（合計 0.3秒） */
+const PARTIAL_READ_RETRIES = [50, 100, 150] as const
+
 /** settings.json と state.json を、sanitize に渡す1つの値へ戻す。状態側に無い項目は設定側（移行前の古いファイル）の値を使う */
 export function mergeSettings(config: Record<string, unknown>, state: unknown): Record<string, unknown> {
   const s = (state && typeof state === 'object' ? state : {}) as Partial<PersistedState>
@@ -293,12 +297,55 @@ export function parseSettingsText(text: string): ParsedSettings {
   return { ok: true, value: value as Record<string, unknown> }
 }
 
+/** Windows で、他のプロセス（ウイルス対策・エディタ・Agent・索引）が開いている間だけ起きる失敗 */
+const TRANSIENT_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'EAGAIN'])
+
+export function isTransientFsError(err: unknown): boolean {
+  return TRANSIENT_FS_CODES.has(String((err as NodeJS.ErrnoException | null)?.code ?? ''))
+}
+
+/** main を止めずに待てる長さの同期の待ち（数十ミリ秒だけ） */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** 一時的な失敗のやり直しの間隔（合計 約0.75秒） */
+export const TRANSIENT_RETRY_DELAYS_MS = [25, 50, 100, 200, 375] as const
+
+interface RetryOptions {
+  /** 既定は process.platform。やり直すのは win32 だけ（他の OS の EACCES・EPERM は本当の権限の問題） */
+  platform?: NodeJS.Platform
+  sleep?: (ms: number) => void
+}
+
+/**
+ * Windows の一時的な失敗（EBUSY・EPERM・EACCES）は少し待ってやり直す。
+ * Windows では、置き換え先・読む先を他のプロセスが開いている間（ウイルス対策の検査・エディタ・Agent の読み取り）は rename や読み取りが失敗する。
+ * 1度で諦めると、保存が落ちて再起動でプロジェクトが消えたように見えたり（issue #5）、起動時に読めずに空の一覧で始まったりした
+ */
+export function retryTransientSync<T>(run: () => T, opt: RetryOptions = {}): T {
+  const retry = (opt.platform ?? process.platform) === 'win32'
+  const sleep = opt.sleep ?? sleepSync
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return run()
+    } catch (err) {
+      if (!retry || !isTransientFsError(err) || attempt >= TRANSIENT_RETRY_DELAYS_MS.length) throw err
+      sleep(TRANSIENT_RETRY_DELAYS_MS[attempt]!)
+    }
+  }
+}
+
+type AtomicWriteOptions = RetryOptions & { rename?: (from: string, to: string) => void }
+
 /** 一時ファイルに書いてから置き換える。途中で落ちても、元のファイルか新しいファイルのどちらかが残る */
-export function writeFileAtomicSync(target: string, text: string): void {
-  const tmp = join(resolve(target, '..'), `.${basename(target)}.${process.pid}.${Date.now().toString(36)}.tmp`)
+export function writeFileAtomicSync(target: string, text: string, opt: AtomicWriteOptions = {}): void {
+  // 同じミリ秒の2つの保存が同じ一時ファイルに書かないよう、乱数を足す
+  const tmp = join(resolve(target, '..'), `.${basename(target)}.${process.pid}.${Date.now().toString(36)}${randomBytes(4).toString('hex')}.tmp`)
+  const rename = opt.rename ?? renameSync
   try {
     writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600 })
-    renameSync(tmp, target)
+    retryTransientSync(() => rename(tmp, target), opt)
   } catch (err) {
     rmSync(tmp, { force: true })
     throw err
@@ -325,6 +372,10 @@ interface SettingsFileStoreOptions {
   debounceMs?: number
   /** state.json に書く印（開発版か配布版か） */
   writtenBy?: BuildKind
+  /** settings.json の読み取り（単体テストで Windows の一時的な失敗・書きかけを再現する） */
+  readFile?: (path: string) => string
+  /** 一時的な失敗のやり直しの OS と待ち方、置き換えの関数（単体テスト用） */
+  retry?: AtomicWriteOptions
 }
 
 interface LoadResult {
@@ -346,6 +397,12 @@ export class SettingsFileStore {
   private errorValue: SettingsFileError | null = null
   private watcher: FSWatcher | null = null
   private timer: NodeJS.Timeout | null = null
+  /**
+   * settings.json の中身を読めたか（または初回で無かったか）。読めないまま（Windows のファイルの掴みっぱなしなど）で始めたときは、
+   * 手元の設定が既定値なので、settings.json へ書くと登録したプロジェクト・オーケストラを空で上書きしてしまう（issue #5）。
+   * 読めるまで settings.json には書かない（state.json だけ）。監視（checkNow）で読めたら取り込んで書けるようにする
+   */
+  private configLoaded = false
 
   constructor(private readonly opt: SettingsFileStoreOptions) {
     this.settingsPath = join(opt.dir, SETTINGS_FILE)
@@ -368,6 +425,11 @@ export class SettingsFileStore {
     if (!same) this.opt.onErrorChange?.(error)
   }
 
+  private readSettingsFile(): string {
+    const read = this.opt.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
+    return retryTransientSync(() => read(this.settingsPath), this.opt.retry)
+  }
+
   private readState(): unknown {
     try {
       const text = readFileSync(this.statePath, 'utf8')
@@ -384,17 +446,33 @@ export class SettingsFileStore {
     this.extras = Object.fromEntries(Object.entries(config).filter(([key]) => !known.has(key)))
     this.schemaRef = typeof config.$schema === 'string' && config.$schema ? config.$schema : SCHEMA_REF
     this.lastText = text
+    this.configLoaded = true
+  }
+
+  /** settings.json を読めて、アプリから書いてよいか（読めないまま始めたときは false） */
+  get loaded(): boolean {
+    return this.configLoaded
   }
 
   /** 起動時に1度。新しいファイルが無ければ以前の置き場所から移す（以前のファイルはそのまま残す） */
   load(): LoadResult {
     mkdirSync(this.opt.dir, { recursive: true })
-    this.writeSchema()
+    // スキーマは補助のファイル。置き換えに失敗しても（Windows でエディタが開いているなど）設定は読む。
+    // 以前はここで投げて読み込みごと失敗し、既定値（プロジェクト0件）で始まり、終了時にそれで settings.json を上書きした（issue #5）
+    try {
+      this.writeSchema()
+    } catch (err) {
+      console.warn('[settings] settings.schema.json を書けませんでした', (err as NodeJS.ErrnoException)?.code ?? err)
+    }
     let text: string | null = null
     try {
-      text = readFileSync(this.settingsPath, 'utf8')
+      text = this.readSettingsFile()
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        // 読めない（やり直しても掴まれたまま・権限）。状態だけで始め、settings.json には書かない。監視で読めたら取り込む
+        console.warn('[settings] settings.json を読めませんでした。読めるまで上書きしません', (err as NodeJS.ErrnoException)?.code ?? err)
+        return { settings: this.opt.sanitize(mergeSettings({}, this.readState())), error: null, migrated: false }
+      }
     }
     if (text === null) {
       // 初回。以前の userData/settings.json があれば、設定と状態の両方をそこから作る
@@ -410,16 +488,28 @@ export class SettingsFileStore {
         }
       }
       const settings = this.opt.sanitize(legacy)
+      this.configLoaded = true
       this.saveSync(settings)
       return { settings, error: null, migrated }
     }
-    const parsed = parseSettingsText(text)
+    let parsed = parseSettingsText(text)
+    // 空・JSON の途中で切れている：Agent やエディタが書いている途中を読んだのかもしれない。少し待って読み直す
+    for (let attempt = 0; !parsed.ok && parsed.error.kind === 'parse' && attempt < PARTIAL_READ_RETRIES.length; attempt++) {
+      ;(this.opt.retry?.sleep ?? sleepSync)(PARTIAL_READ_RETRIES[attempt]!)
+      try {
+        text = this.readSettingsFile()
+      } catch {
+        break
+      }
+      parsed = parseSettingsText(text)
+    }
     const state = this.readState()
     if (!parsed.ok) {
       // 壊れていても起動は続ける。読める範囲で直し、利用者のファイルは直るまで上書きしない
       let raw: Record<string, unknown> = {}
       try { raw = JSON.parse(text) as Record<string, unknown> } catch { /* JSON として読めない。状態だけで始める */ }
       this.lastText = text
+      this.configLoaded = true
       this.setError(parsed.error)
       return { settings: this.opt.sanitize(mergeSettings(raw && typeof raw === 'object' ? raw : {}, state)), error: parsed.error, migrated: false }
     }
@@ -433,7 +523,7 @@ export class SettingsFileStore {
     try {
       if (existsSync(this.schemaPath) && readFileSync(this.schemaPath, 'utf8') === text) return
     } catch { /* 読めなければ書き直す */ }
-    writeFileAtomicSync(this.schemaPath, text)
+    writeFileAtomicSync(this.schemaPath, text, this.opt.retry)
   }
 
   /** settings.json に書く文字列。$schema を先頭に、知らない項目は後ろにそのまま残す */
@@ -480,7 +570,7 @@ export class SettingsFileStore {
     }
     const text = `${JSON.stringify(merged, null, 2)}\n`
     this.remember(merged, text)
-    if (text !== disk) writeFileAtomicSync(this.settingsPath, text)
+    if (text !== disk) writeFileAtomicSync(this.settingsPath, text, this.opt.retry)
     // 取り込みは今の保存が終わってから（保存の途中で設定を差し替えない）
     setImmediate(() => this.opt.onExternalChange?.(merged))
     return 'merged'
@@ -489,7 +579,8 @@ export class SettingsFileStore {
   /** 保存する。settings.json が壊れている間は state.json だけを書く。変わっていなければ書かない */
   saveSync(settings: Settings): void {
     mkdirSync(this.opt.dir, { recursive: true })
-    if (!this.errorValue) {
+    // 読めないまま始めた（configLoaded が false）間は、既定値で利用者の settings.json を上書きしない
+    if (!this.errorValue && this.configLoaded) {
       const text = this.configText(settings)
       if (text !== this.lastText && this.mergeExternalBeforeSave(text) === null) {
         // 先に覚えてから書く（監視が書き込みに先に気づいても、自分の書き込みと分かる）。
@@ -497,7 +588,7 @@ export class SettingsFileStore {
         const previous = this.lastText
         this.lastText = text
         try {
-          writeFileAtomicSync(this.settingsPath, text)
+          writeFileAtomicSync(this.settingsPath, text, this.opt.retry)
         } catch (err) {
           this.lastText = previous
           throw err
@@ -510,7 +601,7 @@ export class SettingsFileStore {
       const previous = this.lastStateText
       this.lastStateText = stateText
       try {
-        writeFileAtomicSync(this.statePath, stateText)
+        writeFileAtomicSync(this.statePath, stateText, this.opt.retry)
       } catch (err) {
         this.lastStateText = previous
         throw err
@@ -535,7 +626,7 @@ export class SettingsFileStore {
     const parsed = parseSettingsText(text)
     if (!parsed.ok) return parsed
     this.remember(parsed.value, text)
-    writeFileAtomicSync(this.settingsPath, text)
+    writeFileAtomicSync(this.settingsPath, text, this.opt.retry)
     this.setError(null)
     return { ok: true, config: parsed.value }
   }
@@ -564,12 +655,12 @@ export class SettingsFileStore {
   checkNow(): 'unchanged' | 'applied' | 'invalid' | 'missing' {
     let text: string
     try {
-      text = readFileSync(this.settingsPath, 'utf8')
+      text = this.readSettingsFile()
     } catch {
       // 消えた・エディタが入れ替えている途中。次の変更を待つ（消えたからといって作り直さない）
       return 'missing'
     }
-    if (text === this.lastText && !this.errorValue) return 'unchanged'
+    if (text === this.lastText && !this.errorValue && this.configLoaded) return 'unchanged'
     const parsed = parseSettingsText(text)
     if (!parsed.ok) {
       this.lastText = text

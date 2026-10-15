@@ -2005,6 +2005,7 @@ export const en = {
   'terminal.errors.nodePty': 'Couldn\'t load node-pty. Rebuild it for Electron (pnpm rebuild:native).',
   'terminal.errors.launch': '{{agent}}: {{error}}',
   'terminal.errors.unknownAgent': '{{agent}} is not registered. Check the Agents section in Settings.',
+  'terminal.errors.shuttingDown': 'Ferret is quitting, so no new terminal was opened.',
   'terminal.send.openTerminal': 'Open a terminal first.',
   'terminal.send.busy': 'Already sending.',
   'terminal.send.noAgent': 'Start Codex or Claude Code in this terminal.',

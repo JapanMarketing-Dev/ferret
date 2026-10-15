@@ -3738,6 +3738,8 @@ function beginShutdown(): boolean {
   // Electron のネイティブ側で二重破棄になりうる。後始末は Electron に任せる。
 
   if (!terminals || terminals.pendingCount() === 0) {
+    // 開いている途中のタブ（起動時にタブを戻している途中など）がこの後で PTY を起動しないよう、新しく開くのも止める（FERRET-20）
+    terminals?.disposeAll()
     terminalRestoreStore?.finish()
     shutdownPhase = 'ready'
     return false

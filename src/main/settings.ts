@@ -334,7 +334,22 @@ export async function loadSettings(): Promise<Settings> {
 export function watchSettings(onChange: (settings: Settings) => void, onError: (error: SettingsFileError | null) => void): void {
   externalListener = onChange
   errorListener = onError
-  fileStore().watch()
+  const s = fileStore()
+  s.watch()
+  // 読み込みから監視を始めるまでの間の変更（起動直後の Agent の書き込みなど）を取りこぼさない
+  s.checkNow()
+  if (!s.loaded) retryUnreadSettings(s)
+}
+
+/** 起動時に settings.json を読めなかったとき、読めるまで間を空けて読み直す（変更が無いと監視は気づかない。issue #5） */
+export const UNREAD_SETTINGS_RETRY_MS = [1_000, 3_000, 10_000, 30_000, 60_000] as const
+
+function retryUnreadSettings(s: SettingsFileStore, attempt = 0): void {
+  if (s.loaded || attempt >= UNREAD_SETTINGS_RETRY_MS.length) return
+  setTimeout(() => {
+    s.checkNow()
+    retryUnreadSettings(s, attempt + 1)
+  }, UNREAD_SETTINGS_RETRY_MS[attempt]).unref?.()
 }
 
 /** 設定のページに出す settings.json の場所と状態 */

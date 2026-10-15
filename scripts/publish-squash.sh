@@ -2,9 +2,9 @@
 #
 # 公開リポジトリ（既定: origin = JapanMarketing-Dev/MOVIE-ADE）へ、履歴を1コミットにまとめて出す準備をする。
 #
-#   scripts/publish-squash.sh [元にする ref（既定: develop）]
+#   scripts/publish-squash.sh [元にする ref（既定: main）]
 #
-# 手元の develop の履歴（作者のメールなど）は公開しない。元の ref の「コミット済みの中身」だけを、
+# 手元の main の履歴（作者のメールなど）は公開しない。元の ref の「コミット済みの中身」だけを、
 # 公開先の main の上に1コミットとして積む。作業は一時的な worktree で行い、手元の作業ツリーには触らない。
 #
 #   0. 元の ref の中身（tree）が、この Mac の単体テストを通っているか確かめる（scripts/cross-os-unit.sh の記録。
@@ -33,7 +33,7 @@
 #                    4 までと gitleaks dir だけを行い、コミットも push もしない
 set -euo pipefail
 
-SOURCE_REF="${1:-develop}"
+SOURCE_REF="${1:-main}"
 REMOTE="${PUBLISH_REMOTE:-origin}"
 BRANCH="${PUBLISH_BRANCH:-main}"
 ROOT="$(git rev-parse --show-toplevel)"
@@ -43,7 +43,7 @@ SOURCE_VERSION="$(git show "${SOURCE_REF}:package.json" | node -e 'let s="";proc
 MESSAGE="${PUBLISH_MESSAGE:-Release ${SOURCE_VERSION}}"
 FORBIDDEN_FILE="${PUBLISH_FORBIDDEN_FILE:-$ROOT/.publish-forbidden.txt}"
 
-# 公開版に含めないもの。手元の develop には残す
+# 公開版に含めないもの。手元の main には残す
 EXCLUDES=(
   e2e
   playwright.config.ts
@@ -202,8 +202,8 @@ authors="$(git log --format='%ae %ce' "$BASE..$COMMIT")"
 # --- 7. push の直前で止める -------------------------------------------------
 REPO_URL="$(git remote get-url "$REMOTE")"
 REPO_NAME="$(basename "$REPO_URL" .git)"
-# main（リリース用）と develop（開発用）の両方を、公開の1コミットから始める
-PUSH_CMD="git push $REMOTE $COMMIT:refs/heads/$BRANCH $COMMIT:refs/heads/develop"
+# 公開のブランチは main だけ（develop は 2026-10-15 に廃止）
+PUSH_CMD="git push $REMOTE $COMMIT:refs/heads/$BRANCH"
 
 say "準備ができました"
 git -C "$STAGE" show --stat --format='commit %H%nAuthor: %an <%ae>%n%n    %s%n' HEAD | tail -n 5
@@ -231,24 +231,11 @@ echo "作業場所を消すとき:  git worktree remove --force $STAGE"
 # ---------------------------------------------------------------------------
 # 公開後の切り替え（手で行う。このスクリプトは実行しない）
 #
-# 公開後の開発は公開リポジトリ（origin = MOVIE-ADE）で続ける。main はリリース用、develop は開発用。
-# 公開の develop は、手元の旧 develop の履歴ではなく、公開の1コミットから始まる。
-# 手元の旧履歴は、非公開の old-origin（JapanMarketing-Dev/ADE-movie）に残す。
+# ブランチは main だけ（develop は 2026-10-15 に廃止）。
+# 手元の main は非公開の old-origin（JapanMarketing-Dev/ADE-movie）の main を追い、作者のメールを含む履歴はそこにだけ置く。
+# 公開リポジトリ（origin）の main には、このスクリプトが作る1コミットだけを積む。
 #
-#   1. 旧履歴を old-origin に残す（未コミットの作業があればコミットしてから）
-#        git push old-origin develop
-#        git branch -m develop legacy-develop      # 手元にも別名で残す
-#
-#   2. 公開の develop を手元の develop にする
-#        git fetch origin
-#        git switch -c develop --track origin/develop
-#
-#   3. 公開の後で旧 develop に積んだ作業があれば、1つずつ移す
-#        git cherry-pick <コミット>                 # 旧履歴は公開の1コミットと共通の祖先を持たないので merge はしない
-#
-#   4. 一時的な作業場所を消す
-#        git worktree remove --force <作業場所>
-#
-#   5. 以後は develop から作業ブランチを切り、PR は develop へ出す。リリースは develop を main へ取り込む。
-#      公開リポジトリには旧履歴を push しない（old-origin と origin を取り違えない。
-#      git push origin legacy-develop などはしない）。
+#   1. 手元の履歴を old-origin に残す:  git push old-origin main
+#   2. 一時的な作業場所を消す:          git worktree remove --force <作業場所>
+#   3. 公開リポジトリに手元の main を直接 push しない（git push origin main はしない。
+#      手元の main は公開の main と共通の祖先を持たないので、push は拒まれる。--force で上書きしない）。

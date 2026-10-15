@@ -118,3 +118,79 @@ describe('CIM が時間切れになる環境', () => {
     expect(reportHandled.mock.calls.map(([e]) => e.message).sort()).toEqual(['powershell process sampling failed: exit', 'typeperf process sampling failed: exit'])
   })
 })
+
+describe('typeperf が時間切れになる環境（FERRET-1Z: CPU が絞られて混んでいる）', () => {
+  const cimTimeout = async (file: string) => {
+    if (file === 'powershell.exe') throw timeoutError()
+    throw Object.assign(new Error('Command failed: typeperf.exe ...'), { killed: true, signal: 'SIGTERM', code: null })
+  }
+
+  it('時間切れが何度続いてもやめず・送らず、取れるようになったら行を返す', async () => {
+    let typeperfTimesOut = true
+    const exec = vi.fn(async (file: string, _args: string[], _options?: { timeoutMs?: number }) => {
+      if (file === 'powershell.exe') throw timeoutError()
+      if (typeperfTimesOut) throw Object.assign(new Error('Command failed: typeperf.exe ...'), { killed: true, signal: 'SIGTERM', code: null })
+      return TYPEPERF
+    })
+    let t = 0
+    const collector = new WindowsProcessCollector(exec, () => t, 8)
+    for (let i = 0; i < 10; i++) {
+      expect(await collector.enumerate()).toEqual([])
+      t += 11 * 60_000
+    }
+    expect(collector.stopped).toBe(false)
+    typeperfTimesOut = false
+    expect(await collector.enumerate()).toEqual([{ pid: 1234, ppid: 1000, cpu: 0, memory: 52428800 }])
+    // 送るのは CIM をやめたときの1件だけ。typeperf の時間切れは送らない
+    expect(reportHandled.mock.calls.map(([e]) => e.message)).toEqual(['powershell process sampling failed: timeout'])
+    // typeperf にも長めの時間切れを渡す
+    const typeperfCall = exec.mock.calls.find(([file]) => file === 'typeperf.exe')!
+    expect(typeperfCall[2]).toEqual({ timeoutMs: 15_000 })
+  })
+
+  it('時間切れのあとは間を空け（30秒から倍に、最長10分）、その間は typeperf を呼ばない', async () => {
+    const exec = vi.fn(cimTimeout)
+    let t = 0
+    const collector = new WindowsProcessCollector(exec, () => t, 8)
+    const typeperfCalls = () => exec.mock.calls.filter(([file]) => file === 'typeperf.exe').length
+    await collector.enumerate() // 1回目の時間切れ → 30秒後
+    expect(typeperfCalls()).toBe(1)
+    t += 29_999
+    await collector.enumerate()
+    expect(typeperfCalls()).toBe(1)
+    t += 1
+    await collector.enumerate() // 2回目 → 60秒後
+    expect(typeperfCalls()).toBe(2)
+    t += 59_999
+    await collector.enumerate()
+    expect(typeperfCalls()).toBe(2)
+    t += 1
+    await collector.enumerate()
+    expect(typeperfCalls()).toBe(3)
+    // 何度続いても間は10分を超えない
+    for (let i = 0; i < 10; i++) {
+      t += 10 * 60_000
+      await collector.enumerate()
+    }
+    expect(typeperfCalls()).toBe(13)
+    expect(reportHandled.mock.calls.filter(([e]) => e.backend === 'typeperf')).toEqual([])
+  })
+
+  it('時間切れでない失敗は、時間切れを挟んでも3回でやめて1度だけ送る', async () => {
+    let n = 0
+    const exec = vi.fn(async (file: string) => {
+      if (file === 'powershell.exe') throw timeoutError()
+      n += 1
+      if (n % 2 === 0) throw Object.assign(new Error('Command failed: typeperf.exe ...'), { killed: true, signal: 'SIGTERM', code: null })
+      throw Object.assign(new Error('Command failed: typeperf.exe ...'), { code: 1, killed: false })
+    })
+    let t = 0
+    const collector = new WindowsProcessCollector(exec, () => t, 8)
+    for (let i = 0; i < 20; i++) {
+      await collector.enumerate()
+      t += 11 * 60_000
+    }
+    expect(collector.stopped).toBe(true)
+    expect(reportHandled.mock.calls.filter(([e]) => e.backend === 'typeperf').map(([e]) => e.message)).toEqual(['typeperf process sampling failed: exit'])
+  })
+})

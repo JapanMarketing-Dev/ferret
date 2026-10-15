@@ -1,6 +1,6 @@
 # 閉じた PR の Actions のキャッシュ（pnpm の store など）を消す。Orca の ci-closed-pr-caches.yml を元にした。
-# PR ごとのキャッシュは develop / main から使われないので、残すとリポジトリの上限（10GB）を埋めて、
-# develop のキャッシュが先に追い出される。
+# PR ごとのキャッシュは main から使われないので、残すとリポジトリの上限（10GB）を埋めて、
+# main のキャッシュが先に追い出される。
 # pull_request_target は受け取る側の workflow で動く。PR のコードは取ってこない（checkout しない）。secrets は使わない。
 name: Clean closed PR caches
 

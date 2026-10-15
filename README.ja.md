@@ -183,7 +183,7 @@ Zoom・Meet・Teams のオンライン会議でも、対面で1つの画面を�
 
 ## 開発への参加
 
-不具合の報告やプルリクエストを歓迎します。[CONTRIBUTING.md](CONTRIBUTING.md) を見てください。開発は `develop` で進めます。脆弱性の連絡は [SECURITY.md](SECURITY.md) へ。
+不具合の報告やプルリクエストを歓迎します。[CONTRIBUTING.md](CONTRIBUTING.md) を見てください。開発は `main` で進めます。脆弱性の連絡は [SECURITY.md](SECURITY.md) へ。
 
 ```sh
 git clone https://github.com/JapanMarketing-Dev/ferret.git
@@ -277,7 +277,7 @@ pnpm lp:dev
 
 macOS のインストーラは Developer ID で署名し、公証を受けています。置き場所は Cloudflare R2（バケット `movie-ade-releases`）で、GitHub には置きません。`pnpm dist:mac` / `pnpm dist:win` / `pnpm dist:linux`（Linux の上で）で `Ferret-<version>-<os>-<arch>.<ext>` を作ります。Mac での手順は `pnpm release:build`（型検査と単体テストのあと、6本を `dist/release` に作る。Linux は x64 の podman / docker コンテナで作る。イメージは digest で、Debian のパッケージは snapshot.debian.org の決まった日付で、pnpm は sha512 で固定し、commit・使った材料・各ファイルの sha256 を `dist/release/BUILD-PROVENANCE.txt` に残す）→ `pnpm release:r2 stage` → 確認 → `pnpm release:r2 promote --version <version>` です。公開は2段階です。まず `node scripts/release-r2.mjs stage --dir dist/release` で、公開前の置き場 `staging/<version>/` に上げます。ここでは索引を変えないので、サイトにも更新確認にも出ません。確認が済んだら `node scripts/release-r2.mjs promote --version <version>` で `releases/<version>/` へ移し、`versions.json`・`latest.json` を更新します。同じ版は上げ直しません。最新10版を超えた古い版は、表示してから消します。`v*` のタグを push すると、`.github/workflows/release.yml` が3つの OS で単体テストと配布物のビルドを行い、各ファイルの sha256 をジョブの要約に残します（手元のビルドと見比べる記録）。このワークフローは secrets を持ちません。署名・GitHub Release の下書き・R2 への公開・Sentry へのソースマップは、手元の手順だけで行います（署名の鍵を持つ処理が、タグの中身を動かしたり、artifact の受け渡しで受け取ったバイト列に署名したりしないため）。手元から公開するときは、stage のあとに `node scripts/release-github.mjs create --version <version>` で SHA256SUMS だけの下書きを作り（SHA256SUMS は `dist/release`（`--dir` で変更）の配布物を手元でハッシュした値で作って署名します。staging の manifest はそれと名前・大きさ・sha256 が一致するかを確かめるだけで、違えば署名しません）、`gh release download v<version> --pattern SHA256SUMS` で取った分を `promote --expect-sums` に渡し、最後に `node scripts/release-github.mjs publish --version <version>` で下書きを公開します（どちらも `--dry-run` で gh を動かさずにコマンドだけを確かめられます）。wrangler は devDependencies で版を固定したものを shell を通さずに起動し、R2 から読んだ manifest は形を確かめてから使います。ソースマップを Sentry へ上げる組織トークン（`SENTRY_AUTH_TOKEN`）の作り方は英語の README を見てください。devDependencies で版を固定した `sentry` CLI（`pnpm exec sentry auth login` でログイン）で、手元からだけ上げます。PATH の CLI や npx で取ってきた CLI は使いません。公開リポジトリなので標準のランナーは無料で、`cross-platform.yml` は push / PR のたびに3つのOSで動きます（macOS は1ジョブ）。非公開に戻すときは、実行時間（とくに macOS）の費用が持ち主にかかるので、手動だけにしてください。
 
-要件・設計は[docs/02_requirements.md](docs/02_requirements.md)、[docs/03_design.md](docs/03_design.md)。main はリリース用です。develop で開発し、PR は develop へ出してください。
+要件・設計は[docs/02_requirements.md](docs/02_requirements.md)、[docs/03_design.md](docs/03_design.md)。ブランチは main だけです。PR は main へ出してください。
 
 ## ダウンロードサイトの公開
 

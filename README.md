@@ -185,7 +185,7 @@ Full walkthrough: [Quick start](https://ferretade.dev/docs/quick-start.html).
 
 ## Contributing
 
-Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Development happens on `develop`. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Development happens on `main`. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ```sh
 git clone https://github.com/JapanMarketing-Dev/ferret.git
@@ -303,7 +303,7 @@ Pushing a `v*` tag that matches `package.json` runs `.github/workflows/release.y
 
 The workflows run on free runners because the repository is public; in a private repository the minutes, especially on macOS, are billed to the owner. `.github/workflows/cross-platform.yml` runs type checks, unit tests and unpacked builds on all three OSes (one macOS job) on every push and pull request; switch it to manual-only if the repository ever becomes private.
 
-Requirements and design documents (in Japanese) are in [docs/02_requirements.md](docs/02_requirements.md) and [docs/03_design.md](docs/03_design.md). `main` is for releases. Development happens on `develop`; open pull requests against `develop`.
+Requirements and design documents (in Japanese) are in [docs/02_requirements.md](docs/02_requirements.md) and [docs/03_design.md](docs/03_design.md). `main` is the only branch; open pull requests against `main`.
 
 ## Download site
 
