@@ -64,7 +64,7 @@ tags と添付で分かること（どれも利用者の内容は含まない）
 | 何の失敗か | `kind`（handled / ipc / pty-spawn / preload-error / render-error / perf …）・`area` / `op` |
 | 直前の操作 | パンくずの `flow`（操作名だけ） |
 | 起動が遅い理由 | `Slow startup` は JS より後（アプリの処理）の遅れ、`Slow launch before JS` は JS より前（初回起動の Gatekeeper の検査・dyld など）の遅れ。タグ `startup.phase`（pre-js / js / unknown）、contexts.startup に全体・JS より前・後・節目の時間 |
-| main が止まった理由 | タグ `block.ipc` / `block.slowop` / `block.heap` / `block.ax`、contexts.block |
+| main が止まった理由 | タグ `block.ipc` / `block.slowop` / `block.heap` / `block.ax` / `block.cpulimit`（OS が CPU を絞っていた上限）、contexts.block。Windows でターミナルを閉じた ConPTY の同期の処理は `pty:kill` の重い処理として出る |
 | main の直近のログ | クラッシュの issue の Attachments の `main-log.txt`（見出し付きの行だけ・伏せ字済み） |
 
 ## 6. 確認用の起動

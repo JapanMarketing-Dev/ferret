@@ -840,6 +840,20 @@ interface BlockEnvironment {
   rssMb: number
   axEnabled: boolean
   axChangedMsAgo: number | null
+  /**
+   * OS が掛けている CPU の速度の上限（%。powerMonitor の speed-limit-change。100 は制限なし、null はまだ来ていない）。
+   * 省電力・熱で絞られている間は、アプリの処理でなくてもタイマーが遅れる（FERRET-M の 0.6.30 の Windows で続けて来ていた）
+   */
+  cpuSpeedLimit?: number | null
+}
+
+/** CPU の速度の上限のおおまかな区分（タグにする） */
+export function cpuLimitBucket(limit: number | null | undefined): string {
+  if (limit == null || !Number.isFinite(limit)) return 'unknown'
+  if (limit >= 100) return 'none'
+  if (limit >= 75) return '75-99%'
+  if (limit >= 50) return '50-74%'
+  return '<50%'
 }
 
 /** メモリの量のおおまかな区分（タグにする） */
@@ -890,6 +904,10 @@ export function eventLoopBlockContext(
     context.heap_used = `${Math.round(env.heapUsedMb)}MB`
     context.rss = `${Math.round(env.rssMb)}MB`
     context.ax_changed = env.axChangedMsAgo === null ? 'never' : `${Math.round(env.axChangedMsAgo)}ms ago`
+    if (env.cpuSpeedLimit !== undefined) {
+      tags['block.cpulimit'] = cpuLimitBucket(env.cpuSpeedLimit)
+      context.cpu_speed_limit = env.cpuSpeedLimit === null ? 'unknown' : `${Math.round(env.cpuSpeedLimit)}%`
+    }
   }
   return { tags, context }
 }

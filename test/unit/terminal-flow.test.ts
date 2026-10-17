@@ -130,6 +130,35 @@ describe('Windows: シェルが自分で終わったときに出力用の Worker
     expect(kills).toBe(1)
   })
 
+  it('win32 では kill（ConPTY を閉じる同期の処理）が長ければ pty:kill として控える（FERRET-M 0.6.30）', async () => {
+    const { clearSlowOps, recentSlowOps } = await import('../../src/shared/report')
+    clearSlowOps()
+    let clock = 1_000_000
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock)
+    try {
+      const slow = { kill: () => { clock += 3200 } }
+      hardenWindowsPty({ _agent: slow } as never, 'win32')
+      slow.kill()
+      expect(recentSlowOps(clock)).toEqual([{ op: 'pty:kill', ms: 3200 }])
+      // 短い kill・投げた kill は控えない（投げても main の例外にしない）
+      clearSlowOps()
+      const fast = { kill: () => { clock += 5 } }
+      hardenWindowsPty({ _agent: fast } as never, 'win32')
+      fast.kill()
+      const failing = { kill: () => { throw new Error('gone') } }
+      hardenWindowsPty({ _agent: failing } as never, 'win32')
+      expect(() => failing.kill()).not.toThrow()
+      expect(recentSlowOps(clock)).toEqual([])
+      // resize は測らない
+      const resize = { resize: () => { clock += 3000 } }
+      hardenWindowsPty({ _agent: resize } as never, 'win32')
+      resize.resize()
+      expect(recentSlowOps(clock)).toEqual([])
+    } finally {
+      now.mockRestore()
+    }
+  })
+
   it('win32 以外の PTY には触らない', () => {
     const resize = () => { throw new Error('x') }
     const pty = { _agent: { resize } }

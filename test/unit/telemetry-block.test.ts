@@ -6,6 +6,7 @@ import {
   DEV_EVENT_LOOP_BLOCK_MS,
   EVENT_LOOP_BLOCK_MS,
   eventLoopBlockContext,
+  cpuLimitBucket,
   eventLoopBlockThreshold,
   gcKindName,
   memoryBucket,
@@ -113,6 +114,24 @@ describe('止まったときの main の様子（FERRET-M: スタックもパン
     const out = scrubEvent({ tags: ctx.tags, contexts: { block: ctx.context } }) as { tags: Record<string, string>; contexts: { block: Record<string, string> } }
     expect(out.tags['block.heap']).toBe('1-2GB')
     expect(out.contexts.block.ax_changed).toBe('1250ms ago')
+  })
+
+  it('OS が CPU を絞っていたら、その上限をタグと contexts.block に付ける（FERRET-M 0.6.30 の Windows）', () => {
+    const env = { heapUsedMb: 39, rssMb: 216, axEnabled: false, axChangedMsAgo: null }
+    const limited = eventLoopBlockContext([], [], { ...env, cpuSpeedLimit: 42.4 })
+    expect(limited.tags['block.cpulimit']).toBe('<50%')
+    expect(limited.context.cpu_speed_limit).toBe('42%')
+    const out = scrubEvent({ tags: limited.tags, contexts: { block: limited.context } }) as { tags: Record<string, string>; contexts: { block: Record<string, string> } }
+    expect(out.tags['block.cpulimit']).toBe('<50%')
+    expect(out.contexts.block.cpu_speed_limit).toBe('42%')
+    expect(eventLoopBlockContext([], [], { ...env, cpuSpeedLimit: null }).context.cpu_speed_limit).toBe('unknown')
+    // 渡さなければ付けない（今までの形のまま）
+    expect(eventLoopBlockContext([], [], env).tags).not.toHaveProperty('block.cpulimit')
+  })
+
+  it('CPU の速度の上限の区分（境界と異常な値）', () => {
+    expect([100, 120, 99, 75, 74, 50, 49, 0, -5].map(cpuLimitBucket)).toEqual(['none', 'none', '75-99%', '75-99%', '50-74%', '50-74%', '<50%', '<50%', '<50%'])
+    expect([null, undefined, Number.NaN, Number.POSITIVE_INFINITY].map(cpuLimitBucket)).toEqual(['unknown', 'unknown', 'unknown', 'unknown'])
   })
 
   it('メモリの区分と GC の種類の名前', () => {

@@ -233,6 +233,8 @@ export function watchEventLoop(threshold: number): void {
   // 閉じる操作（before-quit）から will-quit までの片付けの止まりは送らない（shouldReportEventLoopBlock の msSinceQuitRequest）
   let quitRequestedAt: number | null = null
   let resumedAt: number | null = null
+  // OS が掛けている CPU の速度の上限（止まりの手がかり。eventLoopBlockContext の cpuSpeedLimit）
+  let cpuSpeedLimit: number | null = null
   const isActive = (): boolean => app.isReady() && BrowserWindow.getFocusedWindow() !== null
   let activeAtLastTick = false
   app.on('will-quit', () => { quitting = true })
@@ -242,6 +244,7 @@ export function watchEventLoop(threshold: number): void {
     // powerMonitor は ready の後でしか使えない
     powerMonitor.on('resume', () => { resumedAt = performance.now() })
     powerMonitor.on('suspend', () => { resumedAt = null })
+    powerMonitor.on('speed-limit-change', (details: { limit?: unknown }) => { cpuSpeedLimit = typeof details?.limit === 'number' ? details.limit : null })
   })
   // 補助技術の切り替え（FERRET-M では 25 秒ごとに来ていた）。パンくずには残さないので、最後の時刻だけ覚える
   let axChangedAt: number | null = null
@@ -272,7 +275,7 @@ export function watchEventLoop(threshold: number): void {
       // 手がかり：まだ終わっていない IPC（長い順の上位3つ）、直前に終わった重い処理（同期の fs・ps・which・GC など）、メモリの量、補助技術
       const inflight = inflightIpc.snapshot()
       const memory = process.memoryUsage()
-      const ax = { axEnabled: app.accessibilitySupportEnabled, axChangedMsAgo: axChangedAt === null ? null : Date.now() - axChangedAt }
+      const ax = { axEnabled: app.accessibilitySupportEnabled, axChangedMsAgo: axChangedAt === null ? null : Date.now() - axChangedAt, cpuSpeedLimit }
       // GC の記録は少し遅れて届くので、待ってから重い処理を集める
       setTimeout(() => {
         reportPerf('event-loop-block', lag, eventLoopBlockContext(inflight, recentSlowOps(Date.now()).slice(0, 3), {

@@ -1156,7 +1156,10 @@ export function hardenWindowsPty(pty: IPty, platform: NodeJS.Platform = process.
         killed = true
       }
       try {
-        return (original as (...a: unknown[]) => unknown).apply(agent, args)
+        const call = () => (original as (...a: unknown[]) => unknown).apply(agent, args)
+        // kill は ConPTY を閉じる（ClosePseudoConsole）・コンソールのプロセス一覧を取る子プロセスを起こすところまで main で同期に動く。
+        // ターミナルを閉じた数秒後の止まり（FERRET-M の 0.6.30 の Windows：terminal close の後に 3.2s）の手がかりとして時間を控える
+        return name === 'kill' ? timedSync('pty:kill', call) : call()
       } catch {
         // 終わった PTY への resize・kill（想定内）
         return undefined

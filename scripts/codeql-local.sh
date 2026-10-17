@@ -20,10 +20,10 @@
 #   FERRET_CODEQL_KEEP=1 調べたあとも作業フォルダ（データベースと SARIF）を消さない
 set -euo pipefail
 
-# codeql.yml の github/codeql-action@2892aa5e…（v4.38.2）が使う bundle の版と、その macOS 版の sha256
+# codeql.yml の github/codeql-action@24c54180…（v4.38.3）が使う bundle の版と、その macOS 版の sha256
 # （GitHub の release の asset の digest と codeql-bundle-osx64.tar.zst.checksum.txt で確かめた値）
-CODEQL_VERSION=2.27.1
-CODEQL_SHA256=b63286d8189b90f6045a18797d191603f611f0003216783cade7166ec80ada45
+CODEQL_VERSION=2.27.2
+CODEQL_SHA256=6fcb14067caa51ff4dd9a7116955ce14f64027348773dde43a119c0aa618f2ce
 CODEQL_URL="https://github.com/github/codeql-action/releases/download/codeql-bundle-v${CODEQL_VERSION}/codeql-bundle-osx64.tar.zst"
 # codeql.yml の matrix.language と、言語ごとの既定のスイート（queries を指定しないときに CI が使うもの）
 LANGUAGES=(javascript-typescript actions)
