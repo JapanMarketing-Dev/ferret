@@ -11,5 +11,8 @@
   <true/>
   <key>com.apple.security.device.audio-input</key>
   <true/>
+  <!-- 動画づくりの撮影でカメラを録る（src/video/） -->
+  <key>com.apple.security.device.camera</key>
+  <true/>
 </dict>
 </plist>

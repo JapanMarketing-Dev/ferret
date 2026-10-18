@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, Settings, X } from 'lucide-react'
+import { Briefcase, FileCode, FileText, Globe, LayoutDashboard, ListChecks, Settings, X } from 'lucide-react'
 import { applyOrder, moveItem } from '@shared/layout'
 import { CountBadge } from '../ui'
 import { useT } from '../lib/i18n'
@@ -12,8 +12,11 @@ import '../styles/editor.css'
  * 中央ペインに並ぶタブ。ブラウザと指摘一覧と、開いたファイルを同じ場所で切り替える。
  * ファイルは `file:<プロジェクトの根>/<相対パス>`。
  */
-/** settings … 設定のページ（⌘, で開閉。開いている間だけタブを出す） */
-export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'settings' | FileTabId
+/**
+ * settings … 設定のページ（⌘, で開閉。開いている間だけタブを出す）。
+ * business … ビジネスの画面（business.yaml のあるプロジェクト。ビジネスリサーチは上のモード切替で開く）
+ */
+export type CenterTab = 'dashboard' | 'business' | 'browser' | 'findings' | 'settings' | FileTabId
 
 /** タブのドラッグで運ぶデータの種類（ほかの DnD と混ざらないように） */
 const DRAG_TYPE = 'application/x-ade-center-tab'
@@ -45,8 +48,11 @@ export function CenterTabs({
   onReorder,
   settingsOpen = false,
   dashboard = false,
+  venture = null,
   onCloseSettings
 }: {
+  /** 先頭にビジネス（business）のタブを出す（src/renderer/business/ventureShell.tsx） */
+  venture?: 'business' | null
   /** 全体（すべてのプロダクト）を開いている間だけ、先頭にダッシュボードのタブを出す */
   dashboard?: boolean
   active: CenterTab
@@ -82,7 +88,7 @@ export function CenterTabs({
   useEffect(() => () => menuOpenChange.current?.(false), [])
   const closeMenu = useCallback(() => setMenu(null), [])
   const isDirty = (tab: string) => files.some((file) => fileTabId(file.id) === tab && file.dirty)
-  const ids = [...(dashboard ? ['dashboard' as const] : []), ...applyOrder<CenterTab>(['browser', 'findings', ...(settingsOpen ? ['settings' as const] : []), ...files.map((file) => fileTabId(file.id))], order).filter((tab) => tab !== 'dashboard')]
+  const ids = [...(dashboard ? ['dashboard' as const] : []), ...(venture ? [venture] : []), ...applyOrder<CenterTab>(['browser', 'findings', ...(settingsOpen ? ['settings' as const] : []), ...files.map((file) => fileTabId(file.id))], order).filter((tab) => tab !== 'dashboard' && tab !== 'business')]
   const dragProps = (id: CenterTab) => onReorder ? {
     draggable: true,
     onDragStart: (e: DragEvent<HTMLElement>) => {
@@ -132,6 +138,12 @@ export function CenterTabs({
               <button key={tab} type="button" role="tab" className="ctab" aria-selected={active === 'dashboard'} onClick={() => onChange('dashboard')} data-testid="ctab-dashboard">
                 <LayoutDashboard size={13} strokeWidth={1.75} />
                 <span className="ctab__label">{t('orchestra.dashboard')}</span>
+              </button>
+            )
+            if (tab === 'business') return (
+              <button key={tab} type="button" role="tab" className="ctab" aria-selected={active === 'business'} onClick={() => onChange('business')} data-testid="ctab-business">
+                <Briefcase size={13} strokeWidth={1.75} />
+                <span className="ctab__label">{t('centerTabs.business')}</span>
               </button>
             )
             if (tab === 'findings') return (

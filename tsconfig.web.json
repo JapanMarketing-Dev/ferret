@@ -4,6 +4,7 @@
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/shared/*"],
+      "@video/*": ["src/video/*"],
       "@/*": ["src/renderer/*"]
     },
     "module": "ESNext",
@@ -21,5 +22,5 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*", "src/preload/api.d.ts", "workers/feedback-share/client/**/*"]
+  "include": ["src/renderer/**/*", "src/shared/**/*", "src/video/app/renderer/**/*", "src/video/app/shared/**/*", "src/preload/api.d.ts", "workers/feedback-share/client/**/*"]
 }

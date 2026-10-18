@@ -1,0 +1,50 @@
+# 横型（16:9）テンプレートの共通設定。直接は使わず、extends で継承する。
+id: base-horizontal
+version: 1
+abstract: true
+name: { ja: 横型の共通設定, en: Horizontal base }
+kind: talk
+targets: [youtube]
+canvas: { width: 1920, height: 1080, fps: 30 }
+
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full]
+
+cut:
+  silence: { minMs: 450, padMs: 120, noiseDb: -35 }
+  fillers: [えー, えーと, えっと, あのー, あの, まあ, うーん, なんか, その]
+  retakes: keep-last
+  ngMarkers: cut
+  minKeepMs: 300
+
+captions:
+  style: youtube-clean
+  highlight: none
+  maxCharsPerLine: 24
+  maxLines: 2
+  emphasis: auto
+  position: { anchor: bottom, y: 0.92 }
+  safeArea: youtube
+  burnIn: true
+  srt: true
+
+audio:
+  loudness: -14
+  truePeak: -1
+  denoise: light
+  bgm: { gainDb: -24, duckDb: -12 }
+  sfx: { maxPerMinute: 4, gainDb: -14 }
+
+decisions:
+  cutKeep: { autoAbove: 0.7, autoBelow: 0.3 }
+  frameCheck: { passAbove: 0.8 }
+  retakeChoice: { autoAbove: 0.65, autoBelow: 0.35 }
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area]
+
+pipeline: [ingest, sync, transcribe, rough-cut, captions, layout, preview, check, review, final, thumbnail, metadata]

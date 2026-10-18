@@ -117,6 +117,34 @@ The following projects, surveyed in [docs/04_benchmark.md](docs/04_benchmark.md)
 | FeedbackRecorder (`github.com/magnuslandahl/FeedbackRecorder`) | MIT | The flow from a recording to feedback |
 | Clipy / AREC spec | Spec text under CC BY 4.0 | Ideas for the recording format (no spec text is quoted) |
 
+### Solocut (MIT)
+
+The video features (`src/video/`: the `ferret-video` CLI and its packages, the built-in templates, recording, the video review screen and YouTube / TikTok posting) are ported from Solocut (`github.com/JapanMarketing-Dev/solocut`, version 0.2.1), which is no longer published separately. Solocut is by the same organization and itself adapts code from Ferret and Orca (listed above).
+
+```
+MIT License
+
+Copyright (c) 2026 JapanMarketing-Dev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## 2. Main dependencies bundled with the app
 
 The built app includes the following packages (versions as pinned in `pnpm-lock.yaml`). Full license texts are in `node_modules/<package>/LICENSE`.
@@ -138,6 +166,9 @@ The built app includes the following packages (versions as pinned in `pnpm-lock.
 | @sentry/electron (with @sentry/node, @sentry/browser, @sentry/core) | MIT | Functional Software, Inc. dba Sentry |
 | @fontsource-variable/inter (Inter) | SIL Open Font License 1.1 | The Inter Project Authors |
 | @fontsource-variable/jetbrains-mono (JetBrains Mono) | SIL Open Font License 1.1 | The JetBrains Mono Project Authors |
+| zod (video CLI) | MIT | Colin McDonnell |
+| yaml (video CLI, templates) | ISC | Eemeli Aro |
+| budoux (video CLI, Japanese caption line breaks) | Apache-2.0 | Google LLC |
 
 The following packages are pulled in by mermaid and bundled unmodified:
 
@@ -164,3 +195,5 @@ The Sentry CLI package (`sentry`, FSL-1.1-Apache-2.0) and other build-time tools
 | whisper.cpp (for on-device transcription) | MIT |
 | Whisper GGML models (downloaded by the user from `huggingface.co/ggerganov/whisper.cpp`) | MIT (OpenAI Whisper) |
 | Codex CLI, Claude Code and other agents | Each provider's terms |
+| FFmpeg / ffprobe (downloaded on first use by `ferret-video lib install`, from BtbN/FFmpeg-Builds or martin-riedl.de, checked against the publisher's sha256) | LGPL-2.1+ / GPL depending on the build; see the downloaded archive |
+| Noto Sans JP, JetBrains Mono (caption fonts, downloaded on first use) | SIL Open Font License 1.1 |

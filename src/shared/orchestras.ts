@@ -29,7 +29,7 @@ export function orchestraIdOf(projects: readonly Project[], project: Pick<Projec
  */
 export function orchestraMembers(projects: readonly Project[], orchestraId: string, options: { includeExcluded?: boolean } = {}): Project[] {
   return projects.filter((p) =>
-    !isOrchestra(p) && !p.orchestrator && p.source !== 'ssh' && (options.includeExcluded || !p.orchestraExcluded) && orchestraIdOf(projects, p) === orchestraId)
+    !isOrchestra(p) && !p.research && !p.orchestrator && p.source !== 'ssh' && (options.includeExcluded || !p.orchestraExcluded) && orchestraIdOf(projects, p) === orchestraId)
 }
 
 /** 開いているプロジェクトのオーケストラ。オーケストラならそれ、プロダクトならその所属、無ければ先頭のオーケストラ */
@@ -104,7 +104,9 @@ export interface TreeRow {
  * サイドバーに並べる行。オーケストラ → その子（shown の順）を字下げして続ける。畳んだオーケストラの子は出さない。
  * オーケストラに属さないもの（オーケストラが1つも無いとき）は最後に depth 0 で並べる
  */
-export function treeRows(all: readonly Project[], shown: readonly Project[], collapsed: ReadonlySet<string>): TreeRow[] {
+export function treeRows(all: readonly Project[], shownAll: readonly Project[], collapsed: ReadonlySet<string>): TreeRow[] {
+  // ビジネスリサーチのフォルダはオーケストラの木に入れない（サイドバーの上の「ビジネスリサーチ」に並ぶ）
+  const shown = shownAll.filter((p) => !p.research)
   const groups = orchestraTree(all, shown)
   const placed = new Set(groups.flatMap((g) => [g.orchestra.id, ...g.children.map((c) => c.id)]))
   return [

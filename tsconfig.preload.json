@@ -4,7 +4,8 @@
     "target": "ES2022",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["src/shared/*"],
+      "@video/*": ["src/video/*"]
     },
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -20,5 +21,5 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src/preload/**/*", "src/recorder/**/*", "src/shared/**/*"]
+  "include": ["src/preload/**/*", "src/recorder/**/*", "src/video/app/recorder/**/*", "src/shared/**/*"]
 }

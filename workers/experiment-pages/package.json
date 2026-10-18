@@ -1,0 +1,40 @@
+{
+  "name": "business-ade-experiment-pages",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "business-ADE の S8 有料試行・集客で使う実験用ランディングページ（Cloudflare Worker）",
+  "scripts": {
+    "dev": "wrangler dev",
+    "lint": "biome check . && tsc --noEmit",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy:dry-run": "wrangler deploy --dry-run --outdir dist",
+    "deploy:upload": "wrangler versions upload",
+    "deploy:gradual": "node scripts/deploy-gradual.mjs",
+    "deploy:full": "wrangler deploy"
+  },
+  "dependencies": {
+    "@sentry/cloudflare": "11.8.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@cloudflare/vitest-plugin": "1.3.6",
+    "@cloudflare/workers-types": "5.20261016.1",
+    "typescript": "~5.9.3",
+    "vitest": "4.1.12",
+    "wrangler": "4.147.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  }
+}

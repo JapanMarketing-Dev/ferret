@@ -117,7 +117,8 @@ module.exports = {
   files: APP_FILES,
   // node-pty はネイティブモジュールと補助の実行ファイル（spawn-helper、Windows の conpty.dll / OpenConsole.exe）を
   // asar の外に置かないと起動できない
-  asarUnpack: ['node_modules/node-pty/**/*'],
+  // 動画づくりの CLI（ferret-video）は Electron の Node（ELECTRON_RUN_AS_NODE）で asar の外から動かす
+  asarUnpack: ['node_modules/node-pty/**/*', 'out/video-cli/**/*'],
   /*
    * node-pty 1.1 は N-API なので Electron 向けに作り直さなくても読める。
    * macOS / Windows は同梱の prebuilds/<os>-<cpu> があり、読み込み側（node-pty の loadNativeModule）が
@@ -182,8 +183,12 @@ module.exports = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     notarize: MAC_NOTARIZE,
     category: 'public.app-category.developer-tools',
+    // 許可を求めるときの説明の日本語（Info.plist の英語は下の extendInfo）
+    extraResources: [{ from: 'build/mac/ja.lproj', to: 'ja.lproj' }],
     extendInfo: {
       NSMicrophoneUsageDescription: 'Ferret records your voice during a review and saves it with the findings on screen.',
+      // 動画づくりの撮影で、カメラの映像を画面とは別のトラックとして録る（src/video/）。日本語は build/mac/ja.lproj/InfoPlist.strings
+      NSCameraUsageDescription: 'Ferret records your camera as its own track when you shoot a video.',
       // 「相手の声も録る」を入れたときだけ、会議の相手の声（PC の音声）を録る（src/shared/systemAudio.ts）
       NSAudioCaptureUsageDescription: 'Ferret records the other side of a call (your computer\'s audio) when you turn on Record the other side too.',
       // 内蔵ブラウザで同じ LAN の開発サーバー（http://192.168.…:3000 など）を開くため。macOS 15 以降のローカルネットワークの許可の確認に使う（Orca #18900）

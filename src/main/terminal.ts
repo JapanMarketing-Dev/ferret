@@ -22,6 +22,7 @@ import { searchDirs, shellPathIsProvisional } from './agentDetection'
 import { TerminalHistory } from './terminalHistory'
 import { defaultLocaleEnv, prependPathEntry, isHostTerminalEnv, stripAppImagePaths } from './terminalEnv'
 import { AGENT_MAIL_BIN_ENV } from '@shared/agentMail'
+import { VIDEO_BIN_ENV } from '@video/names'
 import { windowsTreeKillCommand } from './platform/windowsTreeKill'
 import { applyAgentWorkspaceTrust, registeredProjectIdFor } from './agentWorkspaceTrust'
 import { detectState, parseTitle, stripAnsi } from './agent/state'
@@ -146,6 +147,10 @@ function ptyEnv(extra: Record<string, string> = {}): Record<string, string> {
   const agentBin = merged[AGENT_MAIL_BIN_ENV]
   delete merged[AGENT_MAIL_BIN_ENV]
   if (agentBin) prependPathEntry(merged, agentBin)
+  // 動画づくりの CLI（ferret-video）のフォルダも PATH の先頭に置く（src/video/app/main/cli/env.ts）
+  const videoBin = merged[VIDEO_BIN_ENV]
+  delete merged[VIDEO_BIN_ENV]
+  if (videoBin) prependPathEntry(merged, videoBin)
   return merged
 }
 

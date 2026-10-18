@@ -1,0 +1,620 @@
+/* 中央の「動画」タブ（担当: 動画タブ）。色・寸法・時間は tokens.css の var(--…) だけを使う */
+
+.video-ws {
+  display: flex;
+  overflow: auto;
+  flex: 1 1 auto;
+  align-self: stretch;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  flex-direction: column;
+  background: var(--color-bg-app);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+}
+
+.video-note {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  gap: var(--space-3);
+}
+
+.video-note--warn {
+  display: flex;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-quiet);
+  color: var(--color-text);
+}
+
+.video-note code,
+.video-feedback code {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.video-error {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.video-error__details summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.video-error__details code {
+  display: block;
+  margin-top: var(--space-3);
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── 一覧 ─────────────────────────────── */
+
+.video-list,
+.video-detail {
+  display: flex;
+  flex: none;
+  width: 100%;
+  max-width: 880px;
+  box-sizing: border-box;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-7) var(--space-8);
+  gap: var(--space-6);
+}
+
+.video-list__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.video-list__heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.video-list__heading h2,
+.video-detail__title h2 {
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+}
+
+.video-list__channel {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-list__count {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-sm);
+}
+
+.video-list__rows {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+}
+
+.video-list__rows > [role='listitem'] + [role='listitem'] {
+  border-top: 1px solid var(--color-border);
+}
+
+.video-list__tile {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+  font-weight: var(--font-weight-bold);
+  place-items: center;
+}
+
+.video-list__dir {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+.video-list__trail {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-faint);
+  gap: var(--space-4);
+}
+
+/* ── 新しい動画 ─────────────────────────── */
+
+.video-new {
+  display: flex;
+  width: min(100%, 520px);
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.video-new__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: var(--space-3);
+}
+
+.video-new__field > span:first-child,
+.video-new__field legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.video-new__templates {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.video-new__template {
+  display: grid;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  column-gap: var(--space-4);
+  grid-template-columns: auto 1fr;
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.video-new__template.is-selected {
+  border-color: var(--color-accent-line);
+  background: var(--color-accent-wash);
+}
+
+.video-new__template input {
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
+.video-new__template-name {
+  font-weight: var(--font-weight-medium);
+}
+
+.video-new__template-desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  grid-column: 2;
+}
+
+.video-new__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-4);
+}
+
+/* ── 動画1本 ─────────────────────────────── */
+
+.video-detail {
+  gap: var(--space-6);
+}
+
+.video-detail__head {
+  margin: calc(var(--space-5) * -1) 0 calc(var(--space-3) * -1) calc(var(--space-4) * -1);
+}
+
+.video-detail__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.video-detail__title > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.video-detail__actions {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.video-action {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+  gap: var(--space-4);
+}
+
+.video-action .btn {
+  justify-content: center;
+}
+
+.video-action__hint {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.video-detail__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.video-steps {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.video-step {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  gap: var(--space-3);
+}
+
+.video-step--done,
+.video-step--skipped {
+  color: var(--color-text);
+}
+
+.video-step--done svg {
+  color: var(--color-success);
+}
+
+.video-step--running {
+  border-color: var(--color-accent-line);
+  color: var(--color-text);
+}
+
+.video-step--running svg {
+  color: var(--color-accent);
+}
+
+.video-step--needs-human {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-quiet);
+  color: var(--color-text);
+}
+
+.video-step--needs-human svg {
+  color: var(--color-warning);
+}
+
+.video-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-hover);
+  gap: var(--space-4);
+}
+
+.video-next__label {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.video-next__why {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.video-feedback {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.video-feedback__row {
+  display: flex;
+  align-items: center;
+  min-height: var(--size-row);
+  color: var(--color-text-muted);
+  gap: var(--space-4);
+}
+
+.video-feedback__row code {
+  color: var(--color-text);
+}
+
+/* ── 確認（喋って囲む）─────────────────────── */
+
+.video-review {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  flex-direction: column;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  gap: var(--space-5);
+}
+
+.video-review__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.video-review__title {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-sm);
+}
+
+.video-review__body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  gap: var(--space-6);
+}
+
+.video-review__stage {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.video-review__player {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #000;
+}
+
+.video-review__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.video-review__canvas {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+  pointer-events: none;
+}
+
+.video-review__canvas.is-drawing {
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.video-review__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-height: var(--size-toolbar);
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+  gap: var(--space-4);
+}
+
+.video-review__bar.is-active {
+  border-color: var(--color-record-line);
+}
+
+.video-review__rec {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  gap: var(--space-3);
+}
+
+.video-review__time {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-time);
+  font-variant-numeric: tabular-nums;
+}
+
+.video-review__spacer {
+  flex: 1;
+}
+
+.video-review__items {
+  display: flex;
+  width: 360px;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-panel);
+}
+
+.video-review__items-head,
+.video-review__items-foot {
+  display: flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  gap: var(--space-4);
+}
+
+.video-review__items-head {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.video-review__items-head h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+.video-review__items-foot {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--color-border);
+}
+
+.video-review__items > .video-note {
+  padding: var(--space-5);
+}
+
+.video-review__list {
+  display: flex;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  margin: 0;
+  padding: var(--space-4);
+  gap: var(--space-4);
+  list-style: none;
+}
+
+.video-item {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  gap: var(--space-3);
+}
+
+.video-item__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.video-item__tc {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.video-item__tc:hover {
+  color: var(--color-accent-hover);
+}
+
+.video-item__said {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+}
+
+.video-item__said > span {
+  margin-right: var(--space-3);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.video-item__said.is-muted {
+  color: var(--color-text-muted);
+}
+
+.video-item__req {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.video-item__req > span {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.video-item__req textarea {
+  box-sizing: border-box;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-app);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  resize: vertical;
+}
+
+.video-item__req textarea:focus {
+  border-color: var(--color-accent-line);
+  outline: none;
+}
+
+@media (width <= 760px) {
+  .video-review__body {
+    flex-direction: column;
+  }
+
+  .video-review__items {
+    width: auto;
+    max-height: 50%;
+  }
+}
+
+/* 上のモード切替の「動画」のときは中央のタブも URL の欄も無いので、ペインを1行にして下まで地を敷く */
+.pane:has(> .video-ws) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.video-ws__channel {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: var(--space-6, 24px);
+}

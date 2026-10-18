@@ -1,0 +1,6 @@
+# 旧テンプレートの id（既存のプロジェクトのために残す別名）。中身は talk と同じ。新しいプロジェクトは tech（標準テンプレート）を使う。
+id: shorts-from-long
+version: 2
+alias: true
+extends: talk
+name: { ja: 長尺からショート, en: Shorts from long }

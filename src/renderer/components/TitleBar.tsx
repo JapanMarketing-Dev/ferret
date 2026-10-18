@@ -1,7 +1,9 @@
 import {
+  Clapperboard,
   MessageSquarePlus,
   MessageSquareQuote,
   PanelsTopLeft,
+  Search,
   Settings
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -29,6 +31,8 @@ export function TitleBar({
   mode,
   recording,
   onChangeMode,
+  video = false,
+  onOpenVideo,
   onProjectMenuChange,
   onToggleRecording,
   onOpenSettings,
@@ -37,13 +41,19 @@ export function TitleBar({
   noteMode = false,
   noteDisabled = false,
   onToggleNote,
-  round
+  round,
+  research
 }: {
+  /** モード切替の「ビジネスリサーチ」（選んだときだけ中央をリサーチの画面にする。src/renderer/research/researchMode.tsx） */
+  research?: { active: boolean; onEnter: () => void }
   workspace: WorkspaceState
   projects: ProjectsState
   mode: AppMode
   recording: boolean
   onChangeMode: (mode: AppMode) => void
+  /** 「動画」（src/video/）を選んでいるか。選ぶと onOpenVideo、ほかを選ぶと onChangeMode */
+  video?: boolean
+  onOpenVideo?: () => void
   /** プロジェクト一覧の開閉。開いている間は内蔵ブラウザのビューを隠す */
   onProjectMenuChange?: (open: boolean) => void
   onToggleRecording: () => void
@@ -73,8 +83,8 @@ export function TitleBar({
       <div className="titlebar__center">
         <Segmented
           ariaLabel={t('titleBar.mode')}
-          value={mode}
-          onChange={onChangeMode}
+          value={research?.active ? 'research' : video ? 'video' : mode}
+          onChange={(next) => { if (next === 'research') research?.onEnter(); else if (next === 'video') onOpenVideo?.(); else onChangeMode(next) }}
           options={[
             {
               value: 'editor',
@@ -89,7 +99,15 @@ export function TitleBar({
               icon: <MessageSquareQuote size={13} strokeWidth={1.75} />,
               testId: 'mode-feedback',
               title: t('titleBar.feedbackTitle', { key: SHORTCUTS.toggleMode() })
-            }
+            },
+            ...(research ? [{
+              value: 'research' as const,
+              label: t('research.mode.label'),
+              icon: <Search size={13} strokeWidth={1.75} />,
+              testId: 'mode-research',
+              title: t('research.mode.title')
+            }] : []),
+            ...(onOpenVideo ? [{ value: 'video' as const, label: t('video.tab'), icon: <Clapperboard size={13} strokeWidth={1.75} />, testId: 'mode-video', title: t('video.modeTitle') }] : [])
           ]}
         />
         {round}

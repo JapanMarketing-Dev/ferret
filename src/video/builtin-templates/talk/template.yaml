@@ -1,0 +1,43 @@
+# 旧テンプレート（既存のプロジェクトのために残す。一覧には出さない）。新しい動画は tech（標準テンプレート）を使う。
+id: talk
+version: 2
+alias: true
+extends: base-horizontal
+name: { ja: 語り動画（16:9・1本）, en: Talking head (16:9, one file) }
+description:
+  ja: カメラに向かって話す解説動画。ジャンプカットごとに軽いズームで変化をつけ、図解や画像を挟む
+  en: Talking-head explainer. Light punch-ins on jump cuts, with diagrams and images inserted
+kind: talk
+targets: [youtube]
+canvas: { width: 1920, height: 1080, fps: 30 }
+
+record:
+  tracks: [camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+
+layouts:
+  default: camera-full
+  allowed: [camera-full, scene]
+
+cut:
+  silence: { minMs: 400, padMs: 100 }
+  jumpZoom: { every: 2, scale: 1.12 }
+
+multicam: { maxShotSec: 12, minShotSec: 2 }
+
+# 効果音のルール（ferret-video sfx apply）。章の頭と強調語に入れ、1分あたりの上限を守る
+sfx:
+  rules:
+    - { on: section, kind: whoosh }
+    - { on: emphasis, kind: pop, probability: 0.6 }
+  maxPerMin: 4
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, caption-face-overlap, camera-switch]
+
+features:
+  faceReframe: true
+
+outputs:
+  youtube: { }
+
+pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, sfx, layout, preview, check, final, thumbnail, metadata]

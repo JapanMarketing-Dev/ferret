@@ -16,7 +16,7 @@ const AGENT_START_TIMEOUT_MS = 45_000
 const GENERIC_SETTLE_MS = 3000
 
 /** その Agent のタブを開き、入力を受け付ける（待機中・確認待ち）まで待つ。ターミナルの id を返す */
-async function launchAgentAndWait(agent: TuiAgent): Promise<string | null> {
+export async function launchAgentAndWait(agent: TuiAgent): Promise<string | null> {
   const before = new Set((await window.ade.invoke('terminal:list')).map((x) => x.id))
   requestAgentLaunch(agent)
   const deadline = Date.now() + AGENT_START_TIMEOUT_MS

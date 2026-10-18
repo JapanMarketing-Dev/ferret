@@ -3,8 +3,13 @@ import { copyFileSync, mkdirSync } from 'node:fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import { build, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+// 動画づくり: ferret-video CLI のまとめと、投稿の OAuth のクライアントの値（src/video/build/）
+import { videoCliPlugin } from './src/video/build/cliPlugin'
+import { videoOAuthDefines } from './src/video/build/oauthEnv'
+import { videoRecorderPlugin } from './src/video/build/recorderPlugin'
 
 const shared = resolve(__dirname, 'src/shared')
+const video = resolve(__dirname, 'src/video')
 const recorderSrc = resolve(__dirname, 'src/recorder')
 const recorderOut = resolve(__dirname, 'out/recorder')
 /**
@@ -56,8 +61,9 @@ function recorderPagePlugin(): Plugin {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), recorderPagePlugin()],
-    resolve: { alias: { '@shared': shared } },
+    plugins: [externalizeDepsPlugin(), recorderPagePlugin(), videoCliPlugin(__dirname), videoRecorderPlugin(__dirname, sourcemap)],
+    resolve: { alias: { '@shared': shared, '@video': video } },
+    define: videoOAuthDefines(),
     build: {
       sourcemap,
       // 起動時間（NF-5）のため、メインプロセスは単一ファイルに固め、
@@ -67,7 +73,7 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
-    resolve: { alias: { '@shared': shared } },
+    resolve: { alias: { '@shared': shared, '@video': video } },
     build: {
       sourcemap,
       rollupOptions: {
@@ -76,7 +82,9 @@ export default defineConfig({
           // 録画用ウィンドウの preload
           recorder: resolve(__dirname, 'src/preload/recorder.ts'),
           // レビュー対象ページへ入れる注入スクリプト（操作ログ・ペン・テキスト）
-          review: resolve(__dirname, 'src/preload/review.ts')
+          review: resolve(__dirname, 'src/preload/review.ts'),
+          // 動画の撮影の録画ウインドウ・範囲を選ぶ重ねたウインドウの preload
+          videoRecorder: resolve(__dirname, 'src/video/app/recorder/preload.ts')
         }
       }
     }
@@ -84,7 +92,7 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
     plugins: [react()],
-    resolve: { alias: { '@shared': shared, '@': resolve(__dirname, 'src/renderer') } },
+    resolve: { alias: { '@shared': shared, '@video': video, '@': resolve(__dirname, 'src/renderer') } },
     build: {
       sourcemap,
       rollupOptions: { input: { index: resolve(__dirname, 'src/renderer/index.html') } }

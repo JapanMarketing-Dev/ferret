@@ -26,3 +26,7 @@ out-*/
 # 判定モデルの受け入れ確認を手で試したときにできるファイル（commit しない）
 /req.json
 /state.txt
+
+# Cloudflare Worker の手元用の秘密（wrangler dev。commit しない）
+.dev.vars
+.wrangler/

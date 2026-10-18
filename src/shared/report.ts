@@ -16,7 +16,7 @@ import { perfAnomalyEvent, type PerfAnomaly } from './telemetry'
 export type ReportArea =
   | 'terminal' | 'pty' | 'agent-launch' | 'agent-mail' | 'recording' | 'stt' | 'organize' | 'review' | 'files' | 'editor'
   | 'browser' | 'github' | 'usage' | 'accounts' | 'update' | 'settings' | 'layout' | 'resources' | 'sessions'
-  | 'preview' | 'startup' | 'ui' | 'onboarding' | 'mobile-remote'
+  | 'preview' | 'startup' | 'ui' | 'onboarding' | 'mobile-remote' | 'video'
 
 interface ReportWhere {
   area: ReportArea

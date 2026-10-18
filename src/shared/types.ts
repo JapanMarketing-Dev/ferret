@@ -91,7 +91,8 @@ export interface WorkspaceState {
  *   desktop … 起動コマンドと、録画するウインドウ（Electron / Tauri の開発サーバーなら URL も）
  *   other   … 起動コマンド・ウインドウ・URL を自由に
  */
-export type ProjectKind = 'web' | 'mobile' | 'desktop' | 'other'
+/** video … 動画のチャンネル（マスタフォルダ）。中のフォルダが動画1本ずつ（src/video/）。「動画」のタブが出る */
+export type ProjectKind = 'web' | 'mobile' | 'desktop' | 'other' | 'video'
 
 /**
  * プロジェクトごとに登録する確認先（ターゲット）。名前は自由で、件数の上限は無い。
@@ -171,6 +172,11 @@ export interface Project {
   orchestraExcluded?: true
   /** 属するオーケストラ（editorWorkspace のプロジェクトの id）。無ければ先頭のオーケストラ（@shared/orchestras） */
   orchestraId?: string
+  /**
+   * ビジネスリサーチのフォルダ（research.yaml。src/shared/research/）。サイドバーではオーケストラの上の「ビジネスリサーチ」に並び、
+   * オーケストラには入れない（見込みありと判定した候補が「プロジェクトにする」でオーケストラ配下のプロジェクトになる）
+   */
+  research?: true
   /**
    * 内蔵ブラウザのログインの組。無ければすべてのプロジェクトで共有（一度ログインすればどこでもログインしたまま）。
    * クライアントが違うなど分けたいときに名前を付け、同じ名前のプロジェクト同士で共有する（@shared/browserProfile）

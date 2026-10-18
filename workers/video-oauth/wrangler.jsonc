@@ -1,0 +1,19 @@
+{
+  // 動画の投稿（TikTok）のトークンの交換（README.md に手順）。旧 Solocut から動いている Worker（名前はそのまま）。
+  // アプリ（src/video/app/main/publish/tiktok.ts）は TikTok のクライアントシークレットを持たず、認可の code（PKCE）かリフレッシュトークンをここへ送る。
+  // 公開: node scripts/release-tools.mjs wrangler deploy --config workers/video-oauth/wrangler.jsonc
+  // 秘密（4つ。アプリが送る client_key で組を選ぶ）は wrangler secret put で入れる。このファイルにもリポジトリにも書かない:
+  //   TIKTOK_CLIENT_KEY / TIKTOK_CLIENT_SECRET                  本番
+  //   TIKTOK_SANDBOX_CLIENT_KEY / TIKTOK_SANDBOX_CLIENT_SECRET  サンドボックス
+  "name": "solocut-oauth",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  // Ferret のドメインで受ける（https://ferretade.dev/oauth/*。アプリの既定の交換先）。
+  // solocut.app は閉じた。*.workers.dev（https://solocut-oauth.<subdomain>.workers.dev/oauth/*）でも受ける。版ごとのプレビューの URL は出さない
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{ "pattern": "ferretade.dev/oauth/*", "zone_name": "ferretade.dev" }],
+  // 要求の記録（code・トークンを含みうる）は残さない
+  "observability": { "enabled": false },
+  "logpush": false
+}

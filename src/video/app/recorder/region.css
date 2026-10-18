@@ -1,0 +1,9 @@
+/* 透明の上に暗い幕を張り、選んだところだけを抜く（選択の外を box-shadow で暗くする）。録画の赤は選んだ枠だけ */
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; cursor: crosshair; user-select: none; font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+.dim { position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); }
+.dim[hidden] { display: none; }
+.sel { position: fixed; outline: 2px solid #e5484d; box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.35); }
+.sel[hidden] { display: none; }
+.size { position: absolute; right: 0; bottom: -26px; padding: 2px 8px; border-radius: 4px; background: rgb(0 0 0 / 0.75); color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hint { position: fixed; left: 50%; top: 40%; transform: translateX(-50%); margin: 0; padding: 8px 14px; border-radius: 8px; background: rgb(0 0 0 / 0.75); color: #fff; pointer-events: none; }
+.hint[hidden] { display: none; }

@@ -18,6 +18,8 @@ import { assetVersion } from './asset-version.mjs'
 export const DOCS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../site/docs')
 const REPO = 'https://github.com/JapanMarketing-Dev/ferret'
 const APP = 'Ferret'
+const CONTACT_URL = 'https://github.com/JapanMarketing-Dev/ferret/issues'
+const COMPANY_URL = 'https://www.japan-marketing.co.jp/'
 // canonical・og:url は tools/qa/site-meta.mjs（pnpm site:meta）と同じ形にする。両方を走らせても差分が出ないように
 const SITE_URL = /export const SITE_URL = '([^']+)'/.exec(readFileSync(resolve(DOCS_DIR, '../js/config.js'), 'utf8'))?.[1]
 if (!SITE_URL) throw new Error('site/js/config.js に SITE_URL が見つかりません')
@@ -175,7 +177,7 @@ ${code(`# UI feedback (N)
 <p>The headings and labels in <code>feedback.md</code> follow the interface language (Settings → Language).</p>
 <p>Agents read this with the tools they already have (file read, image view), so no plugin or MCP server is needed. Any agent that can read files and images can use it.</p>`],
     ['local-first', 'Local first', `
-<p>Recordings, images, and notes stay in your project folder. Transcription runs on-device by default. Anything that leaves your machine goes straight from your computer to the service you chose (OpenAI, your endpoint, GitHub). There are two exceptions: crash reporting to Sentry (errors, one session per launch, and freeze warnings; on by default, off in Settings), and in-app feedback you choose to send, which goes through the developer's small relay and becomes a public GitHub issue. The relay does not store your IP address. Apart from that relay, the developer runs no servers and pays for nothing on your behalf. See <a href="privacy.html">Data and privacy</a>.</p>`],
+<p>Recordings, images, and notes stay in your project folder. Transcription runs on-device by default. Anything that leaves your machine goes straight from your computer to the service you chose (OpenAI, your endpoint, GitHub). There are two exceptions: crash reporting to Sentry (errors, one session per launch, and freeze warnings; on by default, off in Settings), and in-app feedback you choose to send, which goes through the developer's small relay and becomes a public GitHub issue. The relay does not store your IP address. If you connect TikTok, the sign-in also passes through a small token relay that adds the app's secret and stores nothing (see <a href="privacy.html#tiktok">TikTok</a>). Apart from these relays and the <a href="recording.html#share">share links</a> you make, the developer runs no servers and pays for nothing on your behalf. See <a href="privacy.html">Data and privacy</a>.</p>`],
   ])
 
 page('keyboard.html', 'Start here', 'Keyboard shortcuts',
@@ -1026,7 +1028,7 @@ qwen3:14b for Organize findings and add a prd URL for the shop project"&gt;`)}
 /* ───────────── Reference ───────────── */
 
 page('privacy.html', 'Reference', 'Data and privacy',
-  'Reviews live in your project folder. Settings live in <code>~/.ferret/</code>, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue.',
+  'Reviews live in your project folder. Settings live in <code>~/.ferret/</code>, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue. Videos you post to YouTube or TikTok go from your computer to that service, only when you press OK to post. Last updated: October 18, 2026.',
   [
     ['reviews', 'Inside .ferret/reviews/', `
 ${code(`&lt;project&gt;/.ferret/reviews/20261003-104500/
@@ -1056,6 +1058,8 @@ ${code(`&lt;project&gt;/.ferret/reviews/20261003-104500/
     <tr><td>Footer usage (Claude Code and Codex only)</td><td>Anthropic, ChatGPT</td><td>usage request with your own login</td></tr>
     <tr><td>GitHub star prompt</td><td>GitHub via your <code>gh</code></td><td>checks whether you starred the repo, and stars it only if you click ${ui('Star on GitHub')}</td></tr>
     <tr><td>Updates (when ${APP} starts, every 6 hours, and ${ui('Check for Updates')})</td><td>download server (Cloudflare R2)</td><td>requests for <code>latest.json</code> and that version's <code>SHA256SUMS</code> (on macOS also <code>UPDATE-SHA256SUMS</code>); when a newer version is found, the update file for your computer (only when you click ${ui('Download')} if ${ui('Update automatically')} is off)</td></tr>
+    <tr><td>Connecting and posting to YouTube (only when you connect your Google account and press OK to post)</td><td>Google (YouTube Data API)</td><td>sign-in on Google's own page; the video, thumbnail, title, description, tags and privacy setting you approved; reads the connected channel's name and the upload status (see <a href="#youtube">YouTube</a>)</td></tr>
+    <tr><td>Connecting and posting to TikTok (only when you connect TikTok and press OK to post)</td><td>TikTok (Login Kit and Content Posting API). The sign-in code and token refreshes go through the developer's token relay at <code>ferretade.dev/oauth/tiktok/</code></td><td>the video and caption you approved; reads your TikTok display name. The relay passes the code or token on and stores nothing (see <a href="#tiktok">TikTok</a>)</td></tr>
     <tr><td>Sending feedback from the app (only when you send it)</td><td>the developer's feedback relay (a Cloudflare Worker), which opens a public issue in <code>JapanMarketing-Dev/ferret</code></td><td>your text, bug or idea, app / OS version and CPU, and up to 3 screenshots you attach. Keys, tokens, email addresses, and home-folder paths are masked. The relay does not store your IP address (see <a href="#feedback">Feedback from the app</a>)</td></tr>
     <tr><td>A crash or error (${ui('Send crash reports')} on)</td><td>Sentry</td><td>stack trace and OS / CPU / app versions (see <a href="#crash-reports">Crash reports</a>)</td></tr>
   </tbody>
@@ -1075,6 +1079,23 @@ ${code(`&lt;project&gt;/.ferret/reviews/20261003-104500/
   <li>The relay does not store your IP address. To limit how often one sender can post (5 per hour, 20 per day), it counts a keyed hash of the IP address (and of the install ID, if sent) for up to 24 hours, then deletes it. Neither appears in the issue.</li>
   <li>Screenshots are kept by the relay in Cloudflare R2 under unguessable names and shown in the issue. To have an issue or its screenshots removed, comment on the issue or open a new one.</li>
   <li>The relay's code is in <code>workers/feedback-relay</code> in the repository.</li>
+</ul>`],
+    ['youtube', 'YouTube (YouTube API Services)', `
+<p>${APP} uses YouTube API Services to upload videos to your own YouTube channel. It does so only after you connect your Google account in ${APP} and press OK to post a video. By connecting, you agree to be bound by the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. How Google handles your data is described in the <a href="http://www.google.com/policies/privacy">Google Privacy Policy</a>.</p>
+<ul>
+  <li><strong>Access requested</strong>: <code>youtube.upload</code> to upload videos, and <code>youtube.force-ssl</code> to set the video's thumbnail and read the name of the connected channel.</li>
+  <li><strong>What is used, and for what</strong>: the video, thumbnail and metadata you approved (title, description, tags, privacy and similar settings) are uploaded to your channel, and the upload status is read back so ${APP} can show whether it finished. The channel name is read only to show which channel is connected. ${APP} does not read, collect or share any other data from your Google account, and does not use it for advertising or analytics.</li>
+  <li><strong>Where it goes</strong>: from your computer straight to Google. Nothing from your Google account, your channel or the videos you post is sent to the developer or to anyone else. Crash reports never include tokens, videos, titles or channel names.</li>
+  <li><strong>Where it is stored</strong>: the OAuth tokens are kept only on your computer, encrypted with the OS keychain (macOS Keychain, Windows DPAPI or the Linux secret service), in ${APP}'s userData folder. The connected channel's name is kept next to them to show in the app. The video and its post settings stay in your project folder.</li>
+  <li><strong>How to stop</strong>: disconnect your Google account in ${APP}'s settings at any time. This deletes the tokens from your computer. You can also revoke ${APP}'s access at <a href="https://security.google.com/settings/security/permissions">Google security settings</a>. Videos that were already uploaded stay on YouTube until you delete them there.</li>
+  <li>${APP}'s use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</li>
+</ul>`],
+    ['tiktok', 'TikTok', `
+<p>If you connect TikTok, ${APP} uses TikTok's Login Kit and Content Posting API only to post the video and caption you approved to your TikTok account, after you press OK. Use of TikTok is subject to <a href="https://www.tiktok.com/legal/terms-of-service">TikTok's Terms of Service</a> and <a href="https://www.tiktok.com/legal/privacy-policy">Privacy Policy</a>.</p>
+<ul>
+  <li><strong>Access requested</strong>: <code>user.info.basic</code> to show the display name of the connected account, and <code>video.upload</code> to send the video to your TikTok inbox, where you finish the post in the TikTok app. <code>video.publish</code> (posting directly) is requested only after TikTok approves ${APP} for it.</li>
+  <li><strong>Where it goes and where it is stored</strong>: the video and caption go from your computer straight to TikTok. The tokens are kept only on your computer, encrypted with the OS keychain in the same way as for YouTube. Disconnecting TikTok in ${APP}'s settings deletes them. You can also remove ${APP}'s access in the TikTok app's settings.</li>
+  <li><strong>Token relay</strong>: TikTok needs the app's client secret to turn the sign-in code into tokens, and that secret must not ship inside the app. So for that step only, ${APP} sends the request to a small Cloudflare Worker run by the developer at <code>https://ferretade.dev/oauth/tiktok/</code>. It accepts only three requests (exchange the sign-in code, refresh a token, revoke a token), adds the client secret, forwards the request to TikTok, and returns TikTok's answer to your computer unchanged. It does not log or store the code, the tokens, your IP address or anything about your account, and it never receives your videos or captions.</li>
 </ul>`],
     ['crash-reports', 'Crash reports', `
 <p>When the app crashes or hits an unhandled error, ${APP} sends a crash report to <a href="https://sentry.io/">Sentry</a> so the bug can be fixed. It is on by default. Turn it off in ${ui('Settings → Privacy → Send crash reports')}, or with ${ui('Turn off')} on the notice shown at first launch. Turning it off takes effect at once. Turning it back on takes effect at the next launch. Development builds (<code>pnpm dev</code>) also send, tagged <code>development</code>, so the developers can fix crashes they hit while working. E2E runs and unit tests never send.</p>
@@ -1109,6 +1130,30 @@ ${code(`&lt;project&gt;/.ferret/reviews/20261003-104500/
 </table>
 <p>The installed app sends at most 10 reports per launch and only half of JavaScript errors (native crashes are always sent). Development builds send every error, up to 50 per launch. The same error is sent only once per launch. Slow startups (over 5 seconds) and long freezes of the app (over 1 second) are sent as warnings, at most once every 10 minutes. No performance tracing or session replay is used. The app uses Sentry's free plan. If it fills up, extra reports are dropped and nobody is charged.</p>
 <p>Building ${APP} yourself? Set <code>FERRET_SENTRY_DSN</code> (the old name <code>MOVIE_ADE_SENTRY_DSN</code> also works) to your own Sentry DSN, or to an empty string to send nothing. The code is in <code>src/main/telemetry.ts</code> and <code>src/shared/telemetry.ts</code>.</p>`],
+    ['contact', 'Contact', `
+<p>${APP} is provided by Japan Marketing LLC. For questions about privacy, or to ask about data the developer holds (crash reports, feedback, share links), open an issue at <a href="${CONTACT_URL}">GitHub Issues</a> or contact <a href="${COMPANY_URL}">Japan Marketing LLC</a>. See also the <a href="terms.html">Terms of Service</a>.</p>`],
+  ])
+
+page('terms.html', 'Reference', 'Terms of Service',
+  `These terms apply to the ${APP} desktop app and the website ferretade.dev, provided by Japan Marketing LLC ("we"). By using ${APP} you agree to them. Last updated: October 18, 2026.`,
+  [
+    ['software', 'The software', `
+<p>${APP} is open-source software under the <a href="${REPO}/blob/main/LICENSE">MIT License</a>. You may use, copy, modify and distribute it free of charge under that license. Third-party components and the files ${APP} downloads on demand (such as speech recognition models) are subject to their own licenses.</p>`],
+    ['content', 'Your content and accounts', `
+<p>Your recordings, findings, projects and videos are yours. ${APP} processes them on your computer and claims no rights to them. You are responsible for having the rights to what you record and post, and for the accounts you connect.</p>
+<p>Coding agents (for example Claude Code, Codex or Gemini CLI) and AI services you set up run under your own subscription and keys. Your use of them is subject to their providers' terms.</p>`],
+    ['youtube', 'YouTube', `
+<p>${APP} uses YouTube API Services to post your videos to your own channel after you press OK. By connecting your Google account you agree to be bound by the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>. The <a href="http://www.google.com/policies/privacy">Google Privacy Policy</a> applies to data handled by Google. You can revoke ${APP}'s access at any time at <a href="https://security.google.com/settings/security/permissions">Google security settings</a> or by disconnecting in ${APP}. How ${APP} uses this access is described in <a href="privacy.html#youtube">Data and privacy</a>.</p>`],
+    ['tiktok', 'TikTok', `
+<p>If you connect TikTok, videos are posted to your account under <a href="https://www.tiktok.com/legal/terms-of-service">TikTok's Terms of Service</a> and <a href="https://www.tiktok.com/community-guidelines">Community Guidelines</a>, which you agree to follow. Nothing is posted until you press OK. See <a href="privacy.html#tiktok">Data and privacy</a>.</p>`],
+    ['online', 'Online services', `
+<p>A few optional features use small servers run by us: <a href="recording.html#share">share links</a>, the feedback relay and the TikTok token relay. They are provided free of charge and may change, be limited or stop at any time. Don't use them to send unlawful content or to attack or overload them.</p>`],
+    ['warranty', 'No warranty', `
+<p>${APP} is provided "as is", without warranty of any kind, express or implied, including merchantability and fitness for a particular purpose. To the extent permitted by law, we are not liable for any damages arising from its use, including lost data, changes made by coding agents, or content posted by mistake. Review your video and its post settings before you press OK.</p>`],
+    ['changes', 'Changes', `
+<p>We may update these terms. The date at the top shows the latest version. If you keep using ${APP} after a change, you accept the updated terms.</p>`],
+    ['contact', 'Contact', `
+<p><a href="${CONTACT_URL}">GitHub Issues</a> or <a href="${COMPANY_URL}">Japan Marketing LLC</a></p>`],
   ])
 
 page('files.html', 'Reference', 'Files and environment',
@@ -1352,6 +1397,7 @@ const SITE_STRINGS = {
   'footer.product': 'Product',
   'footer.community': 'Community',
   'footer.privacy': 'Privacy',
+  'footer.terms': 'Terms',
   'footer.license': 'MIT License',
   ...Object.fromEntries(GROUPS.map((g) => [groupKey(g), g])),
 }
@@ -1589,6 +1635,7 @@ const footer = (c) => `<footer class="site-footer">
             <li>${tabLink(c, '../download.html#versions', c('nav.changelog'))}</li>
             <li>${tabLink(c, 'quick-start.html', c('nav.docs'))}</li>
             <li>${tabLink(c, 'privacy.html', c('footer.privacy'))}</li>
+            <li>${tabLink(c, 'terms.html', c('footer.terms'))}</li>
           </ul>
         </div>
         <div>

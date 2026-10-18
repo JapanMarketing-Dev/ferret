@@ -3,7 +3,8 @@
     "target": "ES2022",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["src/shared/*"],
+      "@video/*": ["src/video/*"]
     },
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -21,7 +22,7 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src/main/**/*", "src/shared/**/*", "electron.vite.config.ts"],
+  "include": ["src/main/**/*", "src/shared/**/*", "src/video/**/*", "electron.vite.config.ts"],
   "//": "画面の上に描く部品（DOM だけを使う）は preload・web の型検査で見る",
-  "exclude": ["src/shared/annotationPaint.ts", "src/shared/annotationPointer.ts", "src/shared/noteEditorDom.ts"]
+  "exclude": ["src/video/app/renderer/**/*", "src/video/app/recorder/**/*", "src/shared/annotationPaint.ts", "src/shared/annotationPointer.ts", "src/shared/noteEditorDom.ts"]
 }

@@ -1,0 +1,5 @@
+/* macOS が許可を求めるときに出す説明（日本語）。英語は electron-builder.config.cjs の mac.extendInfo */
+NSMicrophoneUsageDescription = "Ferret はレビュー中のあなたの声を録音し、画面の指摘と一緒に保存します。";
+NSAudioCaptureUsageDescription = "「相手の声も録る」をオンにしたとき、Ferret は通話の相手の声（PC の音声）を録音します。";
+NSLocalNetworkUsageDescription = "Ferret は同じネットワーク上の開発サーバーを内蔵ブラウザで開きます。";
+NSCameraUsageDescription = "動画を撮るとき、Ferret はカメラの映像を画面とは別のトラックとして録画します。";

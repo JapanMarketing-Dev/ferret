@@ -33,12 +33,14 @@ export const GESTURE_GRANT_MS = {
   /** 端末への貼り付け（Ctrl+V を押した直後に1回だけ。security-7 [1]） */
   paste: 5_000,
   /** フッターの「最新を取得」・push（押した直後に1回だけ。push は外へ出るので確認の Push を押したとき） */
-  gitSync: 10_000
+  gitSync: 10_000,
+  /** ビジネス・ビジネスリサーチの「Agent へ送る」の札を作る（押した直後に1回だけ。renderer はクリックの処理ですぐ呼ぶ） */
+  send: 1_500
 } as const
 
 export type GestureAction = keyof typeof GESTURE_GRANT_MS
 /** 1回の操作で1回しか使えないもの */
-const ONE_USE: ReadonlySet<GestureAction> = new Set(['record', 'screenshot', 'gitSync', 'paste'])
+const ONE_USE: ReadonlySet<GestureAction> = new Set(['record', 'screenshot', 'gitSync', 'paste', 'send'])
 
 /**
  * 利用者の操作から作る、短い間だけ有効な許可。

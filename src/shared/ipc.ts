@@ -1,3 +1,5 @@
+// 動画づくりのチャネル（video: で始まる。正本は src/video/app/shared/ipc.ts）
+import { VIDEO_IPC_EVENT_CHANNELS, VIDEO_IPC_REQUEST_CHANNELS, type VideoIpcEvents, type VideoIpcRequests } from '@video/app/shared/ipc'
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
@@ -81,6 +83,8 @@ import type { FeedbackEnvironment, FeedbackSubmitInput, FeedbackSubmitResult } f
 import type { GitActionResult, GitRepoStatus } from './github'
 import type { FetchTrigger, GitSyncAction } from './gitSync'
 import type { DroppedEntry } from './externalDrop'
+import { BUSINESS_IPC_CHANNELS, BUSINESS_IPC_EVENTS, type BusinessIpcEvents, type BusinessIpcRequests } from './business/ipc'
+import { RESEARCH_IPC_CHANNELS, RESEARCH_IPC_EVENTS, type ResearchIpcEvents, type ResearchIpcRequests } from './research/ipc'
 
 /**
  * IPC の全チャネルを1か所で宣言する。
@@ -90,7 +94,8 @@ import type { DroppedEntry } from './externalDrop'
  * ハンドラ登録側（main）と呼び出し側（preload）の両方がこの型から生成されるため、
  * チャネル名・引数・戻り値のずれはコンパイルエラーになる。
  */
-export interface IpcRequests {
+/** ビジネス（business:*）とビジネスリサーチ（research:*）は src/shared/business/ipc.ts・src/shared/research/ipc.ts に置く */
+export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, ResearchIpcRequests {
   'app:ready': () => StartupTiming
   'app:settings': () => Settings
   /** settings.json の場所と、壊れているか（~/.ferret/settings.json。src/main/settingsFile.ts） */
@@ -619,7 +624,7 @@ export interface IpcRequests {
   'feedback:captureWindow': () => { type: 'image/png' | 'image/jpeg'; base64: string; width: number; height: number }
 }
 
-export interface IpcEvents {
+export interface IpcEvents extends VideoIpcEvents, BusinessIpcEvents, ResearchIpcEvents {
   'browser:stateChanged': (state: BrowserState) => void
   /** 内蔵ブラウザから利用者へ短く知らせる（タブの上限など） */
   'browser:notice': (message: string) => void
@@ -739,6 +744,8 @@ export interface AdeApi {
 export const ADE_API_KEY = 'ade' as const
 
 export const IPC_REQUEST_CHANNELS = [
+  ...BUSINESS_IPC_CHANNELS,
+  ...RESEARCH_IPC_CHANNELS,
   'app:ready',
   'app:settings',
   'settingsFile:info', 'settingsFile:read', 'settingsFile:write', 'settingsFile:reveal', 'settings:feedbackTargets',
@@ -843,10 +850,13 @@ export const IPC_REQUEST_CHANNELS = [
   'github:open', 'github:repoStatus', 'github:autoFetch', 'github:gitAction', 'github:autoFetchConsent',
   'github:repoCreateInfo', 'github:createPrivateRepo', 'settings:github',
   'star:star', 'star:openWeb', 'star:later', 'star:never', 'star:fromMenu',
-  'feedback:environment', 'feedback:account', 'feedback:submit', 'feedback:captureWindow'
+  'feedback:environment', 'feedback:account', 'feedback:submit', 'feedback:captureWindow',
+  ...VIDEO_IPC_REQUEST_CHANNELS
 ] as const satisfies readonly IpcRequestChannel[]
 
 export const IPC_EVENT_CHANNELS = [
+  ...BUSINESS_IPC_EVENTS,
+  ...RESEARCH_IPC_EVENTS,
   'browser:stateChanged',
   'browser:notice',
   'browserExtensions:changed',
@@ -877,5 +887,6 @@ export const IPC_EVENT_CHANNELS = [
   'settings:changed', 'settingsFile:error',
   'update:status',
   'remote:changed',
-  'editor:saveForQuit', 'editor:revealUnsaved'
+  'editor:saveForQuit', 'editor:revealUnsaved',
+  ...VIDEO_IPC_EVENT_CHANNELS
 ] as const satisfies readonly IpcEventChannel[]

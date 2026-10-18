@@ -1,0 +1,6 @@
+# 旧テンプレートの id（既存のプロジェクトのために残す別名）。中身は tech と同じ。新しいプロジェクトは tech（標準テンプレート）を使う。
+id: tech-short
+version: 2
+alias: true
+extends: tech
+name: { ja: 技術動画（縦型ショート）, en: Tech short }

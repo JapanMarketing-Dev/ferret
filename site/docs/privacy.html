@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Data and privacy · Ferret docs</title>
-  <meta name="description" content="Reviews live in your project folder. Settings live in ~/.ferret/, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue.">
+  <meta name="description" content="Reviews live in your project folder. Settings live in ~/.ferret/, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue. Videos you post to YouTube or TikTok go from your computer to that service, only when you press OK to post. Last updated: October 18, 2026.">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#050508">
   <link rel="canonical" href="https://ferretade.dev/docs/privacy">
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ferret">
   <meta property="og:title" content="Data and privacy · Ferret docs">
-  <meta property="og:description" content="Reviews live in your project folder. Settings live in ~/.ferret/, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue.">
+  <meta property="og:description" content="Reviews live in your project folder. Settings live in ~/.ferret/, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue. Videos you post to YouTube or TikTok go from your computer to that service, only when you press OK to post. Last updated: October 18, 2026.">
   <meta property="og:url" content="https://ferretade.dev/docs/privacy">
   <meta property="og:image" content="https://ferretade.dev/assets/ferret-og.png?v=07c6706b">
   <meta property="og:locale" content="en_US">
@@ -24,7 +24,7 @@
   <meta property="og:image:alt" content="Ferret: the ADE for feedback by voice and screen. A pen circles Sign up on a pricing page, two findings appear, and a terminal running claude reports Done 2/2.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Data and privacy · Ferret docs">
-  <meta name="twitter:description" content="Reviews live in your project folder. Settings live in ~/.ferret/, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue.">
+  <meta name="twitter:description" content="Reviews live in your project folder. Settings live in ~/.ferret/, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue. Videos you post to YouTube or TikTok go from your computer to that service, only when you press OK to post. Last updated: October 18, 2026.">
   <meta name="twitter:image" content="https://ferretade.dev/assets/ferret-og.png?v=07c6706b">
   <meta name="twitter:image:alt" content="Ferret: the ADE for feedback by voice and screen. A pen circles Sign up on a pricing page, two findings appear, and a terminal running claude reports Done 2/2.">
   <link rel="icon" href="../favicon.svg?v=ad226cca" type="image/svg+xml">
@@ -114,6 +114,7 @@
         <p class="docs-nav-heading">Reference</p>
         <ul>
           <li><a href="privacy.html" aria-current="page">Data and privacy</a></li>
+          <li><a href="terms.html">Terms of Service</a></li>
           <li><a href="files.html">Files and environment</a></li>
           <li><a href="advanced-install.html">Advanced install</a></li>
         </ul>
@@ -131,7 +132,7 @@
       <article class="docs-content">
         <p class="docs-eyebrow">Reference</p>
         <h1>Data and privacy</h1>
-        <p class="docs-lead">Reviews live in your project folder. Settings live in <code>~/.ferret/</code>, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue.</p>
+        <p class="docs-lead">Reviews live in your project folder. Settings live in <code>~/.ferret/</code>, and keys and accounts in the OS user-data folder. Only crash reports reach the developer, through Sentry, and you can turn them off. Feedback you choose to send from the app becomes a public GitHub issue. Videos you post to YouTube or TikTok go from your computer to that service, only when you press OK to post. Last updated: October 18, 2026.</p>
 
       <section class="docs-section" aria-labelledby="reviews">
         <h2 id="reviews"><a class="docs-anchor" href="#reviews" aria-label="Link to Inside .ferret/reviews/">#</a>Inside .ferret/reviews/</h2>
@@ -168,6 +169,8 @@
     <tr><td>Footer usage (Claude Code and Codex only)</td><td>Anthropic, ChatGPT</td><td>usage request with your own login</td></tr>
     <tr><td>GitHub star prompt</td><td>GitHub via your <code>gh</code></td><td>checks whether you starred the repo, and stars it only if you click <span class="docs-ui">Star on GitHub</span></td></tr>
     <tr><td>Updates (when Ferret starts, every 6 hours, and <span class="docs-ui">Check for Updates</span>)</td><td>download server (Cloudflare R2)</td><td>requests for <code>latest.json</code> and that version's <code>SHA256SUMS</code> (on macOS also <code>UPDATE-SHA256SUMS</code>); when a newer version is found, the update file for your computer (only when you click <span class="docs-ui">Download</span> if <span class="docs-ui">Update automatically</span> is off)</td></tr>
+    <tr><td>Connecting and posting to YouTube (only when you connect your Google account and press OK to post)</td><td>Google (YouTube Data API)</td><td>sign-in on Google's own page; the video, thumbnail, title, description, tags and privacy setting you approved; reads the connected channel's name and the upload status (see <a href="#youtube">YouTube</a>)</td></tr>
+    <tr><td>Connecting and posting to TikTok (only when you connect TikTok and press OK to post)</td><td>TikTok (Login Kit and Content Posting API). The sign-in code and token refreshes go through the developer's token relay at <code>ferretade.dev/oauth/tiktok/</code></td><td>the video and caption you approved; reads your TikTok display name. The relay passes the code or token on and stores nothing (see <a href="#tiktok">TikTok</a>)</td></tr>
     <tr><td>Sending feedback from the app (only when you send it)</td><td>the developer's feedback relay (a Cloudflare Worker), which opens a public issue in <code>JapanMarketing-Dev/ferret</code></td><td>your text, bug or idea, app / OS version and CPU, and up to 3 screenshots you attach. Keys, tokens, email addresses, and home-folder paths are masked. The relay does not store your IP address (see <a href="#feedback">Feedback from the app</a>)</td></tr>
     <tr><td>A crash or error (<span class="docs-ui">Send crash reports</span> on)</td><td>Sentry</td><td>stack trace and OS / CPU / app versions (see <a href="#crash-reports">Crash reports</a>)</td></tr>
   </tbody>
@@ -190,6 +193,29 @@
   <li>The relay does not store your IP address. To limit how often one sender can post (5 per hour, 20 per day), it counts a keyed hash of the IP address (and of the install ID, if sent) for up to 24 hours, then deletes it. Neither appears in the issue.</li>
   <li>Screenshots are kept by the relay in Cloudflare R2 under unguessable names and shown in the issue. To have an issue or its screenshots removed, comment on the issue or open a new one.</li>
   <li>The relay's code is in <code>workers/feedback-relay</code> in the repository.</li>
+</ul>
+      </section>
+
+      <section class="docs-section" aria-labelledby="youtube">
+        <h2 id="youtube"><a class="docs-anchor" href="#youtube" aria-label="Link to YouTube (YouTube API Services)">#</a>YouTube (YouTube API Services)</h2>
+        <p>Ferret uses YouTube API Services to upload videos to your own YouTube channel. It does so only after you connect your Google account in Ferret and press OK to post a video. By connecting, you agree to be bound by the <a href="https://www.youtube.com/t/terms" target="_blank" rel="noopener noreferrer">YouTube Terms of Service<span class="sr-only"> (opens in a new tab)</span></a>. How Google handles your data is described in the <a href="http://www.google.com/policies/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy<span class="sr-only"> (opens in a new tab)</span></a>.</p>
+<ul>
+  <li><strong>Access requested</strong>: <code>youtube.upload</code> to upload videos, and <code>youtube.force-ssl</code> to set the video's thumbnail and read the name of the connected channel.</li>
+  <li><strong>What is used, and for what</strong>: the video, thumbnail and metadata you approved (title, description, tags, privacy and similar settings) are uploaded to your channel, and the upload status is read back so Ferret can show whether it finished. The channel name is read only to show which channel is connected. Ferret does not read, collect or share any other data from your Google account, and does not use it for advertising or analytics.</li>
+  <li><strong>Where it goes</strong>: from your computer straight to Google. Nothing from your Google account, your channel or the videos you post is sent to the developer or to anyone else. Crash reports never include tokens, videos, titles or channel names.</li>
+  <li><strong>Where it is stored</strong>: the OAuth tokens are kept only on your computer, encrypted with the OS keychain (macOS Keychain, Windows DPAPI or the Linux secret service), in Ferret's userData folder. The connected channel's name is kept next to them to show in the app. The video and its post settings stay in your project folder.</li>
+  <li><strong>How to stop</strong>: disconnect your Google account in Ferret's settings at any time. This deletes the tokens from your computer. You can also revoke Ferret's access at <a href="https://security.google.com/settings/security/permissions" target="_blank" rel="noopener noreferrer">Google security settings<span class="sr-only"> (opens in a new tab)</span></a>. Videos that were already uploaded stay on YouTube until you delete them there.</li>
+  <li>Ferret's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy<span class="sr-only"> (opens in a new tab)</span></a>, including the Limited Use requirements.</li>
+</ul>
+      </section>
+
+      <section class="docs-section" aria-labelledby="tiktok">
+        <h2 id="tiktok"><a class="docs-anchor" href="#tiktok" aria-label="Link to TikTok">#</a>TikTok</h2>
+        <p>If you connect TikTok, Ferret uses TikTok's Login Kit and Content Posting API only to post the video and caption you approved to your TikTok account, after you press OK. Use of TikTok is subject to <a href="https://www.tiktok.com/legal/terms-of-service" target="_blank" rel="noopener noreferrer">TikTok's Terms of Service<span class="sr-only"> (opens in a new tab)</span></a> and <a href="https://www.tiktok.com/legal/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy<span class="sr-only"> (opens in a new tab)</span></a>.</p>
+<ul>
+  <li><strong>Access requested</strong>: <code>user.info.basic</code> to show the display name of the connected account, and <code>video.upload</code> to send the video to your TikTok inbox, where you finish the post in the TikTok app. <code>video.publish</code> (posting directly) is requested only after TikTok approves Ferret for it.</li>
+  <li><strong>Where it goes and where it is stored</strong>: the video and caption go from your computer straight to TikTok. The tokens are kept only on your computer, encrypted with the OS keychain in the same way as for YouTube. Disconnecting TikTok in Ferret's settings deletes them. You can also remove Ferret's access in the TikTok app's settings.</li>
+  <li><strong>Token relay</strong>: TikTok needs the app's client secret to turn the sign-in code into tokens, and that secret must not ship inside the app. So for that step only, Ferret sends the request to a small Cloudflare Worker run by the developer at <code>https://ferretade.dev/oauth/tiktok/</code>. It accepts only three requests (exchange the sign-in code, refresh a token, revoke a token), adds the client secret, forwards the request to TikTok, and returns TikTok's answer to your computer unchanged. It does not log or store the code, the tokens, your IP address or anything about your account, and it never receives your videos or captions.</li>
 </ul>
       </section>
 
@@ -229,9 +255,14 @@
 <p>Building Ferret yourself? Set <code>FERRET_SENTRY_DSN</code> (the old name <code>MOVIE_ADE_SENTRY_DSN</code> also works) to your own Sentry DSN, or to an empty string to send nothing. The code is in <code>src/main/telemetry.ts</code> and <code>src/shared/telemetry.ts</code>.</p>
       </section>
 
+      <section class="docs-section" aria-labelledby="contact">
+        <h2 id="contact"><a class="docs-anchor" href="#contact" aria-label="Link to Contact">#</a>Contact</h2>
+        <p>Ferret is provided by Japan Marketing LLC. For questions about privacy, or to ask about data the developer holds (crash reports, feedback, share links), open an issue at <a href="https://github.com/JapanMarketing-Dev/ferret/issues" target="_blank" rel="noopener noreferrer">GitHub Issues<span class="sr-only"> (opens in a new tab)</span></a> or contact <a href="https://www.japan-marketing.co.jp/" target="_blank" rel="noopener noreferrer">Japan Marketing LLC<span class="sr-only"> (opens in a new tab)</span></a>. See also the <a href="terms.html">Terms of Service</a>.</p>
+      </section>
+
         <nav class="docs-pager" aria-label="Previous and next page">
           <a class="docs-pager-prev" href="settings-json.html"><span>Previous</span>Configure with settings.json</a>
-          <a class="docs-pager-next" href="files.html"><span>Next</span>Files and environment</a>
+          <a class="docs-pager-next" href="terms.html"><span>Next</span>Terms of Service</a>
         </nav>
         <p class="docs-edit"><a href="https://github.com/JapanMarketing-Dev/ferret/blob/main/tools/docs/build-docs.mjs" target="_blank" rel="noopener noreferrer">Edit this page on GitHub<span class="sr-only"> (opens in a new tab)</span></a></p>
       </article>
@@ -244,7 +275,10 @@
         <li><a href="#retention">Retention</a></li>
         <li><a href="#network">What leaves your machine</a></li>
         <li><a href="#feedback">Feedback from the app</a></li>
+        <li><a href="#youtube">YouTube (YouTube API Services)</a></li>
+        <li><a href="#tiktok">TikTok</a></li>
         <li><a href="#crash-reports">Crash reports</a></li>
+        <li><a href="#contact">Contact</a></li>
       </ul>
     </aside>
   </div>
@@ -264,6 +298,7 @@
             <li><a href="../download.html#versions">Changelog</a></li>
             <li><a href="quick-start.html">Docs</a></li>
             <li><a href="privacy.html">Privacy</a></li>
+            <li><a href="terms.html">Terms</a></li>
           </ul>
         </div>
         <div>

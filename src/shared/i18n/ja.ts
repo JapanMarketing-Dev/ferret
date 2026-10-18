@@ -1,7 +1,10 @@
 import type { Messages } from './en'
+import { videoJa } from './video'
+import { researchJa } from '../research/messages.ja'
 
 /** 日本語の辞書。キーは en.ts が正本 */
 export const ja: Messages = {
+  ...videoJa,
   'common.cancel': 'キャンセル',
   'onboarding.permissions.subtitleOther': 'Windows と Linux では、これらの許可を前もって求められません。そのまま進めます。',
   'ai.key.envHint': '環境変数 {{env}}（.env でも可）も使えます。',
@@ -2807,4 +2810,6 @@ export const ja: Messages = {
   'remote.resetDone': "新しいリンクを作りました。古いリンクはもう使えません。",
   'remote.warning': "このリンクを知っている人は誰でも、ターミナルに文字を打ち込めます。人に渡さず、信頼できるネットワークだけで使ってください。通信は暗号化しない HTTP なので、公衆 Wi‑Fi では近くの人に読まれるおそれがあります（Tailscale 越しなら暗号化されます）。",
   'remote.firewall': "初めて使うとき、macOS や Windows が「受信の接続を許可するか」を聞くことがあります。プライベートなネットワークでは許可してください。",
+  // ビジネス・ビジネスリサーチ（src/shared/research/messages.ja.ts）
+  ...researchJa
 }

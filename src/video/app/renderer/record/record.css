@@ -1,0 +1,481 @@
+/* 撮る（RecordView）。色・寸法・時間は tokens.css の var(--…) だけ。赤は録画のためだけに使う */
+
+.vrec {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg-app);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+/* 録画中であることが一目で分かる赤い枠（ページの上に重ねる。レイアウトを動かさない） */
+.vrec.is-recording::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--color-record);
+  pointer-events: none;
+  z-index: var(--z-overlay);
+}
+
+.vrec__head {
+  background: var(--color-bg-panel);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--size-border) solid var(--color-divider);
+}
+
+.vrec__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vrec__subtitle {
+  margin-left: var(--space-2);
+  font-weight: var(--font-weight-regular);
+  color: var(--color-text-muted);
+}
+
+.vrec__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--size-border) solid var(--color-divider);
+  background: var(--color-bg-panel);
+  min-height: var(--size-toolbar);
+  flex-wrap: wrap;
+}
+
+.vrec__timer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-time);
+  font-variant-numeric: tabular-nums;
+  min-width: 72px;
+}
+
+.vrec__sep {
+  width: var(--size-border);
+  align-self: stretch;
+  background: var(--color-divider);
+  margin: 0 var(--space-1);
+}
+
+.vrec__grow {
+  flex: 1;
+}
+
+.vrec__n {
+  margin-left: var(--space-1);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.vrec__countdown-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+}
+
+.vrec select {
+  height: var(--size-control-sm);
+  padding: 0 var(--space-2);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.vrec__size {
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.vrec__banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+}
+
+.vrec__banner > span {
+  flex: 1;
+}
+
+.vrec__banner.is-warn {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-quiet);
+}
+
+.vrec__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.vrec__stage {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* 画面のプレビューは、残りの高さいっぱいに比率を保って置く（下に空きを作らない） */
+.vrec__screen-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: size;
+}
+
+.vrec__screen,
+.vrec__cam-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-panel);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  color: var(--color-text-muted);
+}
+
+.vrec__screen {
+  --ratio: 16 / 9;
+  aspect-ratio: var(--ratio);
+  width: min(100cqw, 100cqh * (var(--ratio)));
+}
+
+.vrec__screen img,
+.vrec__cam-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.vrec__region {
+  position: absolute;
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 0 0 100vmax var(--color-scrim);
+  pointer-events: none;
+}
+
+.vrec__tag {
+  position: absolute;
+  left: var(--space-2);
+  bottom: var(--space-2);
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--radius-sm);
+  max-width: calc(100% - 2 * var(--space-2));
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: var(--color-scrim);
+  color: var(--color-text);
+  font-size: var(--font-size-xs);
+}
+
+.vrec__placeholder {
+  color: var(--color-text-muted);
+}
+
+.vrec__cams {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 128px;
+  overflow-x: auto;
+}
+
+.vrec__cam-preview {
+  flex-shrink: 0;
+  height: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.vrec__side {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: auto;
+}
+
+.vrec__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.vrec__step-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.vrec__step-head h3 {
+  flex: 1;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.vrec__step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-selected);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-2xs);
+}
+
+.vrec__sources,
+.vrec__camgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.vrec__source,
+.vrec__cam-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--motion-ease);
+}
+
+.vrec__source:hover:not(:disabled),
+.vrec__cam-toggle:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.vrec__source.is-selected,
+.vrec__cam.is-on .vrec__cam-toggle {
+  border-color: var(--color-accent);
+  background: var(--color-accent-wash);
+}
+
+.vrec__source:disabled,
+.vrec__cam-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.vrec__source-img,
+.vrec__cam-img {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-panel);
+  overflow: hidden;
+  color: var(--color-text-muted);
+}
+
+.vrec__source-img img,
+.vrec__cam-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vrec__source-name,
+.vrec__cam-name,
+.vrec__mic-name {
+  color: var(--color-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-size-xs);
+}
+
+.vrec__cam {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-start;
+}
+
+.vrec__cam-toggle {
+  width: 100%;
+}
+
+.vrec__cam-check {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.vrec__region-row,
+.vrec__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.vrec__row > span:first-child {
+  flex: 1;
+  color: var(--color-text-muted);
+}
+
+.vrec__mics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vrec__mic {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.vrec__mic label,
+.vrec__switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.vrec__switch > span {
+  flex: 1;
+}
+
+.vrec__note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-relaxed);
+}
+
+.vrec__empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+/* カウントダウン。数字だけを大きく出す（録画の赤は使わない。始まるまでは録っていない） */
+.vrec__countdown {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-scrim);
+  z-index: var(--z-overlay);
+  pointer-events: none;
+}
+
+.vrec__countdown span {
+  font-size: 96px;
+  font-weight: var(--font-weight-heavy);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* レベルメーター（緑 → 黄 → 赤）。音割れは編集で直せないので、録る前に分かるようにする */
+.vrec-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 10px;
+}
+
+.vrec-level--wide {
+  width: 100%;
+}
+
+.vrec-level__seg {
+  width: 4px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--color-surface-active);
+}
+
+.vrec-level--wide .vrec-level__seg {
+  flex: 1;
+  width: auto;
+}
+
+.vrec-level__seg.is-on {
+  background: var(--color-success);
+}
+
+.vrec-level__seg.is-on.is-warm {
+  background: var(--color-warning);
+}
+
+.vrec-level__seg.is-on.is-hot,
+.vrec-level.is-clip .vrec-level__seg.is-on {
+  background: var(--color-danger);
+}
+
+@media (max-width: 900px) {
+  .vrec__body {
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .vrec__side {
+    width: auto;
+    overflow: visible;
+  }
+}

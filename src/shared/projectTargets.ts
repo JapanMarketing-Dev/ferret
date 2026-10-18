@@ -9,7 +9,7 @@ import type { CaptureSourceInfo, ProjectKind, ProjectTarget, TargetPurpose } fro
  * （画面がその種類で使う欄だけを出す）。
  */
 
-export const PROJECT_KINDS: readonly ProjectKind[] = ['web', 'mobile', 'desktop', 'other']
+export const PROJECT_KINDS: readonly ProjectKind[] = ['web', 'mobile', 'desktop', 'other', 'video']
 export const DEFAULT_PROJECT_KIND: ProjectKind = 'web'
 
 /** 種類ごとに画面へ出す欄 */
@@ -17,7 +17,9 @@ export const KIND_FIELDS: Record<ProjectKind, { url: boolean; launchCommand: boo
   web: { url: true, launchCommand: false, windowMatch: false },
   mobile: { url: true, launchCommand: true, windowMatch: true },
   desktop: { url: true, launchCommand: true, windowMatch: true },
-  other: { url: true, launchCommand: true, windowMatch: true }
+  other: { url: true, launchCommand: true, windowMatch: true },
+  // 動画のチャンネル。確認先は使わないが、公開先の URL（チャンネルのページなど）は置ける
+  video: { url: true, launchCommand: false, windowMatch: false }
 }
 
 /** 新しく足すときの名前の候補（順に、まだ使っていないものを選ぶ） */
@@ -25,7 +27,8 @@ export const SUGGESTED_LABELS: Record<ProjectKind, readonly string[]> = {
   web: ['local', 'dev', 'prd', 'staging', 'preview'],
   mobile: ['iOS sim', 'Android emu', 'mobile web'],
   desktop: ['dev', 'app'],
-  other: ['target']
+  other: ['target'],
+  video: ['channel']
 }
 
 /** 欄の入力例（placeholder） */
@@ -33,7 +36,8 @@ export const KIND_PLACEHOLDERS: Record<ProjectKind, { url: string; launchCommand
   web: { url: 'http://localhost:3000', launchCommand: '', windowMatch: '' },
   mobile: { url: 'http://localhost:8081', launchCommand: 'open -a Simulator', windowMatch: 'Simulator' },
   desktop: { url: 'http://localhost:1420', launchCommand: 'pnpm tauri dev', windowMatch: 'MyApp' },
-  other: { url: 'http://localhost:3000', launchCommand: './run.sh', windowMatch: '' }
+  other: { url: 'http://localhost:3000', launchCommand: './run.sh', windowMatch: '' },
+  video: { url: 'https://www.youtube.com/@channel', launchCommand: '', windowMatch: '' }
 }
 
 export function sanitizeProjectKind(raw: unknown): ProjectKind {

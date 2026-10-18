@@ -6,7 +6,12 @@
  * 数で形の変わる文は `_one` / `_other` を対で持ち、t(key, { count }) で引く。
  * 置き換えは {{name}}。英語は短く自然な UI の英語にし、Orca の表記（New Terminal、Agent settings… など）に合わせる。
  */
+import { videoEn } from './video'
+import { researchEn } from '../research/messages.en'
+
 export const en = {
+  // 動画づくり（src/shared/i18n/video/。キーは video. で始まる）
+  ...videoEn,
   'common.cancel': 'Cancel',
   'onboarding.permissions.subtitleOther': 'Windows and Linux don\'t ask for these permissions in advance. You can continue.',
   'ai.key.envHint': 'You can also use the {{env}} environment variable (or .env).',
@@ -2811,7 +2816,9 @@ export const en = {
   'remote.resetConfirm': "Make a new link? Phones that use the current link stop working until you scan the new QR code.",
   'remote.resetDone': "Made a new link. Old links no longer work.",
   'remote.warning': "Anyone who has this link can type into your terminals. Share it with no one, and use it only on networks you trust: the connection is plain HTTP, so on public Wi-Fi others nearby could read it. Over Tailscale it is encrypted.",
-  'remote.firewall': "On first use, macOS or Windows may ask whether Ferret can accept incoming connections. Allow it on private networks."
+  'remote.firewall': "On first use, macOS or Windows may ask whether Ferret can accept incoming connections. Allow it on private networks.",
+  // ビジネス・ビジネスリサーチ（src/shared/research/messages.en.ts）
+  ...researchEn
 } as const
 
 export type MessageKey = keyof typeof en

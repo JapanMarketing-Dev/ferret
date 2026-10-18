@@ -5,6 +5,9 @@
     "paths": {
       "@shared/*": [
         "src/shared/*"
+      ],
+      "@video/*": [
+        "src/video/*"
       ]
     },
     "module": "ESNext",
@@ -28,5 +31,9 @@
     "tools/pipeline/**/*",
     "src/shared/**/*",
     "workers/*/src/**/*"
+  ],
+  "//": "実験ページの Worker（workers/experiment-pages）は Cloudflare の型を使うので、その中の tsconfig.json で検査する",
+  "exclude": [
+    "workers/experiment-pages/**/*"
   ]
 }

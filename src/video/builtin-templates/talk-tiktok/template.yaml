@@ -1,0 +1,6 @@
+# 旧テンプレートの id（既存のプロジェクトのために残す別名）。中身は talk と同じ。新しいプロジェクトは tech（標準テンプレート）を使う。
+id: talk-tiktok
+version: 2
+alias: true
+extends: talk
+name: { ja: 語り動画（縦型ショート）, en: Talking head short }

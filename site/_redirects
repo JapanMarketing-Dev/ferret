@@ -34,3 +34,8 @@
 /docs/id/* /docs/:splat 301
 /docs/vi /docs/quick-start 301
 /docs/vi/* /docs/:splat 301
+# Short, stable URLs for the privacy policy and terms (Google OAuth and TikTok app review link to these)
+/privacy /docs/privacy 301
+/terms /docs/terms 301
+/ja/privacy /docs/ja/privacy 301
+/ja/terms /docs/ja/terms 301

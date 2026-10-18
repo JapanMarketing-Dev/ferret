@@ -8,6 +8,9 @@ import { showAgentNotification } from './agentNotify'
 import { failoverPrefs, initFailover, onUsageChanged, setFailoverPrefs, switchRunningAgents } from './failover/service'
 import { agentMailEnv, agentMailTerminalCreated, initAgentMail, revokeAgentMailSession, stopAgentMail, syncAgentMailSkill } from './agentMail'
 import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
+// 動画づくり（src/video/app/main/。入口はこの1つ）
+import { createVideoIpcHandlers, startVideo, stopVideo, videoCaptureActive, videoTerminalEnv } from '@video/app/main/ipc'
+import type { VideoMainContext } from '@video/app/main/context'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
@@ -108,6 +111,10 @@ import { isValidPort } from '@shared/mobileRemote'
 import { delay } from '@shared/delay'
 import { TerminalRestoreStore } from './terminalRestore'
 import { syntheticSystemAudio, systemAudioFeatures } from '@shared/systemAudio'
+import { ventureHandlers, ventureWatcher } from './business/wire'
+import businessManual from '../../resources/business/手法.md?raw'
+import researchKnowledge from '../../docs/business-research/knowledge.md?raw'
+import researchKnowledgeEn from '../../docs/business-research/knowledge.en.md?raw'
 
 /*
  * クラッシュの受け口（Crashpad / Sentry）は、OSの既定のクラッシュ処理より前に入れたいので、他の初期化より先に呼ぶ。
@@ -635,6 +642,32 @@ const fileWatcher = new ProjectWatcher((event) => {
   recordProgressFromDisk(ids)
 })
 
+/** ビジネス・ビジネスリサーチのフォルダ（business.yaml・research.yaml など）の変更を画面へ知らせる（src/main/business/wire.ts） */
+const businessWatcher = ventureWatcher((channel) => send(channel))
+
+/**
+ * ビジネスリサーチ・「プロジェクトにする」で作ったフォルダを登録する（src/main/research/handlers.ts から呼ぶ）。
+ * リサーチ（research: true）はオーケストラに入れず、ビジネスは指定のオーケストラ（無ければ先頭）に入れる
+ */
+function registerVentureProject(folder: string, patch: Partial<Project>): Project {
+  const { projects, project } = upsertProjectFolder(currentSettings().projects, folder)
+  const next = projects.map((p) => (p.id === project.id ? { ...p, ...patch } : p))
+  updateSettings({ projects: next })
+  syncEditorWorkspace()
+  send('projects:changed', projectsState())
+  return next.find((p) => p.id === project.id) ?? project
+}
+
+/**
+ * 「プロジェクトにする」（src/main/research/handlers.ts の research:promote）で作ったビジネスのフォルダの行き先。差し替えの口はここ1か所。
+ * いまは指定のオーケストラ（無ければ先頭）にプロジェクトとして入れる（開かない。画面が開き直す）
+ */
+function registerPromotedBusiness(folder: string, name: string, orchestraId: string | null): { projectId: string } {
+  const orchestras = orchestraList(currentSettings().projects)
+  const orchestra = orchestraId && orchestras.some((o) => o.id === orchestraId) ? orchestraId : orchestras[0]?.id
+  return { projectId: registerVentureProject(folder, { name, ...(orchestra ? { orchestraId: orchestra } : {}) }).id }
+}
+
 /** ファイルエディタの IPC が触ってよい根。未選択なら断る */
 function projectRoot(): string {
   if (!workspace.folderPath) throw new UserFacingError(t('errors.openProjectFolder'))
@@ -644,6 +677,7 @@ function projectRoot(): string {
 function setWorkspace(folderPath: string | null, project: Project | null = null): WorkspaceState {
   if (folderPath !== workspace.folderPath) {
     fileWatcher.watch(folderPath)
+    businessWatcher.watch(project?.source === 'ssh' ? null : folderPath)
     // 文字で指摘は前のプロジェクトのレビューへ足さない（切って足し先も外す）
     textNotes?.setActive(false, { reviewId: null, notify: true })
   }
@@ -1972,8 +2006,75 @@ async function publishThumbnail(path: string, kind: 'image' | 'video'): Promise<
   return image.isEmpty() ? undefined : image.resize({ width: size.width }).toDataURL()
 }
 
+/**
+ * 動画づくり（src/video/app/main/）へ渡すもの。動画のコードは workspace・terminals を直接触らず、これを通す。
+ * 送り先は agent:sendText と同じ（選んでいるターミナル → 同じプロジェクトの Agent）
+ */
+const videoContext: VideoMainContext = {
+  folderPath: () => workspace.folderPath,
+  project: () => {
+    const found = workspace.projectId ? currentSettings().projects.find((p) => p.id === workspace.projectId) : undefined
+    return found ? { id: found.id, name: found.name, ...(found.kind ? { kind: found.kind } : {}) } : null
+  },
+  send: (channel, ...args) => (send as (c: string, ...a: unknown[]) => void)(channel, ...args),
+  mainWindow: () => mainWindow,
+  get userDataDir() { return app.getPath('userData') },
+  // 配布版では CLI・録画のページを app.asar.unpacked から読む（Electron の Node は asar の中のファイルを実行できない）
+  appOutDir: join(__dirname, '..').replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked'),
+  isPackaged: IS_PACKAGED,
+  sendToAgent: async (text) => {
+    const target = terminals ? await terminals.resolveSendTarget(null, workspace.folderPath) : null
+    if (!target) return { ok: false, message: t('terminal.send.noAgent'), noAgent: true }
+    return terminals!.sendReview(target, text)
+  },
+  // 確認の画面の「喋って囲む」の文字起こし（録画・mtg の取り込みと同じ設定のエンジン）
+  transcribe: async (wavPath, options) => {
+    const stt = await sttEngineFor(currentSettings().capture?.transcription ?? 'local', options?.language ?? currentSettings().capture?.language ?? 'auto')
+    if (!stt.engine) return { segments: [], ...(stt.warning ? { warning: stt.warning } : {}) }
+    try {
+      const result = await stt.engine.transcribeChunk({ wavPath, offsetMs: 0, speaker: 'self', source: 'mic' })
+      return { segments: result.segments.map(({ t0, t1, text }) => ({ t0, t1, text })) }
+    } catch (err) {
+      reportHandled(err, { area: 'stt', op: 'transcribe video feedback' })
+      return { segments: [], warning: t('errors.transcriptionFailed', { message: err instanceof Error ? err.message : String(err) }) }
+    }
+  },
+  // 動画の撮影とレビューの録画は同時に使わない（逆向きは recording:start・note:setMode が videoCaptureActive() を見る）
+  reviewRecording: () => recordingBusy || (!!recording && recording.status.state !== 'idle'),
+  consumeGesture: (action) => gestures.consume(action),
+  reportHandled
+}
+
 function registerIpc(): void {
   const handlers: { [C in keyof IpcRequests]: (...args: Parameters<IpcRequests[C]>) => unknown } = {
+    // 動画づくり（video: のチャネル。src/video/app/main/ipc.ts）
+    ...createVideoIpcHandlers(videoContext),
+    // ビジネス（src/main/business/）とビジネスリサーチ（src/main/research/）。フォルダは開いているプロジェクトだけ（SSH は除く）
+    ...ventureHandlers({
+      userData: app.getPath('userData'),
+      isPackaged: IS_PACKAGED,
+      isE2E: IS_E2E,
+      safeStorage,
+      dialog,
+      root: () => (workspace.folderPath && !isRemoteWorkspace() ? workspace.folderPath : null),
+      projects: () => currentSettings().projects,
+      terminals: () => terminals,
+      browserContents: () => browser?.contents ?? null,
+      // 証拠に追加（ビジネス）: 許可（gestures の 'screenshot'。1回きり）を使えたときだけ wire.ts から呼ばれる
+      shootPage: async (contents) => { const image = await contents.capturePage(); return image.isEmpty() ? new Uint8Array() : image.toPNG() },
+      consume: (kind) => gestures.consume(kind),
+      window: () => mainWindow,
+      locale: guideLanguage,
+      manual: businessManual,
+      knowledge: guideLanguage() === 'en' ? researchKnowledgeEn : researchKnowledge,
+      registerResearch: (folder) => {
+        assertNotRecording()
+        const project = registerVentureProject(folder, { research: true })
+        openProject(project)
+        return { projectId: project.id }
+      },
+      registerBusiness: registerPromotedBusiness
+    }),
     'app:ready': () => reportInteractive(),
     // 平文の apiKey は renderer へ渡さない
     'app:settings': () => redactKeys({ ...currentSettings() }),
@@ -2952,7 +3053,7 @@ function registerIpc(): void {
       return r.revealReview(r.checkedPaths(workspace.folderPath, id))
     },
     'recording:start': async (options) => {
-      if (recordingBusy || (recording && recording.status.state !== 'idle')) throw new UserFacingError(t('errors.recordingBusy'))
+      if (recordingBusy || (recording && recording.status.state !== 'idle') || videoCaptureActive()) throw new UserFacingError(t('errors.recordingBusy'))
       if (!workspace.folderPath) throw new UserFacingError(t('errors.openProjectFolder'))
       const { BROWSER_TARGET } = await import('@shared/captureTarget')
       let captureTarget = sanitizeCaptureTarget(options.captureTarget) ?? BROWSER_TARGET
@@ -3068,7 +3169,7 @@ function registerIpc(): void {
     'note:setMode': async (enabled, reviewId) => {
       // ツールバーの［文字で指摘］。録画中・プロジェクト未選択は入れない。足し先は開いているレビュー（このプロジェクトのもの。review.ts の addTextNote が確かめる）
       if (enabled === true && !workspace.folderPath) throw new UserFacingError(t('errors.openProjectFolder'))
-      if (enabled === true && (recordingBusy || (recording && recording.status.state !== 'idle'))) throw new UserFacingError(t('errors.recordingBusy'))
+      if (enabled === true && (recordingBusy || (recording && recording.status.state !== 'idle') || videoCaptureActive())) throw new UserFacingError(t('errors.recordingBusy'))
       const notes = enabled === true ? await ensureTextNotes() : textNotes
       return notes?.setActive(enabled === true, { reviewId: typeof reviewId === 'string' && reviewId ? reviewId : null }) ?? false
     },
@@ -3507,7 +3608,9 @@ async function main(): Promise<void> {
     ...(currentSettings().decision?.enabled
       ? await (await decision()).launchEnv({ ...(workspace.projectId ? { projectId: workspace.projectId } : {}), ...(meta.agent ? { agent: meta.agent } : {}), sessionId: meta.sessionId })
       : {}),
-    ...(await agentMailEnv(meta.sessionId).catch((err: unknown) => { reportHandled(err, { area: 'agent-mail', op: 'terminal env' }); return {} }))
+    ...(await agentMailEnv(meta.sessionId).catch((err: unknown) => { reportHandled(err, { area: 'agent-mail', op: 'terminal env' }); return {} })),
+    // 動画づくりの CLI（ferret-video）を PATH に置く（src/video/app/main/cli/env.ts）
+    ...(await videoTerminalEnv(videoContext).catch((err: unknown) => { reportHandled(err, { area: 'video', op: 'terminal env' }); return {} }))
   })
   // タブが閉じたら、そのタブに渡した中継の合言葉を無効にする（残った子プロセスが使い続けられないように）
   terminals.onSessionClosed = (sessionId) => { decisionService?.revokeSession(sessionId); revokeAgentMailSession(sessionId) }
@@ -3541,6 +3644,8 @@ async function main(): Promise<void> {
   // 最初のタブを開く要求が届く前に、node-pty の読み込みと最初のシェルの起動（rc の読み込み）を済ませておく
   terminals.prewarm()
   registerIpc()
+  // 動画づくり: 投稿の受け渡しの見張りなど（src/video/app/main/ipc.ts）
+  if (!IS_E2E) startVideo(videoContext)
   // 発信の下書きを、最近の変更から裏で作り置く（新しいコミットがあり、未使用が少ないときだけ。src/main/publish/background.ts）
   if (!IS_E2E) publishBackground.start()
   // 裏での更新。配布版だけ、起動から少し待って確かめ、あとは6時間ごと（開発版・E2E では動かさない）
@@ -3818,6 +3923,7 @@ app.on('before-quit', (event) => {
 app.on('quit', (_event, exitCode) => {
   // Agent どうしの依頼の受け口（一時フォルダ）を消す
   stopAgentMail()
+  stopVideo()
   publishBackground.stop()
   void mobileRemote?.stop()
   if (exitCode === 0) autoUpdates?.installOnQuit()

@@ -2,8 +2,8 @@
 <!-- @title bd3b785878 -->
 データとプライバシー
 
-<!-- @lead f52bb23052 -->
-レビューはプロジェクトのフォルダに、設定は <code>~/.ferret/</code> に、キーとアカウントは OS のユーザーデータのフォルダに置かれます。開発者に届くのは Sentry 経由のクラッシュレポートだけで、これは止められます。アプリから自分で送ったフィードバックは、公開の GitHub の issue になります。
+<!-- @lead fa1ab46986 -->
+レビューはプロジェクトのフォルダに、設定は <code>~/.ferret/</code> に、キーとアカウントは OS のユーザーデータのフォルダに置かれます。開発者に届くのは Sentry 経由のクラッシュレポートだけで、これは止められます。アプリから自分で送ったフィードバックは、公開の GitHub の issue になります。YouTube や TikTok に投稿する動画は、「OK・投稿する」を押したときだけ、自分の PC からそのサービスへ送られます。最終更新日: 2026年10月18日。
 
 <!-- @reviews 2d1a3289b5 -->
 ## .ferret/reviews/ の中身
@@ -21,7 +21,7 @@
 ## 保管期間
 <p><span class="docs-ui">録画の保管</span>（最初の設定は7日。30日か <span class="docs-ui">ずっと</span> も選べます）: 起動したとき、その期間より古い完了済みのレビューから <code>recording.webm</code> と <code>work/</code> を消します。<code>feedback.md</code> と指摘の画像は残ります。完了していないレビューは消しません。消す処理は起動時に、最後に開いたプロジェクトに対して行います。</p>
 
-<!-- @network 575731811a -->
+<!-- @network 1004561691 -->
 ## 外に出るデータ
 <table>
   <thead><tr><th>いつ</th><th>送り先</th><th>データ</th></tr></thead>
@@ -38,6 +38,8 @@
     <tr><td>フッターの使用量（Claude Code と Codex だけ）</td><td>Anthropic、ChatGPT</td><td>自分のログインで使用量を問い合わせる</td></tr>
     <tr><td>GitHub の star のお願い</td><td>自分の <code>gh</code> 経由で GitHub</td><td>リポジトリに star 済みかを確かめ、<span class="docs-ui">GitHub で star</span> を押したときだけ star する</td></tr>
     <tr><td>アップデート（Ferret の起動時・6時間ごと・<span class="docs-ui">更新を確認</span>）</td><td>ダウンロードのサーバー（Cloudflare R2）</td><td><code>latest.json</code> とその版の <code>SHA256SUMS</code>（macOS では <code>UPDATE-SHA256SUMS</code> も）の要求。新しい版があれば、自分のパソコン用の更新ファイル（<span class="docs-ui">新しい版を自動で入れる</span> をオフにしているときは <span class="docs-ui">ダウンロード</span> を押したときだけ）</td></tr>
+    <tr><td>YouTube の連携と投稿（Google アカウントを連携し、「OK・投稿する」を押したときだけ）</td><td>Google（YouTube Data API）</td><td>Google 自身の画面でのサインイン、承認した動画・サムネイル・タイトル・説明・タグ・公開設定。連携したチャンネルの名前とアップロードの状況を読み取ります（<a href="#youtube">YouTube</a> を参照）</td></tr>
+    <tr><td>TikTok の連携と投稿（TikTok を連携し、「OK・投稿する」を押したときだけ）</td><td>TikTok（Login Kit と Content Posting API）。サインインのコードとトークンの更新は、開発元のトークン中継 <code>ferretade.dev/oauth/tiktok/</code> を通ります</td><td>承認した動画とキャプション。TikTok の表示名を読み取ります。中継はコードやトークンを受け渡すだけで、何も保存しません（<a href="#tiktok">TikTok</a> を参照）</td></tr>
     <tr><td>アプリからフィードバックを送る（送ったときだけ）</td><td>開発者のフィードバック中継（Cloudflare Worker）。ここが <code>JapanMarketing-Dev/ferret</code> に公開の issue を作る</td><td>書いた文、不具合か案か、アプリ / OS のバージョンと CPU、添えたスクリーンショット3枚まで。キー、トークン、メールアドレス、ホームフォルダのパスは伏せます。中継は IP アドレスを保存しません（<a href="#feedback">アプリからのフィードバック</a>を参照）</td></tr>
     <tr><td>クラッシュやエラー（<span class="docs-ui">クラッシュレポートを送る</span> がオン）</td><td>Sentry</td><td>スタックトレースと OS / CPU / アプリのバージョン（<a href="#crash-reports">クラッシュレポート</a>を参照）</td></tr>
   </tbody>
@@ -59,6 +61,27 @@
   <li>中継は IP アドレスを保存しません。1人が投稿できる回数（1時間に5回、1日に20回）を抑えるため、IP アドレス（と、送っていればインストール ID）の鍵付きハッシュを最長24時間数え、その後に消します。どちらも issue には出ません。</li>
   <li>スクリーンショットは、中継が推測できない名前で Cloudflare R2 に置き、issue に表示します。issue やそのスクリーンショットを消してほしいときは、その issue にコメントするか、新しい issue を作ってください。</li>
   <li>中継のコードはリポジトリの <code>workers/feedback-relay</code> にあります。</li>
+</ul>
+
+<!-- @youtube 87f54ea396 -->
+## YouTube（YouTube API サービス）
+<p>Ferret は、YouTube API サービスを使って、あなた自身の YouTube チャンネルに動画をアップロードします。アップロードするのは、Ferret で Google アカウントを連携し、動画の「OK・投稿する」を押したあとだけです。連携することで、<a href="https://www.youtube.com/t/terms">YouTube 利用規約</a>に拘束されることに同意したものとみなされます。Google によるデータの取り扱いは <a href="http://www.google.com/policies/privacy">Google プライバシー ポリシー</a>に書かれています。</p>
+<ul>
+  <li><strong>求める権限</strong>: 動画をアップロードするための <code>youtube.upload</code> と、動画のサムネイルを設定し、連携したチャンネルの名前を読み取るための <code>youtube.force-ssl</code>。</li>
+  <li><strong>使うデータと使い道</strong>: 承認した動画・サムネイル・メタデータ（タイトル、説明、タグ、公開設定など）をチャンネルにアップロードし、終わったかどうかを表示するためにアップロードの状況を読み取ります。チャンネルの名前は、どのチャンネルを連携しているかを表示するためだけに読み取ります。Google アカウントのほかのデータを読み取る・集める・共有することはなく、広告や分析にも使いません。</li>
+  <li><strong>送り先</strong>: 自分の PC から Google へ直接送られます。Google アカウント、チャンネル、投稿した動画のどの情報も、開発元やほかの誰かに送られることはありません。クラッシュレポートにも、トークン・動画・タイトル・チャンネル名は入りません。</li>
+  <li><strong>保存場所</strong>: OAuth のトークンは自分の PC の中にだけ、OS のキーチェーン（macOS のキーチェーン、Windows の DPAPI、Linux のシークレットサービス）で暗号化して、Ferret の userData フォルダに保存します。連携したチャンネルの名前も、アプリに表示するためにその隣に保存します。動画と投稿の設定はプロジェクトのフォルダに残ります。</li>
+  <li><strong>やめ方</strong>: Ferret の設定から、いつでも Google アカウントの連携を解除できます。解除すると PC からトークンを削除します。<a href="https://security.google.com/settings/security/permissions">Google のセキュリティ設定</a>から Ferret のアクセス権を取り消すこともできます。すでにアップロードした動画は、YouTube で削除するまで YouTube に残ります。</li>
+  <li>Google API から受け取った情報の Ferret による利用と移転は、制限付き使用（Limited Use）の要件を含め、<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API サービスのユーザーデータに関するポリシー</a>に従います。</li>
+</ul>
+
+<!-- @tiktok 164ecbf907 -->
+## TikTok
+<p>TikTok を連携した場合、Ferret は TikTok の Login Kit と Content Posting API を、あなたが承認した動画とキャプションを「OK」を押したあとにあなたの TikTok アカウントへ投稿するためだけに使います。TikTok の利用には <a href="https://www.tiktok.com/legal/terms-of-service">TikTok 利用規約</a>と<a href="https://www.tiktok.com/legal/privacy-policy">プライバシーポリシー</a>が適用されます。</p>
+<ul>
+  <li><strong>求める権限</strong>: 連携したアカウントの表示名を表示するための <code>user.info.basic</code> と、動画を TikTok の受信箱に送るための <code>video.upload</code>（投稿の仕上げは TikTok アプリで行います）。直接投稿する <code>video.publish</code> は、TikTok が Ferret に許可したあとにだけ求めます。</li>
+  <li><strong>送り先と保存場所</strong>: 動画とキャプションは自分の PC から TikTok へ直接送られます。トークンは YouTube と同じく、自分の PC の中にだけ OS のキーチェーンで暗号化して保存します。Ferret の設定で TikTok の連携を解除すると削除します。TikTok アプリの設定から Ferret のアクセス権を外すこともできます。</li>
+  <li><strong>トークンの中継</strong>: TikTok では、サインインのコードをトークンに換えるのにアプリのクライアントシークレットが要り、そのシークレットはアプリの中に入れられません。そこでこの手順だけ、Ferret は開発元が動かす小さな Cloudflare Worker（<code>https://ferretade.dev/oauth/tiktok/</code>）へリクエストを送ります。受け付けるのは3種類（サインインのコードの交換、トークンの更新、トークンの取り消し）だけで、クライアントシークレットを付けて TikTok へ転送し、TikTok の答えをそのまま PC へ返します。コード、トークン、IP アドレス、アカウントについての情報は記録も保存もせず、動画やキャプションを受け取ることもありません。</li>
 </ul>
 
 <!-- @crash-reports 44454d7d22 -->
@@ -95,3 +118,7 @@
 </table>
 <p>インストールしたアプリが送るのは起動ごとに最大10件で、JavaScript のエラーは半分だけ送ります（ネイティブのクラッシュは必ず送ります）。開発用のビルドはすべてのエラーを、起動ごとに50件まで送ります。同じエラーは起動ごとに1回だけ送ります。遅い起動（5秒を超えるもの）と、アプリが長く固まったとき（1秒を超えるもの）は警告として、10分に1回まで送ります。パフォーマンスのトレースとセッションリプレイは使いません。アプリは Sentry の無料プランを使っています。上限に達したら余った分は捨てられ、誰にも料金はかかりません。</p>
 <p>Ferret を自分でビルドする場合は、<code>FERRET_SENTRY_DSN</code>（古い名前の <code>MOVIE_ADE_SENTRY_DSN</code> も使えます）に自分の Sentry の DSN を入れるか、空の文字列にして何も送らないようにします。コードは <code>src/main/telemetry.ts</code> と <code>src/shared/telemetry.ts</code> にあります。</p>
+
+<!-- @contact 928c7b48cb -->
+## お問い合わせ
+<p>Ferret は Japan Marketing LLC が提供しています。プライバシーについての質問や、開発元が持っているデータ（クラッシュレポート、フィードバック、共有リンク）についての問い合わせは、<a href="https://github.com/JapanMarketing-Dev/ferret/issues">GitHub Issues</a> か <a href="https://www.japan-marketing.co.jp/">Japan Marketing合同会社</a> へお寄せください。<a href="terms.html">利用規約</a>もあわせてご覧ください。</p>

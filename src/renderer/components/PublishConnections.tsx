@@ -5,6 +5,7 @@ import { PUBLISH_LIMITS } from '@shared/publish'
 import { Badge, Button, Field, IconButton, Segmented, useToast } from '../ui'
 import { useT } from '../lib/i18n'
 import { errorMessage } from '../lib/errors'
+import { VideoPublishConnections } from '@video/app/renderer/publish/VideoPublishConnections'
 
 /**
  * 発信の接続先。X は利用者が自分の X の開発者ポータルで作った Native App の Client ID を入れ、既定のブラウザで認証する。
@@ -89,6 +90,7 @@ export function PublishConnections({ info, onChange, onBack }: {
       {busy === 'connect' && <p className="st-note" role="status">{t('publish.connect.xWaiting')}</p>}
     </section>
 
+    <VideoPublishConnections />
     <section className="publish-connect__section" aria-labelledby="publish-connect-blog">
       <h3 id="publish-connect-blog">{t('publish.connect.blogTitle')}</h3>
       {info?.blogs.length ? <ul className="publish-connect__blogs" data-testid="publish-blogs">

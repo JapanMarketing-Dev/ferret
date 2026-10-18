@@ -1,0 +1,4 @@
+# wrangler dev 用（.dev.vars にコピーして使う。本番は wrangler secret put）
+ADMIN_TOKEN=local-admin-token-change-me-0123456789abcdef
+HASH_SALT=local-hash-salt-change-me-0123456789abcdef
+SENTRY_DSN=

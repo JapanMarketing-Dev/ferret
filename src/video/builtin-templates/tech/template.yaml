@@ -1,0 +1,85 @@
+# Ferret の標準テンプレート（アプリはいつもこれを使う）。画面収録＋人物のカメラから、YouTube 形式の 16:9 の動画を1本作る。
+# 同じ動画ファイルを YouTube にも TikTok にも投稿できる（縦型の別バージョンは作らない）。
+id: tech
+version: 2
+extends: base-horizontal
+name: { ja: 動画（16:9・1本）, en: Video (16:9, one file) }
+description:
+  ja: 画面収録とカメラの解説動画。操作している箇所へ自動でズームし、キー操作を表示する。人物は顔が中央に来るように切り抜き、右下の丸ワイプ、章の頭はカメラのみ
+  en: Screen recording plus camera. Auto-zoom to the operated area, keystroke display, the person's face kept centred (circular wipe), camera-only at chapter starts
+kind: tech
+targets: [youtube]
+canvas: { width: 1920, height: 1080, fps: 30 }
+
+record:
+  tracks: [screen, camera, mic]
+  camera: { width: 1920, height: 1080, fps: 30 }
+  screen: { fps: 30 }
+  cursorLog: true   # 自動ズーム・クリックの輪に使う
+  keyLog: true      # キー表示に使う（パスワード入力欄では記録しない）
+
+layouts:
+  default: screen-with-wipe
+  allowed: [screen-with-wipe, screen-full, camera-full, scene]
+  wipe: { shape: circle, corner: br, style: circle-gradient }
+
+cut:
+  # 画面を見せながら話すので、語りより間を少し長めに残す（操作の結果を目で追う時間）
+  silence: { minMs: 600, padMs: 150 }
+  retakes: keep-last
+  ngMarkers: cut
+  minKeepMs: 400
+
+# 字幕: 日本の技術系 YouTube でよく見る形。極太ゴシック・白文字に太い縁・下中央（下から約8%）・1行 18 字まで・2行まで。
+# 1字幕に 1〜2 語のキーワードを黄色に（emphasis: auto。用語集・数字・注意の言葉を優先）。表示は 0.8〜4 秒
+captions:
+  style: tech-bold
+  maxCharsPerLine: 18
+  maxLines: 2
+  emphasis: auto
+  position: { anchor: bottom, y: 0.92 }
+  minDurationMs: 800
+  maxDurationMs: 4000
+
+audio:
+  sfx: { maxPerMinute: 6, gainDb: -18 }
+
+decisions:
+  # 画面の操作を切ると手順が抜けるので、自動で切るしきい値を語りより厳しくする
+  cutKeep: { autoAbove: 0.75, autoBelow: 0.25 }
+
+# 画面とカメラの切り替え（全画面・ワイプ・カメラのみ）の長さ
+multicam: { maxShotSec: 90, minShotSec: 3 }
+
+# 効果音のルール（ferret-video sfx apply）。組み込みの効果音（~/.ferret/video/sfx/builtin、初回に自動で作る）を使う。
+# 1分に 4〜8 回の控えめな密度。章の頭・ズームイン・強調語・場面の切り替わりに入れ、話し声の頭とは重ねない
+sfx:
+  rules:
+    - { on: section, kind: whoosh }
+    - { on: zoom-in, kind: swoosh-in, probability: 0.7, gainDb: -20 }
+    - { on: scene-in, kind: pop, probability: 0.6 }
+    - { on: emphasis, kind: pop, probability: 0.5, gainDb: -22 }
+  maxPerMin: 6
+  gainDb: -18
+  minSpacingMs: 2500
+
+# クリックした場所へ寄るズーム（ferret-video tracks apply）
+zoom: { followClicks: true }
+
+features:
+  autoZoom: true
+  # 人物の顔がカメラの枠の中央に来るように切り抜く（ferret-video tracks apply。顔の解析は derived/analysis/faces.*.json）
+  faceReframe: true
+  keystrokes: true
+  cursorHighlight: true
+  piiMask: true
+
+checks: [black-frames, freeze, loudness, spec, audio-clicks, cut-boundaries, caption-safe-area, pii-on-screen, mosaic-tracking, camera-switch]
+
+# 出力は YouTube 形式の 16:9 を1本だけ（renders/youtube/final.mp4）。
+outputs:
+  youtube: { }
+
+# 人の確認はアプリの投稿画面で、完成した動画を見て行う（OK なら投稿）。そのため review の手順は置かず、final まで進める。
+# sfx は layout（tracks apply のズーム）の後: ズームインに効果音を合わせる
+pipeline: [ingest, sync, analyze, transcribe, rough-cut, multicam, captions, layout, sfx, masks, preview, check, final, thumbnail, metadata]

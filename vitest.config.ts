@@ -7,7 +7,7 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   resolve: {
-    alias: { '@shared': resolve(__dirname, 'src/shared') }
+    alias: { '@shared': resolve(__dirname, 'src/shared'), '@video': resolve(__dirname, 'src/video') }
   },
   test: {
     include: ['test/unit/**/*.test.ts'],
