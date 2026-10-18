@@ -292,6 +292,11 @@ export class EmbeddedBrowser {
     return this.webContents
   }
 
+  /** 外の自動操作（browser-use。browserCdp.ts）に見せるタブ。閉じかけ・閉じたものは入れない */
+  automationTabs(): Array<{ id: string; contents: WebContents }> {
+    return this.tabs.filter((tab) => !tab.destroyed && !tab.view.webContents.isDestroyed()).map((tab) => ({ id: tab.id, contents: tab.view.webContents }))
+  }
+
   /** 開いているタブの中身すべて（並び順） */
   allContents(): WebContents[] {
     return this.tabs.map((tab) => tab.view.webContents).filter((wc) => !wc.isDestroyed())
@@ -667,6 +672,7 @@ export class EmbeddedBrowser {
   closeTab(id: string): void {
     const tab = this.tabs.find((candidate) => candidate.id === id)
     if (!tab) return
+    this.automationHeld.delete(id)
     if (this.tabs.length === 1) {
       const blank = this.createTab()
       this.activateTab(blank.id)
@@ -846,7 +852,48 @@ export class EmbeddedBrowser {
   /** renderer が実測した領域。スマホ幅のときは中央に寄せて端末幅に収める */
   setBounds(bounds: ViewBounds | null): void {
     this.bounds = bounds
+    if (bounds && bounds.width > 0 && bounds.height > 0) this.lastShownBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
     this.applyBounds()
+  }
+
+  /** 外の自動操作（browser-use）がつないでいるタブ。画面に出ていなくても、描画できる大きさで隠しておく */
+  private automationHeld = new Set<string>()
+  /** 最後に画面に出したときの枠（自動操作のタブを隠しておく大きさ。出したことが無ければ 1280×800） */
+  private lastShownBounds: { x: number; y: number; width: number; height: number } | null = null
+
+  holdForAutomation(id: string, held: boolean): void {
+    if (held) this.automationHeld.add(id)
+    else this.automationHeld.delete(id)
+    this.placeViews()
+  }
+
+  /** 自動操作のタブを、画面に出さずに描画できる大きさで置く（ページの大きさ・クリックの位置・スクリーンショットが正しくなる） */
+  private holdHidden(view: WebContentsView): void {
+    const rect = this.lastShownBounds ?? { x: 0, y: 0, width: 1280, height: 800 }
+    view.setBounds({ x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) })
+    // 隠したままでは大きさがページへ伝わらない。同じティックで出して隠し、大きさだけを伝える（画面には描かれない）
+    view.setVisible(true)
+    view.setVisible(false)
+  }
+
+  /**
+   * タブのスクリーンショット（画面に出ていないタブも撮る。capturePage の stayHidden）。CDP の Page.captureScreenshot の代わり
+   */
+  async captureTab(id: string, options: { format?: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number } }): Promise<string> {
+    const tab = this.tabs.find((candidate) => candidate.id === id && !candidate.destroyed)
+    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('No target with given id found')
+    // 内蔵ブラウザが画面に出ていて、撮るタブが前に出ていなければ前に出す（エージェントがいま作業しているタブを見せる）
+    if (tab.id !== this.activeId && this.bounds && this.bounds.width > 0 && this.bounds.height > 0) {
+      this.activateTab(tab.id)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    }
+    const rect = options.clip ? { x: Math.round(options.clip.x), y: Math.round(options.clip.y), width: Math.round(options.clip.width), height: Math.round(options.clip.height) } : undefined
+    const image = await tab.view.webContents.capturePage(rect, { stayHidden: true }).catch(() => {
+      // 一度も画面に出ていないタブは、撮る元の画面が無い
+      throw new Error("Ferret's built-in browser is not on screen, so this tab cannot be captured. Show the browser in Ferret (or ask the person to), then retry.")
+    })
+    const buffer = options.format === 'jpeg' ? image.toJPEG(Math.max(0, Math.min(100, Math.round(options.quality ?? 80)))) : image.toPNG()
+    return buffer.toString('base64')
   }
 
   private applyBounds(): void {
@@ -858,6 +905,10 @@ export class EmbeddedBrowser {
     // 前に出ていないタブは隠す（ページはそのまま。切り替えても読み込み直さない）
     for (const tab of this.tabs) {
       if (tab.id === this.activeId || tab.destroyed || tab.view.webContents.isDestroyed()) continue
+      if (this.automationHeld.has(tab.id)) {
+        this.holdHidden(tab.view)
+        continue
+      }
       tab.view.setVisible(false)
       tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
@@ -867,6 +918,11 @@ export class EmbeddedBrowser {
     view.setVisible(true)
     const mirror = this.mirror && !this.mirror.webContents.isDestroyed() ? this.mirror : null
     if (!this.bounds || this.bounds.width <= 0 || this.bounds.height <= 0) {
+      if (this.automationHeld.has(this.activeId)) {
+        this.holdHidden(view)
+        mirror?.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+        return
+      }
       view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
       mirror?.setBounds({ x: 0, y: 0, width: 0, height: 0 })
       return

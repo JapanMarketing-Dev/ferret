@@ -195,6 +195,55 @@ let captureConsent: CaptureConsentState = { target: { kind: 'browser' }, mic: tr
 /** 録画中か（main が出す印。窓の題名と macOS の Dock） */
 let capturing = false
 let browser: EmbeddedBrowser | null = null
+/** 内蔵ブラウザのタブの変化を待つもの（browser-use の中継。browserAutomation.ts） */
+const browserTabListeners = new Set<() => void>()
+/** 内蔵ブラウザを browser-use で動かす口（ターミナルに BU_CDP_URL を渡す） */
+let browserAutomationService: import('./browserAutomation').BrowserAutomation | null = null
+async function browserAutomation(): Promise<import('./browserAutomation').BrowserAutomation> {
+  if (!browserAutomationService) {
+    const { BrowserAutomation } = await import('./browserAutomation')
+    browserAutomationService = new BrowserAutomation({
+      configFile: join(app.getPath('userData'), 'browser-cdp.json'),
+      toolDir: join(app.getPath('userData'), 'browser-use'),
+      tabs: () => browser?.automationTabs() ?? [],
+      createTab: async (url) => {
+        if (!browser) throw new UserFacingError(t('browser.errors.invalidUrl'))
+        return browser.newTab(url)
+      },
+      closeTab: (id) => browser?.closeTab(id),
+      activateTab: (id) => browser?.activateTab(id),
+      hold: (id, held) => browser?.holdForAutomation(id, held),
+      capture: async (id, params) => {
+        if (!browser) throw new Error('No target with given id found')
+        return browser.captureTab(id, params)
+      },
+      onTabsChanged: (listener) => {
+        browserTabListeners.add(listener)
+        return () => browserTabListeners.delete(listener)
+      },
+      session: () => browser?.activeSession() ?? browserSession(),
+      notice: (message) => send('browser:notice', message),
+      attachedMessage: () => t('browser.automation.attached'),
+      reveal: () => send('browser:agentAttached'),
+      // browser-use の Agent（API）の中継が付けるキー。送り先は中継の表の決まった接続先だけで、保存したキーと同じ門（gateCredentials）を通す
+      llmKey: async (id) => {
+        const { LLM_PROVIDER_PRESETS } = await import('@shared/aiProviders')
+        const { RELAY_PROVIDERS } = await import('./browserLlmRelay')
+        const preset = (LLM_PROVIDER_PRESETS as Record<string, { vendor: import('@shared/aiProviders').AiVendor; envVar?: string }>)[id]
+        const relay = RELAY_PROVIDERS.find((p) => p.id === id)
+        if (!preset || !relay) return undefined
+        const ref = preset.envVar ? { apiKeyEnv: preset.envVar } : undefined
+        try {
+          await gateCredentials(`browser-use:${id}`, relay.baseUrl, ref, preset.vendor, [relay.baseUrl], false)
+        } catch {
+          return undefined
+        }
+        return providerKey(ref, preset.vendor)
+      }
+    })
+  }
+  return browserAutomationService
+}
 /** 内蔵ブラウザの拡張機能（内蔵ブラウザの session にだけ読み込む。browserExtensions.ts） */
 let extensions: BrowserExtensions | null = null
 /** 直前に探した取り込みの候補（key → 写す元）。画面からはパスを受け取らず、この key だけを受ける */
@@ -1422,6 +1471,14 @@ function syncAgentSkillOnStart(): void {
 function syncAgentMailSkillNow(): void {
   if (!IS_PACKAGED || IS_E2E) return
   void syncAgentMailSkill(app.getVersion()).catch((err: unknown) => reportHandled(err, { area: 'agent-mail', op: 'sync skill' }))
+}
+
+/** 内蔵ブラウザを browser-use で動かす skill（ferret-browser）を Claude Code・Codex に入れる。配布版だけ */
+function syncBrowserSkillNow(): void {
+  if (!IS_PACKAGED || IS_E2E) return
+  void import('./browserSkill')
+    .then(({ syncBrowserSkill }) => syncBrowserSkill(app.getVersion()))
+    .catch((err: unknown) => reportHandled(err, { area: 'browser', op: 'sync skill' }))
 }
 
 /** main が録画の対象を変える（内蔵ブラウザへ戻すときだけ）。設定に残し、画面へ知らせる */
@@ -3643,7 +3700,9 @@ async function main(): Promise<void> {
       : {}),
     ...(await agentMailEnv(meta.sessionId).catch((err: unknown) => { reportHandled(err, { area: 'agent-mail', op: 'terminal env' }); return {} })),
     // 動画づくりの CLI（ferret-video）を PATH に置く（src/video/app/main/cli/env.ts）
-    ...(await videoTerminalEnv(videoContext).catch((err: unknown) => { reportHandled(err, { area: 'video', op: 'terminal env' }); return {} }))
+    ...(await videoTerminalEnv(videoContext).catch((err: unknown) => { reportHandled(err, { area: 'video', op: 'terminal env' }); return {} })),
+    // browser-use で内蔵ブラウザを動かす（BU_CDP_URL。src/main/browserAutomation.ts）
+    ...(await (await browserAutomation()).env().catch((err: unknown) => { reportHandled(err, { area: 'browser', op: 'automation env' }); return {} }))
   })
   // タブが閉じたら、そのタブに渡した中継の合言葉を無効にする（残った子プロセスが使い続けられないように）
   terminals.onSessionClosed = (sessionId) => { decisionService?.revokeSession(sessionId); revokeAgentMailSession(sessionId) }
@@ -3725,6 +3784,7 @@ async function main(): Promise<void> {
     if (state.url && state.url !== 'about:blank') updateSettings({ url: state.url })
     recordProjectUrl(state)
     send('browser:stateChanged', state)
+    for (const listener of browserTabListeners) listener()
   })
   // タブ（@shared/browserTabs）。どのタブも録画に結びつけ、前に出ているタブを録る（recording/controller.ts の selectBrowserTab）
   browser.onTabCreated = (contents) => {
@@ -3766,6 +3826,7 @@ async function main(): Promise<void> {
   // 入れてある設定の skill を、この版の設定の項目に合わせる
   syncAgentSkillOnStart()
   syncAgentMailSkillNow()
+  syncBrowserSkillNow()
 
   await rendererLoad
   mark('renderer:loaded')

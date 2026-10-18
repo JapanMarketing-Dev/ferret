@@ -219,6 +219,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const videoChannel = useVideoChannel(projects.projects.find((p) => p.id === workspace.projectId))
   /** 上のモード切替で「動画」を選んでいる間だけ、中央に動画の画面（一覧・撮る・確認・投稿）を出す。エディタのモードの上に重ねる */
   const [videoOpen, setVideoOpen] = useState(false)
+  const videoOpenRef = useRef(videoOpen)
+  videoOpenRef.current = videoOpen
   /** 全体では、フィードバックの対象を大きく見せるためターミナルの欄を閉じる（右下のボタンで開く。設定の配置は変えない） */
   const [terminalPeek, setTerminalPeek] = useState(false)
   const baseLayout = browserFocus ? browserFocusLayout(savedLayout) : savedLayout
@@ -1138,6 +1140,11 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     const offBrowser = window.ade.on('browser:stateChanged', setBrowserState)
     // 内蔵ブラウザからの短い知らせ（タブの上限など）。フィードバックモードでは帯の案内の枠にも出る（Toast の置き先）
     const offBrowserNotice = window.ade.on('browser:notice', (message) => toast({ tone: 'warning', message }))
+    // エージェントが browser-use で内蔵ブラウザを動かし始めた。エディタの画面なら中央を内蔵ブラウザにして、操作が見えるようにする
+    // （ビジネスリサーチ・動画の画面のときは切り替えない。そのタブは隠れたまま、大きさだけ保つ）
+    const offAgentBrowser = window.ade.on('browser:agentAttached', () => {
+      if (modeRef.current === 'editor' && !researchActiveRef.current && !videoOpenRef.current) setCenterTab('browser')
+    })
     const offWorkspace = window.ade.on('workspace:changed', setWorkspace)
     const offProjects = window.ade.on('projects:changed', (state) => {
       projectsFromEventRef.current = true
@@ -1147,6 +1154,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     return () => {
       offBrowser()
       offBrowserNotice()
+      offAgentBrowser()
       offWorkspace()
       offProjects()
       offMode()

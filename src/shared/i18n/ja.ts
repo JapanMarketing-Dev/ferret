@@ -1749,6 +1749,7 @@ export const ja: Messages = {
   'browser.tabs.menu.closeRight': '右側のタブをすべて閉じる',
   'browser.tabs.menu.closeAll': 'すべてのタブを閉じる',
   'browser.tabs.limit': 'タブは {{n}} 枚まで開けます。使わないタブを閉じてください。',
+  'browser.automation.attached': 'エージェントが内蔵ブラウザのタブを操作しています（browser-use）。',
   'browser.tabs.limitSameTab': 'タブが上限（{{n}} 枚）なので、同じタブで開きました。',
   'textNote.button.label': '文字で指摘',
   'textNote.button.title': 'ページに枠を引き、直してほしいことを打つ。録画せずに指摘になります（Esc でやめる）',

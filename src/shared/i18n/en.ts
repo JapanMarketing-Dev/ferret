@@ -1757,6 +1757,7 @@ export const en = {
   'browser.tabs.menu.closeRight': 'Close Tabs to the Right',
   'browser.tabs.menu.closeAll': 'Close All Tabs',
   'browser.tabs.limit': 'You can open up to {{n}} tabs. Close tabs you no longer need.',
+  'browser.automation.attached': 'An agent is controlling a built-in browser tab (browser-use).',
   'browser.tabs.limitSameTab': 'Opened in the same tab because the tab limit ({{n}}) was reached.',
   'textNote.button.label': 'Type feedback',
   'textNote.button.title': 'Draw a box on the page and type what to change. It becomes a finding without recording (Esc to stop)',

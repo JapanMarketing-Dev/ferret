@@ -189,6 +189,9 @@ describe('security-5 [1] capture needs a fresh one-use grant from a native gestu
     const allowed: Record<string, RegExp> = {
       'src/main/index.ts': /capturePage/,
       'src/main/recording/stills.ts': /capturePage/,
+      // 内蔵ブラウザのタブだけ。browser-use（Ferret のターミナルに渡した合言葉付きの CDP の口）の Page.captureScreenshot の代わりで、
+      // その口では CDP の撮影そのものも使える（同じ範囲）。アプリの画面・ほかの窓は撮らない
+      'src/main/browser.ts': /capturePage/,
       'src/main/recording/sources.ts': /desktopCapturer/,
       // 一覧のサムネイル（手前に出すウインドウ）。listCaptureSources からだけ呼ぶ
       'src/main/recording/devices.ts': /screencapture/

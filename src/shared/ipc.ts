@@ -630,6 +630,8 @@ export interface IpcEvents extends VideoIpcEvents, BusinessIpcEvents, ResearchIp
   'browser:stateChanged': (state: BrowserState) => void
   /** 内蔵ブラウザから利用者へ短く知らせる（タブの上限など） */
   'browser:notice': (message: string) => void
+  /** 外の自動操作（browser-use）が内蔵ブラウザのタブにつないだ。エディタなら中央を内蔵ブラウザにして、操作が見えるようにする */
+  'browser:agentAttached': () => void
   /** 拡張機能の一覧・読み込みの結果が変わった */
   'browserExtensions:changed': (list: BrowserExtensionInfo[]) => void
   /** 取り込んだパスワードが変わった（鍵のボタンを出し直す） */
@@ -862,6 +864,7 @@ export const IPC_EVENT_CHANNELS = [
   ...RESEARCH_IPC_EVENTS,
   'browser:stateChanged',
   'browser:notice',
+  'browser:agentAttached',
   'browserExtensions:changed',
   'passwords:changed',
   'mode:changed',

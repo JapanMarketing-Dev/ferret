@@ -1,3 +1,4 @@
+import { BROWSER_BIN_ENV } from '@shared/browserAutomationEnv'
 import { delay } from '@shared/delay'
 import { shellQuote, sshShellSpec, type SshTarget } from '@shared/sshCommand'
 import { execFile, execFileSync } from 'node:child_process'
@@ -151,6 +152,10 @@ function ptyEnv(extra: Record<string, string> = {}): Record<string, string> {
   const videoBin = merged[VIDEO_BIN_ENV]
   delete merged[VIDEO_BIN_ENV]
   if (videoBin) prependPathEntry(merged, videoBin)
+  // 内蔵ブラウザを browser-use の Agent（API）で動かす ferret-browser のフォルダも（src/main/browserAutomation.ts）
+  const browserBin = merged[BROWSER_BIN_ENV]
+  delete merged[BROWSER_BIN_ENV]
+  if (browserBin) prependPathEntry(merged, browserBin)
   return merged
 }
 
