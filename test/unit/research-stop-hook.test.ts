@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { STOP_HOOK_COMMAND, STOP_HOOK_MAX_BLOCKS, STOP_HOOK_SCRIPT_FILE, mergeStopHookSettings, stopHookScript } from '../../src/shared/research/stopHook'
+import { STOP_HOOK_COMMAND, STOP_HOOK_MAX_BLOCKS, STOP_HOOK_SCRIPT_FILE, conclusionMissing, continueMessage, mergeStopHookSettings, stopHookScript } from '../../src/shared/research/stopHook'
 
 /**
  * 「参入先を決め切る」の Stop フック。生成したスクリプトを node で実際に動かし、
@@ -154,5 +154,26 @@ describe('.claude/settings.json に足す', () => {
   it('もう入っている・読めない・形が違うなら書かない（null）', () => {
     expect(mergeStopHookSettings(mergeStopHookSettings(null))).toBeNull()
     for (const bad of ['{ broken', '[]', '"x"', JSON.stringify({ hooks: [] }), JSON.stringify({ hooks: { Stop: {} } })]) expect(mergeStopHookSettings(bad)).toBeNull()
+  })
+})
+
+describe('Ferret の判定（conclusionMissing）は Stop フックのスクリプトと同じ', () => {
+  const input = (conclusion: string | null) => ({
+    conclusion,
+    candidates: [{ id: 'C001', stage: 'discovered' }, { id: 'C002', stage: 'discovered' }, { id: 'C003', stage: 'discovered' }, { id: 'C004', stage: 'dropped' }],
+    experimentIds: ['X001']
+  })
+  const CASES: Array<string | null> = [null, DONE, DONE.replace('状態: 決め切った', '状態: まだ'), DONE.replace('C001 入札', 'C001 か C002 入札'), DONE.replace('- C003: 支出の証拠が弱い\n', ''), DONE.replace('X001', 'X009'), DONE.replace('第2候補 C002', '未定'), DONE.replace('- [ ] G1', '- G1')]
+  it.each(CASES.map((c, i) => [i, c] as const))('ケース %i', (_i, conclusion) => {
+    if (conclusion !== null) write('conclusion.md', conclusion)
+    const missing = conclusionMissing(input(conclusion), 'ja')
+    const r = run(DECIDE)
+    if (missing.length === 0) expect(r.block).toBeNull()
+    else expect(r.block?.reason).toBe(continueMessage(missing, 1, STOP_HOOK_MAX_BLOCKS, 'ja'))
+  })
+
+  it('決め切った結論は空、英語も同じ形', () => {
+    expect(conclusionMissing(input(DONE), 'ja')).toEqual([])
+    expect(conclusionMissing(input(null), 'en')).toEqual(['conclusion.md does not exist yet (write the entry decision)'])
   })
 })

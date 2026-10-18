@@ -24,6 +24,7 @@
 import { createHash } from 'node:crypto'
 import {
   GATE_IDS,
+  RESEARCH_CONCLUSION_FILE,
   RESEARCH_CONTEXT_FILE,
   RESEARCH_FILE,
   RESEARCH_KNOWLEDGE_FILE,
@@ -51,7 +52,7 @@ import type { ResearchIssue, ResearchPromptId, ResearchPromptView, ResearchSaveR
 import { RESEARCH_PROMPT_IDS } from '@shared/research/ipc'
 import { coerceResearch, coerceResearchRecord, emptyResearch, hasResearchErrors, validateResearchRecord, type ResearchFix } from '@shared/research/records'
 import { canDecideGate } from '@shared/research/gates'
-import { STOP_HOOK_SCRIPT_FILE, STOP_HOOK_SETTINGS_FILE, STOP_HOOK_STATE_DIR, mergeStopHookSettings, stopHookScript } from '@shared/research/stopHook'
+import { STOP_HOOK_SCRIPT_FILE, STOP_HOOK_SETTINGS_FILE, STOP_HOOK_STATE_DIR, conclusionMissing, mergeStopHookSettings, stopHookScript } from '@shared/research/stopHook'
 import { buildResearchPrompt, researchAgentRules, researchGoal } from '@shared/research/prompts'
 import { researchContextMarkdown, researchReadme } from '@shared/research/context'
 import { MAX_RECORD_BYTES, RecordParseError, dumpYaml, formatRecordFile, parseRecordFile, parseYaml } from '@shared/business/format'
@@ -683,6 +684,24 @@ export class ResearchStore {
     if (candidateId !== null && !loaded.data.candidates.some((c) => c.id === candidateId)) fail('notFound', { id: candidateId })
     const built = buildResearchPrompt(i.promptId, loaded.data, candidateId, this.locale())
     return { id: i.promptId, candidateId, text: built.text }
+  }
+
+  /** conclusion.md に足りないもの（空なら決め切った）。どの Agent でも Ferret が続けさせるかを決める（keepGoing.ts） */
+  async conclusionMissing(): Promise<string[]> {
+    const loaded = await this.loadAll()
+    const conclusion = await this.fs.readText(RESEARCH_CONCLUSION_FILE, LIMITS.agentFileBytes).catch(() => null)
+    return conclusionMissing({
+      conclusion,
+      candidates: loaded.data.candidates.map((c) => ({ id: c.id, stage: c.stage })),
+      experimentIds: loaded.data.experiments.map((x) => x.id)
+    }, this.locale() === 'en' ? 'en' : 'ja')
+  }
+
+  /** Claude Code の Stop フックが入っているか（スクリプトと .claude/settings.json の両方） */
+  async hasClaudeHook(): Promise<boolean> {
+    if ((await this.fs.kind(STOP_HOOK_SCRIPT_FILE)) !== 'file') return false
+    const settings = await this.fs.readText(STOP_HOOK_SETTINGS_FILE, LIMITS.agentFileBytes).catch(() => null)
+    return settings !== null && settings.includes(STOP_HOOK_SCRIPT_FILE)
   }
 
   /** context.md を書き直してから送る。送れたときだけ .research/sent/ に残す。送れなければ ok:false（送ったとは言わない） */

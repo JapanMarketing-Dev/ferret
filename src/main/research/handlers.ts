@@ -17,6 +17,7 @@ import { t, type TranslationKey } from '@shared/i18n'
 import { BusinessStore, type AgentSender, type ConfirmFn } from '../business/store'
 import { FileApprovalLedger, MemoryApprovalLedger, type ApprovalLedger } from '../business/approvalLedger'
 import { createSendPasses } from '../business/sendPass'
+import type { KeepGoingJob } from './keepGoing'
 import { ResearchStore, fail, localizeError } from './store'
 
 export interface ResearchDeps {
@@ -43,6 +44,8 @@ export interface ResearchDeps {
   knowledge: string
   /** ゲートの人の判断の正本を置くフォルダ（userData/research-gates）と HMAC の鍵。省略時は起動中だけ */
   ledger?: { dir: string; key: () => Promise<Buffer> }
+  /** 「参入先を決め切る」を送ったターミナルを、決め切るまで止めない見張り（keepGoing.ts。どの Agent でも） */
+  keepGoing?: { start(job: KeepGoingJob): unknown }
 }
 
 export type ResearchHandlers = { [C in keyof ResearchIpcRequests]: (...args: Parameters<ResearchIpcRequests[C]>) => unknown }
@@ -225,10 +228,23 @@ export function researchHandlers(deps: ResearchDeps): ResearchHandlers {
     'research:setStage': (input) => store().setStage(input),
     'research:prompt': (input) => store().prompt(input),
     'research:armSend': (input) => passes.arm(input),
-    'research:send': (request) => {
+    'research:send': async (request) => {
       // 送るボタンを押した直後に作った札と、依頼・本文・送り先・フォルダが合うときだけ送る
       if (!passes.use(request)) fail('needsAction')
-      return store().send(request, deps.sender)
+      const root = deps.root()
+      let terminalId: string | undefined
+      const sender: AgentSender = {
+        send: async (target, text) => {
+          const outcome = await deps.sender.send(target, text)
+          terminalId = outcome.terminalId
+          return outcome
+        }
+      }
+      const result = await store().send(request, sender)
+      // 「参入先を決め切る」は、送ったターミナルの Agent を conclusion.md が決め切った条件を満たすまで止めない
+      const promptId = request && typeof request === 'object' ? (request as { promptId?: unknown }).promptId : undefined
+      if (result.ok && promptId === 'decide' && terminalId && root) deps.keepGoing?.start({ terminalId, root, locale: deps.locale() })
+      return result
     },
     'research:promote': (request) => promote(request)
   }

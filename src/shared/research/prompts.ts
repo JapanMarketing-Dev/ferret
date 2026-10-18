@@ -51,6 +51,9 @@ export function researchAgentRules(locale: ResearchLocale): string {
   3. 発注金額・開発費は、自社への支払意思ではない（官公庁が数億円発注していても、応札企業が道具にいくら払うかは別の問い）。
   4. 過去の事例を現在の証拠にしない。出来事の日（eventDate）と掲載日（publishedAt）を分ける。
   5. 負担の金額化（業務量 × 時間 × 社内単価）は負担の見積もりで、支払い可能な価格ではない。
+  6. 競合のサイトのコンセプト・実績の数字は本人の主張。実名の顧客・第三者の評価・数値の根拠がある「証明」と、言っているだけの「主張」を分けて書く（主張は companyFact、実名の導入事例は competitorCase）。
+  7. 広告ライブラリの広告は、出している事実と訴求が分かるだけで、売れている・黒字の証明ではない（grade は companyFact）。出稿開始日・出ている期間・同時の数を書き、長く続く訴求を「反応がある手がかり」として扱う。競合の求人も companyFact（何に人を使っているかの手がかり）。
+  8. 投稿サイト・掲示板の声は1投稿1件（grade は snsComplaint、製品レビューのサイトは reviewComplaint）。投稿者の立場（利用者・社員・競合・紹介料を受ける人）と日付を書き、声の大きい少数や炎上を市場全体の割合にしない。X など、検索や閲覧にログインが要るサイトにはログインしない。公開で読めるページ、検索エンジン（site:x.com など）から開けるページ、または使える場合は X 検索の API で読む。読めなかったものは「未確認」と書く。
 - アイデアを大量に出すより、仮説ごとに証拠と反証を整理する。母集団の偏りに注意する（不満投稿や導入事例だけから集めると偏る）。課題を見つける調査（詳しく読んで仮説を作る）と、広さを確かめる調査（業種・規模などの条件で作った企業群）を分け、割合を言うときは選び方と分母を書く。
 - 意見より行動（購入・利用・継続）を強い証拠として扱う。「興味があります」は次の検証へ進む材料にすぎない。「未確認」は需要がないことを意味しない。
 - grade（証拠の強さ）は観測したものの種類で付ける。強い順に contract（実際の契約・発注）、paidUsage（既存製品の有料利用）、budgetedTender（予算付きの募集・入札）、competitorCase（競合の導入事例）、reviewComplaint（製品レビューの不満）、searchDemand（検索需要）、snsComplaint（SNS での不満）、aiInference（AI による推測）。companyFact は公式サイト・求人・プレスリリースで見た企業の状況（課題の証拠としては数えない）。迷ったら弱い方。
@@ -74,6 +77,9 @@ export function researchAgentRules(locale: ResearchLocale): string {
   3. Order amounts or development budgets are not willingness to pay you (an agency ordering hundreds of millions does not tell how much bidders would pay for a tool).
   4. Do not treat past cases as current evidence. Keep the date of the event (eventDate) apart from the publication date (publishedAt).
   5. Monetising the burden (volume × time × internal hourly cost) estimates the burden; it is not a price they can pay.
+  6. A competitor site's concept and track-record numbers are its own claims. Keep "proof" (named customers, third-party ratings, numbers with a basis) apart from mere "claims" (claims are companyFact; named customer cases are competitorCase).
+  7. An ad in an ad library shows only that it runs and what it says, not that it sells or makes a profit (grade companyFact). Record the start date, how long it has run and how many run at once, and treat long-running angles as "a hint of response". Competitors' job posts are companyFact too (a hint of what they spend people on).
+  8. Posts on posting sites and forums are one record per post (grade snsComplaint; product review sites are reviewComplaint). Record the poster's position (user, employee, competitor, affiliate) and the date, and never turn a loud few or a flame war into a share of the market. Do not log in to sites such as X that require it to search or read; read public pages, pages reachable from a search engine (such as site:x.com), or an X search API if one is available to you. Note what you could not read as "unverified".
 - Organise evidence and counter-evidence per hypothesis rather than generating many ideas. Watch population bias (collecting only complaint posts or case studies is biased). Separate research that discovers problems (read in depth to form hypotheses) from research that checks breadth (a group of companies built from conditions such as industry and size); when stating a proportion, write how targets were chosen and the denominator.
 - Treat behaviour (purchase, usage, continuation) as stronger evidence than opinions. "I'm interested" is only material for the next test. "Unverified" does not mean there is no demand.
 - Grade evidence by what you observed. Strongest first: contract (actual contracts or orders), paidUsage (paid use of existing products), budgetedTender (budgeted calls or tenders), competitorCase (competitors' case studies), reviewComplaint (complaints in product reviews), searchDemand (search demand), snsComplaint (complaints on social media), aiInference (AI inference). companyFact is a company's situation seen on its website, job posts or press releases (not counted as evidence of the problem). When unsure, pick the weaker grade.
@@ -331,7 +337,8 @@ In your final reply, write only "Where to enter", "Why" and "The first experimen
 
 ネット調査:
 - 既存の支出を探す: 発注サイト・入札（予算付きの募集）、既存サービスの料金ページと導入事例、外注・代行の募集、求人（業務を人で回している証拠）。
-- 不満を探す: 製品レビューの低評価、比較記事、解約の投稿、Q&A・掲示板・SNS。
+- 不満を探す: 製品レビューの低評価、比較記事、解約の投稿、Q&A・掲示板・SNS（X・Reddit・5ちゃんねる・Yahoo!知恵袋・note など）。
+- 広告を出してまで売っている業務を探す: Meta 広告ライブラリ・Google 広告透明性センターで業務名を検索し、長く出ている広告の広告主と訴求を見る（売り手が集客にお金を使っている市場の手がかり）。
 - いまある候補（{{candidateCount}} 件）と重ならないものだけ。
 
 書くもの:
@@ -372,7 +379,8 @@ Mindset: work backwards from "how can we keep acquiring customers", not "what ca
 
 Desk research:
 - Find existing spending: procurement and tender sites (budgeted calls), pricing pages and case studies of existing services, outsourcing requests, job posts (proof the work is done by people).
-- Find complaints: low-rated product reviews, comparison articles, posts about cancelling, Q&A sites, forums, social media.
+- Find complaints: low-rated product reviews, comparison articles, posts about cancelling, Q&A sites, forums, social media (X, Reddit, 5channel, Yahoo! Chiebukuro, note and so on).
+- Find work that sellers pay to advertise: search the work in the Meta Ad Library and the Google Ads Transparency Center and look at the advertisers and angles of long-running ads (a sign of a market where sellers spend on acquisition).
 - Only candidates that do not overlap the existing {{candidateCount}}.
 
 What to write:
@@ -548,7 +556,7 @@ Done when: you have a list of customer companies and can explain why those compa
 理論: レビットのマーケティング近視眼と Jobs to Be Done。顧客が欲しいのは商品そのものではなく、その先の成果。表面のニーズ → 実際の仕事 → 深い目的 に分解する。
 
 ネット調査:
-- 契約・発注・入札・料金ページ・導入事例（支出）、レビュー・掲示板・SNS・解約理由（不満）を集める。
+- 契約・発注・入札・料金ページ・導入事例（支出）、レビュー・掲示板・SNS・解約理由（不満）を集める。投稿サイト・掲示板は X（x.com）・Reddit・5ちゃんねる・Yahoo!知恵袋・note・はてなブックマーク・YouTube のコメント・業界のコミュニティまで見て、この業務がどう言われているか（困りごと・回避策・払っている金額の話）を1投稿1件で書く。
 - 原文・URL・確認日・事実・推論を分けて evidence/ に1件ずつ保存する（次の ID は {{nextEvidenceId}}）。証拠の強さ（grade）を8段階で付ける。
 - 既存支出と不満が同時に確認できるかを見る。不満があっても乗り換えコストが高ければ参入は難しい（Why で確かめる）。
 
@@ -596,7 +604,7 @@ ${evidenceYamlJa('{{candidateId}}')}
 Theory: Levitt's marketing myopia and Jobs to Be Done. Customers want the outcome, not the product. Break it down into surface need → actual job → deeper purpose.
 
 Desk research:
-- Collect contracts, orders, tenders, pricing pages, case studies (spending) and reviews, forums, social media, reasons for cancelling (complaints).
+- Collect contracts, orders, tenders, pricing pages, case studies (spending) and reviews, forums, social media, reasons for cancelling (complaints). Cover posting sites and forums too, X (x.com), Reddit, 5channel, Yahoo! Chiebukuro, note, Hatena Bookmark, YouTube comments and industry communities, and record how this work is talked about (pain, workarounds, amounts paid) one post per record.
 - Save each as one record in evidence/ with quote, URL, checked date, fact and inference kept apart (next ID {{nextEvidenceId}}). Grade it on the eight-level scale.
 - Check whether existing spending and complaints are both confirmed. Complaints do not help if switching costs are high (check that under Why).
 
@@ -654,7 +662,7 @@ Done when: you can explain, with evidence, who struggles in which situation with
 
 - A. 顧客を特定して接触する経路: 対象にした理由（どの公開事実が一致したか）・関係する担当者・接点（既存のつながり・紹介者・公開窓口）・今伝える理由になる出来事・最初に見せるもの（deliverable）・求める次の行動（条件の登録・サンプルの確認・課題の共有）。一度だけ使える人脈か、同じ条件の別企業に繰り返せる経路かを分ける。
 - B. 検索から来る経路: 検索語ごとに 想定意図／地域・期間／推定検索量／入札単価の参考値／検索結果の中身／用意するページ／求める行動 を本文の表にする。意図は仮説なので検索結果の中身も確かめる。データを取っていない数は null。
-- C. 競合の広告と申込みまでの流れ（Google 広告透明性センターなど）: 誰のどの課題に呼びかけ、何を成果として約束し、最初の行動を何にし、申込み前に事例・サンプル・価格・実績をどう見せ、どこで不安や導入負担を解消しているか。広告が続いていても黒字とは言えない。
+- C. 競合の広告と申込みまでの流れ（Meta 広告ライブラリ・Google 広告透明性センター、公開されていれば LinkedIn・TikTok の広告ライブラリ。出稿開始日・出ている期間・同時に出している数も見る）: 誰のどの課題に呼びかけ、何を成果として約束し、最初の行動を何にし、申込み前に事例・サンプル・価格・実績をどう見せ、どこで不安や導入負担を解消しているか。広告が続いていても黒字とは言えない。
 - 最初に試しやすい接点と見せるもの: 検索している → 検索広告・課題別の記事・比較ページで疑問への答えと成果／実名で特定できる → 対象を絞った営業・既存のつながりで、その企業に関係するサンプル／専門家や取引先に相談している → 紹介・提携／説明や実演を見たい → 動画・セミナー・デモ。
 
 判定方法:
@@ -707,7 +715,7 @@ Desk research:
 
 - A. Contacting identified customers: why they were targeted (which public facts matched), the relevant person, the contact point (existing connections, referrers, public contact windows), an event that makes contacting them now meaningful, what to show first (deliverable), the next action you ask for (register conditions, check a sample, share a problem). Distinguish a one-off connection from a path repeatable with other companies under the same conditions.
 - B. Coming from search: for each search term make a table in the body of assumed intent / region and period / estimated volume / reference bid price / content of the results / page to prepare / action you ask for. Intent is a hypothesis, so check the actual results. Numbers you did not collect stay null.
-- C. Competitors' ads and the flow to sign-up (e.g. Google Ads Transparency Center): whom and which problem they address, what outcome they promise, what the first action is, how they show cases, samples, prices and track records before sign-up, and where they resolve anxieties and adoption burden. Ads that keep running do not prove profitability.
+- C. Competitors' ads and the flow to sign-up (the Meta Ad Library, the Google Ads Transparency Center, and the LinkedIn or TikTok ad libraries where public; also check start dates, how long ads have run and how many run at once): whom and which problem they address, what outcome they promise, what the first action is, how they show cases, samples, prices and track records before sign-up, and where they resolve anxieties and adoption burden. Ads that keep running do not prove profitability.
 - Contact points easiest to test first and what to show: searching → search ads, problem articles, comparison pages with answers and outcomes / identifiable by name → targeted sales or existing connections with a sample relevant to that company / consulting experts or partners → referrals, partnerships / want an explanation or demo → videos, seminars, demos.
 
 How to judge:
@@ -764,6 +772,10 @@ Done when: you can explain where customers are, when, and through which channel 
 - comparisonArticles 競合比較記事: 購入時の比較基準
 - pricing 料金体系: 価格と提供価値の関係
 - caseStudies 導入事例: 採用理由・導入効果
+- positioning サイトのコンセプトと証明: 競合の公式サイト（トップ・サービス紹介・料金・事例・会社概要）から、①打ち出しているコンセプト（キャッチコピー・誰のどの課題か）②どう見せたいか（誰向け・何の専門家・安さ／品質／手軽さのどれで勝つと言っているか）③何で証明しているか（導入社数・実名の顧客ロゴと事例・数値の効果・受賞・認証・第三者の評価・保証・無料トライアル）を分けて書く。主張しているのに証明していないこと、どの競合も言っていないことが、差別化の候補。
+- competitorHiring 競合の求人: 競合の採用ページ・求人サイトで、採っている職種（営業・カスタマーサクセス・開発・運用）、仕事の中身・担当する顧客・数字の目標・給与水準を見る。力を入れている所と、人手で回している（自動化できていない）所の手がかり。
+- adLibrary 広告ライブラリ: Meta 広告ライブラリ（facebook.com/ads/library。Facebook・Instagram）、Google 広告透明性センター（adstransparency.google.com。検索・YouTube・ディスプレイ）、ほかに公開されていれば LinkedIn・TikTok の広告ライブラリで、競合と業務名を検索する。広告ごとに 広告主・出稿開始日と出ている期間・同時に出している数・訴求（課題／成果／価格／特典）・約束していること・ボタンの行動・飛び先のページを書く。長く出し続け、言い回しを変えて増やしている広告は、反応がある訴求の手がかり（黒字の証明ではない）。
+- socialVoice 投稿サイト・掲示板の声: X（x.com）、Reddit、5ちゃんねる、Yahoo!知恵袋、note、Qiita・Zenn、はてなブックマーク、YouTube のコメント、Threads・LinkedIn の投稿、業界の掲示板・コミュニティで、業務名・競合名・「乗り換え」「高い」「使えない」「やめた」などで探す。何と言われているか（褒め・不満・比較・価格の話・自前の回避策）を、投稿者の立場（利用者・社員・競合・紹介料を受ける人）と日付つきで1投稿1件に書く。
 それぞれ証拠を evidence/ に書き（次の ID は {{nextEvidenceId}}）、findings に証拠 ID を入れて要点を書く。
 
 - いまの選択肢を並べる: 自分で作業 / Excel や社内システム / 公的な情報・機能 / 外注 / 有料サービス / 対象業務を減らす・やめる。比較項目: 得られる成果 / 品質（抜け・誤り・古さ・確認の手間）/ 顧客の総負担（料金＋設定・確認・運用）/ 導入のしやすさ / 変えにくい理由（連携・データ・契約・習慣・社内承認）/ 選ばれている理由。
@@ -796,6 +808,10 @@ why:
     comparisonArticles: ""
     pricing: ""
     caseStudies: ""
+    positioning: E025 …（A社は「営業リストを最短1日で」と打ち出し、導入300社と実名事例3件で証明。精度の証明は無い）
+    competitorHiring: ""
+    adLibrary: E026 …（A社の Meta 広告は「リスト作成の外注費を半額に」を5か月出し続け、言い回しを4つに増やしている）
+    socialVoice: ""
   reason: 採用を始めた企業をその週に知らせ、既存の営業ツールのまま使える
   reasonEvidence: [E023, E024]
 \`\`\`
@@ -812,6 +828,10 @@ Desk research (do not just compare feature lists; find what decides purchases):
 - comparisonArticles: criteria used when comparing
 - pricing: how price relates to the value delivered
 - caseStudies: why they adopted it and what changed
+- positioning (site concept and proof): from competitors' official sites (top page, service pages, pricing, cases, company profile), write separately (1) the concept they put forward (headline, whose problem), (2) how they want to be seen (for whom, expert in what, winning on price, quality or ease), (3) what they offer as proof (number of customers, named logos and cases, measured effects, awards, certifications, third-party ratings, guarantees, free trials). Claims made without proof, and things no competitor says, are candidates for differentiation.
+- competitorHiring (competitors' job posts): on competitors' career pages and job sites, look at the roles they hire (sales, customer success, engineering, operations), the work, the customers handled, numeric targets and pay. Clues to where they invest and what they still do by hand (not automated).
+- adLibrary (ad libraries): search competitors and the work in the Meta Ad Library (facebook.com/ads/library; Facebook and Instagram), the Google Ads Transparency Center (adstransparency.google.com; search, YouTube, display), and the LinkedIn or TikTok ad libraries where public. For each ad write the advertiser, start date and how long it has run, how many run at once, the angle (problem, outcome, price, offer), what it promises, the button's action and the landing page. Ads that keep running and multiply in variations hint at angles that get a response (not proof of profit).
+- socialVoice (posts and forums): on X (x.com), Reddit, 5channel, Yahoo! Chiebukuro, note, Qiita, Zenn, Hatena Bookmark, YouTube comments, Threads and LinkedIn posts, and industry forums and communities, search the work, competitor names and words like "switched", "expensive", "useless", "quit". Record what is said (praise, complaints, comparisons, prices, home-made workarounds) one post per record, with the poster's position (user, employee, competitor, affiliate) and the date.
 Record evidence for each in evidence/ (next ID {{nextEvidenceId}}) and summarise findings with evidence IDs.
 
 - List the current options: doing it yourself / Excel or internal systems / public information and features / outsourcing / paid services / reducing or dropping the work. Compare: outcome / quality (omissions, errors, staleness, effort to check) / total burden (fee + setup, checking, operation) / ease of adoption / reasons it is hard to change (integrations, data, contracts, habits, internal approval) / why it is chosen.
@@ -844,6 +864,10 @@ why:
     comparisonArticles: ""
     pricing: ""
     caseStudies: ""
+    positioning: E025 … (A says "sales lists in one day", proven by 300 customers and three named cases; nothing proves accuracy)
+    competitorHiring: ""
+    adLibrary: E026 … (A's Meta ad "halve your list-building outsourcing cost" has run for five months, now in four variations)
+    socialVoice: ""
   reason: Tells you the same week a company starts hiring, inside the sales tools you already use
   reasonEvidence: [E023, E024]
 \`\`\`

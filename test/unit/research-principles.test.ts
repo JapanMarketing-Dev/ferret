@@ -240,9 +240,9 @@ describe('Why', () => {
     expect(find(statusOf(C({ why: { ...full.why, differentiators: [{ kind: 'magic' as never, note: '' }] } })), 'why', 'differentiator').ok).toBeNull()
   })
 
-  it('findings: 6項目のうち4つ以上', () => {
-    const fd = { ...full.why.findings, churnPosts: '', pricing: '' }
-    expect(find(statusOf(C({ why: { ...full.why, findings: fd } })), 'why', 'findings')).toMatchObject({ ok: true, params: { filled: 4 } })
+  it('findings: 10項目のうち6つ以上（サイトのコンセプトと証明・競合の求人・広告ライブラリ・投稿サイトの声を含む）', () => {
+    const fd = { ...full.why.findings, churnPosts: '', pricing: '', competitorHiring: '', socialVoice: '' }
+    expect(find(statusOf(C({ why: { ...full.why, findings: fd } })), 'why', 'findings')).toMatchObject({ ok: true, params: { filled: 6, total: 10 } })
     expect(find(statusOf(C({ why: { ...full.why, findings: { ...fd, caseStudies: '' } } })), 'why', 'findings').ok).toBeNull()
   })
 

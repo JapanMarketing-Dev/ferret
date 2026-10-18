@@ -155,6 +155,10 @@ Pay particular attention to combinations of "price", "data" and "distribution". 
 | Competitor comparison articles | Criteria used when purchasing |
 | Pricing | Relationship between price and value delivered |
 | Case studies | Reasons for adoption and effects |
+| Competitors' site concept and proof | The concept they put forward, how they want to be seen (for whom, winning on what), and what they offer as proof (customer counts, named cases, measured effects, awards, certifications, third-party ratings, guarantees). Keep claims apart from proof; claims without proof and things nobody says are candidates for differentiation |
+| Competitors' job posts | Roles, the work, customers handled, numeric targets and pay. Clues to where they invest and what they still do by hand |
+| Ad libraries (Meta Ad Library, Google Ads Transparency Center and others) | Advertiser, start date and how long it has run, how many at once, angle, promise, button action, landing page. Angles that keep running and multiply in variations hint at a response (not proof of profit) |
+| Posting sites and forums (X, Reddit, 5channel, Yahoo! Chiebukuro, note, YouTube comments, industry communities and so on) | What is said about the work and the competitors (praise, complaints, comparisons, prices, home-made workarounds). One post per record, with the poster's position and the date. Never turn a loud few into a share of the market. Do not log in to sites that require it |
 Question: what is the clear reason a customer would stop using the existing service, or newly add ours? If this is vague, it should not be built.
 
 Done when: you can explain in one sentence why a specific customer chooses our service, and that reason is backed by customers' actual reviews or behavior.

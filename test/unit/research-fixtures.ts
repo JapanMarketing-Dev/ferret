@@ -171,7 +171,7 @@ export function blankCandidate(id: string, patch: Partial<Candidate> = {}): Cand
     why: {
       switching: { expectedValue: null, adoptionCost: null, switchingRisk: null, statusQuoValue: null, coexists: null },
       differentiators: [],
-      findings: { positiveReviews: '', negativeReviews: '', churnPosts: '', comparisonArticles: '', pricing: '', caseStudies: '' },
+      findings: { positiveReviews: '', negativeReviews: '', churnPosts: '', comparisonArticles: '', pricing: '', caseStudies: '', positioning: '', competitorHiring: '', adLibrary: '', socialVoice: '' },
       reason: '',
       reasonEvidence: []
     },
@@ -244,7 +244,11 @@ export function fullCandidate(id: string, patch: Partial<Candidate> = {}): Candi
         churnPosts: '更新が遅いので解約',
         comparisonArticles: '件数と鮮度で比較',
         pricing: '月3万円〜',
-        caseStudies: '導入で商談2倍'
+        caseStudies: '導入で商談2倍',
+        positioning: 'E003: A社は「最短1日」と打ち出し、導入300社で証明',
+        competitorHiring: 'A社はカスタマーサクセスを3名募集',
+        adLibrary: 'A社の Meta 広告「外注費を半額に」を5か月',
+        socialVoice: 'X で「リストが古い」の投稿が複数'
       },
       reason: '求人が出た直後の企業だけを毎週届けるので、営業の初動が早くなる',
       reasonEvidence: ['E001']

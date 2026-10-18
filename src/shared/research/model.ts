@@ -252,14 +252,17 @@ export interface SwitchingCase {
 export const DIFFERENTIATORS = ['price', 'performance', 'convenience', 'expertise', 'data', 'distribution', 'trust'] as const
 export type Differentiator = (typeof DIFFERENTIATORS)[number]
 
-/** 機能一覧ではなく、購入を決める条件を調べる6項目 */
-export const WHY_RESEARCH_ITEMS = ['positiveReviews', 'negativeReviews', 'churnPosts', 'comparisonArticles', 'pricing', 'caseStudies'] as const
+/**
+ * 機能一覧ではなく、購入を決める条件を調べる10項目。後ろの4つは競合が自分で出しているもの（サイトの見せ方と証明・求人・広告）と、
+ * 投稿サイト・掲示板で言われていること
+ */
+export const WHY_RESEARCH_ITEMS = ['positiveReviews', 'negativeReviews', 'churnPosts', 'comparisonArticles', 'pricing', 'caseStudies', 'positioning', 'competitorHiring', 'adLibrary', 'socialVoice'] as const
 export type WhyResearchItem = (typeof WHY_RESEARCH_ITEMS)[number]
 
 export interface WhyResearch {
   switching: SwitchingCase
   differentiators: Array<{ kind: Differentiator; note: string }>
-  /** 6項目の調べた内容（証拠の ID を本文に書く） */
+  /** 10項目の調べた内容（証拠の ID を本文に書く） */
   findings: Record<WhyResearchItem, string>
   /** 自社を選ぶ理由（1文） */
   reason: string

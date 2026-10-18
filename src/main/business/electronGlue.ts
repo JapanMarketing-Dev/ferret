@@ -74,7 +74,7 @@ export function terminalSender(terminals: () => TerminalManager | null, folder: 
       const state = await manager.agentState(id).catch(() => null)
       const label = agentLabel(state?.agent ?? null) || 'Agent'
       const result = await manager.sendReview(id, text)
-      return { ok: result.ok, message: result.message, label }
+      return { ok: result.ok, message: result.message, label, ...(result.ok ? { terminalId: id } : {}) }
     }
   }
 }

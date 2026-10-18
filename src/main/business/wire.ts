@@ -18,6 +18,8 @@ import { businessHandlers, type BusinessHandlers } from './handlers'
 import { PageConfigStore } from './pages'
 import { BusinessWatcher } from './watcher'
 import { researchHandlers, type ResearchDeps, type ResearchHandlers } from '../research/handlers'
+import { KeepGoing } from '../research/keepGoing'
+import { ResearchStore } from '../research/store'
 import type { ListedProject } from './list'
 
 export interface VentureWiring {
@@ -49,6 +51,15 @@ export function ventureHandlers(w: VentureWiring): BusinessHandlers & ResearchHa
   const cipher = () => chooseKeyCipher({ isPackaged: w.isPackaged, isE2E: w.isE2E, safeStorage: w.safeStorage })
   const ledgerKey = new LedgerKeyStore(join(w.userData, 'business-approvals-key.bin'), cipher())
   const sender = terminalSender(w.terminals, w.root)
+  // 「参入先を決め切る」を、どの Agent でも決め切るまで止めない（Claude Code で Stop フックがあるフォルダはフックに任せる）
+  const keepGoing = new KeepGoing({
+    exists: (id) => w.terminals()?.list().some((s) => s.id === id) ?? false,
+    agentState: async (id) => (await w.terminals()?.agentState(id)) ?? { kind: 'unknown', state: 'unknown', agent: null },
+    screenText: (id) => w.terminals()?.screenText(id) ?? '',
+    send: async (id, text) => (await w.terminals()?.sendReview(id, text)) ?? { ok: false, message: '' },
+    check: (root, locale) => new ResearchStore({ root, locale: () => locale }).conclusionMissing(),
+    hasClaudeHook: (root) => new ResearchStore({ root }).hasClaudeHook()
+  })
   const confirm = dialogConfirm({
     window: w.window,
     showMessageBox: (win, options) => w.dialog.showMessageBox(win, options),
@@ -91,7 +102,8 @@ export function ventureHandlers(w: VentureWiring): BusinessHandlers & ResearchHa
       registerBusiness: w.registerBusiness,
       manual: w.manual,
       knowledge: w.knowledge,
-      ledger: { dir: join(w.userData, 'research-gates'), key: () => ledgerKey.key() }
+      ledger: { dir: join(w.userData, 'research-gates'), key: () => ledgerKey.key() },
+      keepGoing
     })
   }
 }

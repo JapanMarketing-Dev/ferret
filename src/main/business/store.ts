@@ -112,6 +112,8 @@ export interface SendOutcome {
   message: string
   /** 送り先の名前（履歴に残す。例: Claude Code） */
   label: string
+  /** 送ったターミナル（送れたとき。「参入先を決め切る」の見張りに使う） */
+  terminalId?: string
 }
 
 /** Agent へ送る（index.ts では TerminalManager の resolveSendTarget・sendReview。bracketed paste のあと Enter） */

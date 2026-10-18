@@ -636,7 +636,7 @@ const CANDIDATE_FIELDS: readonly FieldRow[] = [
   ['why.switching.expectedValue / adoptionCost / switchingRisk / statusQuoValue', '乗り換えの式（年額・円）: 期待価値 − 導入負担 − 乗り換えリスク ＞ 現状維持の価値', 'Switching formula (JPY per year): expected value − adoption cost − switching risk > value of status quo', 'agent'],
   ['why.switching.coexists', '既存サービスと併用でき導入作業がほぼ要らないか（true / false / null）', 'Can coexist with the current service with almost no setup (true / false / null)', 'agent'],
   ['why.differentiators[].kind / note', `差別化（${values(DIFFERENTIATORS)}）`, `Differentiation (${values(DIFFERENTIATORS)})`, 'agent'],
-  [`why.findings.<${WHY_RESEARCH_ITEMS.join('|')}>`, '購入を決める条件の6項目の調べた内容（証拠の ID を本文に書く）', 'What you found for the six purchase-decision items (cite evidence IDs)', 'agent'],
+  [`why.findings.<${WHY_RESEARCH_ITEMS.join('|')}>`, `購入を決める条件の${WHY_RESEARCH_ITEMS.length}項目の調べた内容（証拠の ID を本文に書く）`, `What you found for the ${WHY_RESEARCH_ITEMS.length} purchase-decision items (cite evidence IDs)`, 'agent'],
   ['why.reason', '自社を選ぶ理由（1文）', 'Why they would choose us (one sentence)', 'agent'],
   ['why.reasonEvidence', 'その理由の裏付けの証拠 ID（顧客の実際の評価や行動）', 'Evidence IDs backing the reason (actual customer reviews or behavior)', 'agent'],
   ['how.monthlyPrice / marginRate', '月額の売上（円/社）・限界利益率（0〜1）', 'Monthly revenue (JPY per company), contribution margin (0–1)', 'agent'],

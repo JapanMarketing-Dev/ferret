@@ -45,8 +45,8 @@ export interface PrincipleStatus {
 export const COVERAGE_RATIO = 0.8
 /** 需要の5要素のうち、点が付いているべき数 */
 export const MIN_DEMAND_FACTORS = 4
-/** Why の調べる6項目のうち、埋まっているべき数 */
-export const MIN_WHY_FINDINGS = 4
+/** Why の調べる10項目のうち、埋まっているべき数 */
+export const MIN_WHY_FINDINGS = 6
 /** 感度分析に要る継続月数の仮定の数 */
 export const MIN_RETENTION_SCENARIOS = 2
 /** LTV/CAC の目安（economics.ts の ltvSensitivity の既定と同じ） */

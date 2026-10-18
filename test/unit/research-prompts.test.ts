@@ -313,6 +313,34 @@ describe('雛形の YAML が model の形に合う', () => {
   })
 })
 
+describe('競合が自分で出しているもの・市場の声', () => {
+  it('ja: Why に サイトのコンセプトと証明・競合の求人・広告ライブラリ・投稿サイトと掲示板 が入り、雛形に4つの欄がある', () => {
+    const t = researchPromptTemplate('why', 'ja')
+    for (const s of ['どう見せたいか', '何で証明しているか', '主張しているのに証明していないこと', '競合の採用ページ', 'facebook.com/ads/library', 'adstransparency.google.com', '出稿開始日', 'x.com', '5ちゃんねる', 'Yahoo!知恵袋', '投稿者の立場']) expect(t).toContain(s)
+    const why = parseYaml(yamlBlocks(t)[0]!) as { why: { findings: Record<string, string> } }
+    for (const k of ['positioning', 'competitorHiring', 'adLibrary', 'socialVoice']) expect(Object.keys(why.why.findings)).toContain(k)
+  })
+
+  it('en: the same sources', () => {
+    const t = researchPromptTemplate('why', 'en')
+    for (const s of ['how they want to be seen', 'what they offer as proof', "competitors' career pages", 'Meta Ad Library', 'Google Ads Transparency Center', 'x.com', 'Reddit']) expect(t).toContain(s)
+  })
+
+  it('Where・What・候補を出す にも、広告ライブラリと投稿サイト・掲示板が入る', () => {
+    expect(researchPromptTemplate('where', 'ja')).toContain('Meta 広告ライブラリ')
+    expect(researchPromptTemplate('what', 'ja')).toContain('X（x.com）')
+    expect(researchPromptTemplate('discover', 'ja')).toContain('Google 広告透明性センター')
+  })
+
+  it.each(LOCALES)('%s: 守ることに、主張と証明・広告は売れている証明ではない・1投稿1件・ログインしない の読み方がある', (locale) => {
+    const r = researchAgentRules(locale)
+    const want = locale === 'ja'
+      ? ['言っているだけの「主張」', '売れている・黒字の証明ではない', '1投稿1件', 'ログインしない', 'site:x.com']
+      : ['mere "claims"', 'not that it sells or makes a profit', 'one record per post', 'Do not log in', 'site:x.com']
+    for (const s of want) expect(r).toContain(s)
+  })
+})
+
 describe('参入先を決め切る（decide）', () => {
   it.each(LOCALES)('%s: 候補なしで穴が残らず、どの記録の状態でも送れる', (locale) => {
     for (const data of [emptyData(), fullData()]) expect(buildResearchPrompt('decide', data, null, locale).missing).toEqual([])

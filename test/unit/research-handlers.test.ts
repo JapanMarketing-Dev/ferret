@@ -175,6 +175,27 @@ describe('送る許可の札', () => {
     expect(await send({ ...req, target: { kind: 'terminal', id: 't1' }, ticket })).toMatchObject({ ok: true })
   })
 
+  it('「参入先を決め切る」を送れたときだけ、送ったターミナルの見張りを始める（ほかの依頼・送れなかったときは始めない）', async () => {
+    const jobs: unknown[] = []
+    let ok = true
+    h = makeHandlers({
+      sender: { send: async () => ({ ok, message: ok ? '送りました' : 'いません', label: 'Hermes Agent', ...(ok ? { terminalId: 't7' } : {}) }) },
+      keepGoing: { start: (job) => { jobs.push(job) } }
+    })
+    const sendAs = async (promptId: string) => {
+      const r = { ...req, promptId }
+      const { ticket } = await call<{ ticket: string }>('research:armSend', { promptId, textHash: sha(r.text), target: r.target })
+      return send({ ...r, ticket })
+    }
+    await sendAs('who')
+    expect(jobs).toEqual([])
+    await sendAs('decide')
+    expect(jobs).toEqual([{ terminalId: 't7', root, locale: 'ja' }])
+    ok = false
+    await sendAs('decide')
+    expect(jobs).toHaveLength(1)
+  })
+
   it('60 秒を過ぎた札は使えない（境界: ちょうど 60 秒はまだ使える）', async () => {
     const t1 = (await arm()).ticket
     clock += SEND_TICKET_MS

@@ -137,3 +137,57 @@ export function mergeStopHookSettings(current: string | null): string | null {
   const next = { ...settings, hooks: { ...(hooks as Record<string, unknown>), Stop: [...stop, { hooks: [{ type: 'command', command: STOP_HOOK_COMMAND, timeout: 30 }] }] } }
   return `${JSON.stringify(next, null, 2)}\n`
 }
+
+/** 結論の判定に使う記録（ファイルから読んだ生の値） */
+export interface ConclusionInput {
+  /** conclusion.md の中身（無ければ null） */
+  conclusion: string | null
+  candidates: ReadonlyArray<{ id: string; stage: string | null }>
+  experimentIds: readonly string[]
+}
+
+const sectionsOf = (text: string): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const part of text.split(/^## /m).slice(1)) {
+    const nl = part.indexOf('\n')
+    out[(nl < 0 ? part : part.slice(0, nl)).trim()] = nl < 0 ? '' : part.slice(nl + 1)
+  }
+  return out
+}
+const sectionOf = (all: Record<string, string>, names: readonly string[]): string | null => {
+  const key = Object.keys(all).find((k) => names.some((n) => k.startsWith(n)))
+  return key === undefined ? null : all[key]!
+}
+
+/**
+ * conclusion.md が「決め切った」の形を満たすか。足りないものを並べる（空なら決め切った）。
+ * Claude Code の Stop フックのスクリプト（stopHookScript）と同じ判定。どの Agent でも Ferret がこれで続けさせるかを決める
+ */
+export function conclusionMissing(input: ConclusionInput, locale: 'ja' | 'en'): string[] {
+  const t = (ja: string, en: string) => (locale === 'en' ? en : ja)
+  const text = input.conclusion
+  if (text === null) return [t('conclusion.md がまだ無い（参入先の結論を書く）', 'conclusion.md does not exist yet (write the entry decision)')]
+  const out: string[] = []
+  if (!/^(状態|Status)\s*[:：]\s*(決め切った|decided)/im.test(text)) out.push(t('「状態: 決め切った」になっていない（6つの条件を満たしたら書く）', 'the status is not "Status: decided" (write it once all six conditions hold)'))
+  const all = sectionsOf(text)
+  const entry = sectionOf(all, ['参入先', 'Where to enter'])
+  const firstLine = (entry ?? '').split('\n').map((l) => l.trim()).find((l) => l) ?? ''
+  const entryIds = [...new Set(firstLine.match(/\bC\d{2,4}\b/g) ?? [])]
+  if (entryIds.length !== 1) out.push(t('「## 参入先」の最初の行に候補の ID が1つだけ無い（「A か B」にしない）', 'the first line under "## Where to enter" does not name exactly one candidate ID (never "A or B")'))
+  const absent = input.candidates.filter((c) => c.stage !== 'dropped').map((c) => c.id).filter((id) => !new RegExp(`\\b${id}\\b`).test(text))
+  if (absent.length) out.push(t(`選ばなかった理由が無い候補: ${absent.join(', ')}`, `candidates with no reason for not choosing them: ${absent.join(', ')}`))
+  const experiments = new Set(input.experimentIds)
+  const named = [...new Set(text.match(/\bX\d{2,4}\b/g) ?? [])]
+  if (!named.some((id) => experiments.has(id))) out.push(t('最初の実験（experiments/ に status: planned で設計した X???）が conclusion.md に無い', 'no first experiment (an X??? designed in experiments/ with status: planned) in conclusion.md'))
+  if (!/(第2候補|runner-up)[^\n]*\bC\d{2,4}\b/i.test(text)) out.push(t('不合格のときの第2候補（C???）が無い', 'no runner-up candidate (C???) for when the experiment fails'))
+  const people = sectionOf(all, ['人が決めること', 'What people decide'])
+  if (people === null || !/^\s*- \[[ xX]\]/m.test(people)) out.push(t('「## 人が決めること」のチェックリスト（- [ ] …）が無い', 'no checklist (- [ ] …) under "## What people decide"'))
+  return out
+}
+
+/** 続けさせるときに Agent へ送る文（Claude Code の Stop フックの reason と同じ中身） */
+export function continueMessage(missing: readonly string[], count: number, max: number, locale: 'ja' | 'en'): string {
+  return locale === 'en'
+    ? `Do not stop yet. Keep going until the entry is settled (${count}/${max}). Missing in conclusion.md:\n- ${missing.join('\n- ')}\nResearch the biggest uncertainty that could change the conclusion and rewrite conclusion.md. Do not ask people or report progress; continue until the done conditions (.research/README.md) hold.`
+    : `まだ止まらない。参入先を決め切るまで続ける（${count}/${max}）。conclusion.md に足りないもの:\n- ${missing.join('\n- ')}\n結論を変えうるいちばん大きな不確かさから調べ、conclusion.md を書き直す。人に確認・中間報告をせず、決め切った条件（.research/README.md）を満たすまで続ける。`
+}
