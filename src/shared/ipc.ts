@@ -431,6 +431,9 @@ export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, Rese
   'settings:onboarding': (patch: OnboardingPatch) => OnboardingState | null
   /** Ferret の設定を変える skill（Claude Code・Codex）を入れてあるか */
   'agentSkill:status': () => AgentSkillStatus[]
+  /** 使っている人の状況（ビジネスリサーチ・ビジネスの前提。@shared/founderProfile） */
+  'profile:get': () => { text: string }
+  'profile:set': (text: string) => { text: string }
   /** skill を入れる・書き直す（押した直後だけ）。agents を省くと使っている Agent すべて */
   'agentSkill:install': (agents?: AgentSkillAgent[]) => AgentSkillStatus[]
   /** マイク・画面収録の OS の許可の状態（読むだけで確認のダイアログは出さない） */
@@ -835,7 +838,7 @@ export const IPC_REQUEST_CHANNELS = [
   'settings:locale',
   'settings:crashReports', 'telemetry:state', 'telemetry:noticeShown',
   'remote:state', 'remote:set', 'remote:resetToken',
-  'settings:onboarding', 'agentSkill:status', 'agentSkill:install', 'permissions:status', 'permissions:request',
+  'settings:onboarding', 'agentSkill:status', 'agentSkill:install', 'profile:get', 'profile:set', 'permissions:status', 'permissions:request',
   'recording:start',
   'recording:pause',
   'recording:resume',

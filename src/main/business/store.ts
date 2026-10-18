@@ -150,6 +150,8 @@ export interface StoreDeps {
   loadBudgetBytes?: number
   /** いまの実験ページの接続先の origin（公開の承認を結び付ける）。省略時は未設定 */
   pageOrigin?: () => Promise<string>
+  /** 使っている人の状況（Ferret の「あなたの状況」。context.md に入れる） */
+  founder?: () => Promise<string>
 }
 
 // ---- 小さな道具 ----
@@ -276,6 +278,7 @@ export class BusinessStore {
   private readonly confirm: ConfirmFn
   private readonly loadBudget: number
   private readonly pageOrigin: () => Promise<string>
+  private readonly founder: () => Promise<string>
   private queue: Promise<unknown> = Promise.resolve()
 
   constructor(deps: StoreDeps) {
@@ -286,6 +289,7 @@ export class BusinessStore {
     this.confirm = deps.confirm ?? (async () => false)
     this.loadBudget = deps.loadBudgetBytes ?? LIMITS.loadBytes
     this.pageOrigin = deps.pageOrigin ?? (async () => '')
+    this.founder = deps.founder ?? (async () => '')
   }
 
   get root(): string {
@@ -547,7 +551,7 @@ export class BusinessStore {
       for (const file of AGENT_FILES) await this.upsertAgentFile(file)
       await ensureBusinessGitExclude(this.fs)
       const loaded = await this.loadAll()
-      await this.fs.write(CONTEXT_FILE, contextMarkdown(loaded.data, now.toISOString()))
+      await this.fs.write(CONTEXT_FILE, contextMarkdown(loaded.data, now.toISOString(), await this.founder().catch(() => '')))
       return this.snapshotOf(loaded)
     })
   }
@@ -763,7 +767,7 @@ export class BusinessStore {
       // 守ること（AGENT_RULES）は main が付ける。画面から来た本文の末尾に無ければ足す（消して送れない）
       const rules = fillPrompt(AGENT_RULES, promptValues(loaded.data)).text
       const body = r.text.trimEnd().endsWith(rules) ? r.text : `${r.text.trimEnd()}\n\n${rules}`
-      await this.fs.write(CONTEXT_FILE, contextMarkdown(loaded.data, now.toISOString()))
+      await this.fs.write(CONTEXT_FILE, contextMarkdown(loaded.data, now.toISOString(), await this.founder().catch(() => '')))
       let outcome: SendOutcome
       try {
         outcome = await sender.send(target, body)

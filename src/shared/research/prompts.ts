@@ -37,6 +37,7 @@ export function researchAgentRules(locale: ResearchLocale): string {
     locale,
     `守ること:
 - ${researchGoal(locale)}
+- 使っている人の状況（${RESEARCH_CONTEXT_FILE} の「使っている人の状況」。経験・今のビジネス・持っている資産・使える時間とお金・目標・やらないこと）を前提に調べる。その経験・今のビジネス・資産が強みになる市場を優先し、使える時間とお金・やらないことに合わない候補は理由を書いて下げる。未記入なら、合い方は分からないものとして結論の不確かさに書く。
 - 最初に ${RESEARCH_CONTEXT_FILE} を読む。記録の形式は ${RESEARCH_README_FILE}、調べ方と判定の基準は ${RESEARCH_KNOWLEDGE_FILE}（集客の5原則）に従う。
 - 書いてよいのは ${RESEARCH_CONCLUSION_FILE}（参入先の結論）、candidates/、evidence/、experiments/（status: planned の設計だけ）。research.yaml・.research/・principles/ は変えない。既存の記録は消さない。
 - 人だけが決める欄は書かない・変えない: 候補の stage・gates（G1〜G7。pass も fail も書かない）・dropReason・promotedTo・who.conditions・decision（次の行動）・execution の confirmed、実験の status・metrics（実測）・interviews。ゲート・段階・除外・次の行動の意見は候補の本文に「提案」として理由つきで書く（conditions の status は提案として書いてよい。人が直す）。
@@ -63,6 +64,7 @@ export function researchAgentRules(locale: ResearchLocale): string {
 - ID は context.md の「次の ID」から順に使い、使い回さない。`,
     `Rules:
 - ${researchGoal(locale)}
+- Research from the person's situation ("About the person using Ferret" in ${RESEARCH_CONTEXT_FILE}: experience, current business, assets, time and money, goal, will-not-do). Prefer markets where that experience, business and those assets give an edge; rank down candidates that do not fit the time, money or constraints, with the reason. If it is not written, treat the fit as unknown and list it as an uncertainty in the conclusion.
 - First read ${RESEARCH_CONTEXT_FILE}. Follow ${RESEARCH_README_FILE} for the record format and ${RESEARCH_KNOWLEDGE_FILE} (the five principles of customer acquisition) for how to research and judge.
 - You may write only ${RESEARCH_CONCLUSION_FILE} (the entry decision), candidates/, evidence/, and experiments/ (designs with status: planned). Do not change research.yaml, .research/, or principles/. Never delete existing records.
 - Never write or change fields only people decide: candidate stage, gates (G1–G7; write neither pass nor fail), dropReason, promotedTo, who.conditions, decision (next action), execution confirmed; experiment status, metrics (measurements), interviews. Put opinions about gates, stages, dropping or the next action in the candidate body as a "Proposal" with reasons (you may write a conditions status as a proposal; people correct it).
@@ -260,6 +262,7 @@ C??? 題名 — どんな企業の誰が、何が起きたとき、何に、い�
 | | C???（参入先） | C??? | C??? |
 |---|---|---|---|
 | 勝負を分けた点 | | | |
+| 使っている人の状況との合い方（経験・今のビジネス・資産） | | | |
 | 支出・不満の証拠 | | | |
 | 接触のしやすさ | | | |
 | 経済性 | | | |
@@ -308,6 +311,7 @@ C??? title — who at what kind of company pays how much for what, when what hap
 | | C??? (entry) | C??? | C??? |
 |---|---|---|---|
 | What decided it | | | |
+| Fit with the person (experience, current business, assets) | | | |
 | Spending and complaint evidence | | | |
 | Reachability | | | |
 | Economics | | | |
@@ -338,6 +342,7 @@ In your final reply, write only "Where to enter", "Why" and "The first experimen
 ネット調査:
 - 既存の支出を探す: 発注サイト・入札（予算付きの募集）、既存サービスの料金ページと導入事例、外注・代行の募集、求人（業務を人で回している証拠）。
 - 不満を探す: 製品レビューの低評価、比較記事、解約の投稿、Q&A・掲示板・SNS（X・Reddit・5ちゃんねる・Yahoo!知恵袋・note など）。
+- 使っている人の状況（context.md）から近い市場も探す: 今の顧客の隣の困りごと、今の販路・人脈で届く相手、経験のある業界の業務。
 - 広告を出してまで売っている業務を探す: Meta 広告ライブラリ・Google 広告透明性センターで業務名を検索し、長く出ている広告の広告主と訴求を見る（売り手が集客にお金を使っている市場の手がかり）。
 - いまある候補（{{candidateCount}} 件）と重ならないものだけ。
 
@@ -380,6 +385,7 @@ Mindset: work backwards from "how can we keep acquiring customers", not "what ca
 Desk research:
 - Find existing spending: procurement and tender sites (budgeted calls), pricing pages and case studies of existing services, outsourcing requests, job posts (proof the work is done by people).
 - Find complaints: low-rated product reviews, comparison articles, posts about cancelling, Q&A sites, forums, social media (X, Reddit, 5channel, Yahoo! Chiebukuro, note and so on).
+- Also look near the person's situation (context.md): problems next to their current customers, buyers reachable through their channels and network, work in industries they know.
 - Find work that sellers pay to advertise: search the work in the Meta Ad Library and the Google Ads Transparency Center and look at the advertisers and angles of long-running ads (a sign of a market where sellers spend on acquisition).
 - Only candidates that do not overlap the existing {{candidateCount}}.
 

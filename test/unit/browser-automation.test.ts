@@ -103,7 +103,8 @@ describe('LLM の中継（API で動かす browser-use の Agent）', () => {
   })
 })
 
-describe('ferret-browser の入口（POSIX）', () => {
+// POSIX の sh の台本なので、Windows では動かさない（Windows は .cmd の入口）
+describe.skipIf(process.platform === 'win32')('ferret-browser の入口（POSIX）', () => {
   let dir: string
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ferret-browser-bin-')) })
   afterEach(() => rmSync(dir, { recursive: true, force: true }))

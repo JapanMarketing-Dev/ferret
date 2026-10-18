@@ -1527,3 +1527,9 @@
 .rs-mode__file[data-active='true'] {
   background: var(--color-bg-elevated);
 }
+
+/* あなたの状況（帯の右端に寄せる） */
+.rs-mode__profile {
+  margin-left: auto;
+  flex: none;
+}

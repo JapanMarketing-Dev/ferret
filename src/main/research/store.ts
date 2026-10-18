@@ -104,6 +104,8 @@ export interface ResearchStoreDeps {
   ledger?: ApprovalLedger
   /** 一度の読み込みで読む合計のバイト数（テストで小さくする） */
   loadBudgetBytes?: number
+  /** 使っている人の状況（Ferret の「あなたの状況」。context.md に入れる） */
+  founder?: () => Promise<string>
 }
 
 // ---- 小さな道具 ----
@@ -204,6 +206,7 @@ export class ResearchStore {
   private readonly locale: () => Locale
   private readonly knowledge: string
   private readonly ledger: ApprovalLedger
+  private readonly founder: () => Promise<string>
   private readonly loadBudget: number
   private queue: Promise<unknown> = Promise.resolve()
 
@@ -214,6 +217,7 @@ export class ResearchStore {
     this.knowledge = deps.knowledge ?? ''
     this.ledger = deps.ledger ?? new MemoryApprovalLedger()
     this.loadBudget = deps.loadBudgetBytes ?? LIMITS.loadBytes
+    this.founder = deps.founder ?? (async () => '')
   }
 
   get root(): string {
@@ -455,7 +459,8 @@ export class ResearchStore {
   }
 
   private async writeContext(data: ResearchData, now: Date): Promise<void> {
-    await this.fs.write(RESEARCH_CONTEXT_FILE, researchContextMarkdown(data, now.toISOString(), this.locale()))
+    const founder = await this.founder().catch(() => '')
+    await this.fs.write(RESEARCH_CONTEXT_FILE, researchContextMarkdown(data, now.toISOString(), this.locale(), founder))
   }
 
   /** アプリが書くファイル。無ければ作り、印があって中身が違えば書き直す。印の無い（人が書いた）ファイルは触らない */

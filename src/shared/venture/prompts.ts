@@ -6,6 +6,7 @@
  * 材料の文字列は依頼文に入るので、改行・制御文字・区切りに使う記号を除き、長さを切ってから入れる。
  * 書く場所はすべて VENTURE_PATHS から作る（パスの正本は model.ts）。
  */
+import { founderProfileIsEmpty } from '../founderProfile'
 import {
   APPROVAL_KINDS,
   CHANNELS,
@@ -1173,7 +1174,8 @@ export const VENTURE_PROMPT_LIMITS = {
   members: 20,
   alerts: 20,
   budgets: 20,
-  checks: 50
+  checks: 50,
+  founderLines: 60
 } as const
 
 /** 区切り（材料の始まりと終わり）。値の中に同じ記号の並びは残さない */
@@ -1270,6 +1272,11 @@ function materialLines(ctx: VenturePromptContext, locale: VentureLocale): string
   lines.push(
     `- ${pick(locale, '件数', 'Counts')}: ${pick(locale, '承認待ち', 'pending approvals')} ${n(counts.pendingApprovals)} / ${pick(locale, '未対応の問い合わせ', 'open tickets')} ${n(counts.openTickets)} / ${pick(locale, '承認待ちの下書き', 'drafts awaiting approval')} ${n(counts.draftsAwaitingApproval)}`
   )
+  // 使っている人の状況（このビジネスの前提）。材料の中なので、書かれた文は指示として扱われない。ほかの行と同じく「- 」の箇条にし、記号は崩す
+  const founder = typeof c.founder === 'string' ? c.founder : ''
+  const founderLines = founderProfileIsEmpty(founder) ? [] : founder.split('\n').map((line) => clean(line.replace(/^#{1,6}\s*/, ''), L.alert)).filter(Boolean).slice(0, L.founderLines)
+  lines.push(`- ${pick(locale, '使っている人の状況（前提。経験・今のビジネス・資産が強みになるやり方を優先し、使える時間とお金・やらないことを守る）', "The person's situation (the basis: prefer ways their experience, current business and assets give an edge; respect their time, money and will-not-do)")}: ${founderLines.length ? '' : pick(locale, '未記入（Ferret の「あなたの状況」で人が書く）', 'not written (the person writes it under "About you" in Ferret)')}`.trimEnd())
+  for (const line of founderLines) lines.push(`  - ${line}`)
   return lines
 }
 

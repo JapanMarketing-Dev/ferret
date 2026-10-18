@@ -6,8 +6,10 @@ import { STEPS, stepById, type BusinessData } from './model'
 import { judge, moneyLabel, cac } from './experiment'
 import { summarize, currentHypothesis } from './steps'
 import { validateBusiness } from './rules'
+import { founderSection } from '../founderProfile'
 
-export function contextMarkdown(data: BusinessData, now: string): string {
+/** founder は使っている人の状況（@shared/founderProfile。空なら「未記入」と書く） */
+export function contextMarkdown(data: BusinessData, now: string, founder = ''): string {
   const s = summarize(data)
   const step = stepById(s.step)
   const h = currentHypothesis(data)
@@ -39,6 +41,7 @@ export function contextMarkdown(data: BusinessData, now: string): string {
     `- 記録の数: 仮説 ${s.counts.hypotheses}、証拠 ${s.counts.evidence}（読了 ${s.counts.readEvidence}）、代替 ${s.counts.alternatives}、聞き取り ${s.counts.interviews}、実験 ${s.counts.experiments}`,
     `- 人の承認待ち: ${s.counts.pendingApprovals} 件`,
     '',
+    ...founderSection(founder, 'ja'),
     '## このステップの出口条件',
     '',
     `${step.exit}（手法.md ${step.method}）`,

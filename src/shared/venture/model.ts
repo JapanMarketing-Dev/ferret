@@ -471,6 +471,8 @@ export interface VenturePromptContext {
   checks: CheckItem[]
   /** 返信待ち・承認待ちなどの件数 */
   counts: { pendingApprovals: number; openTickets: number; draftsAwaitingApproval: number }
+  /** 使っている人の状況（Ferret の「あなたの状況」。@shared/founderProfile） */
+  founder?: string
 }
 
 // ---------------------------------------------------------------- まとめ（summarize.ts の入口と出口）

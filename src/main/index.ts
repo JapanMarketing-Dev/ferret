@@ -712,9 +712,21 @@ function registerVentureProject(folder: string, patch: Partial<Project>): Projec
 /**
  * ビジネス（src/main/venture/）が使う Ferret 本体の口。フォルダの登録・オーケストラにする・開くはここだけで行う
  */
+/** 使っている人の状況（ビジネスリサーチ・ビジネスの前提。userData/founder-profile.md。src/main/founderProfile.ts） */
+let founderProfileStore: import('./founderProfile').FounderProfileStore | null = null
+async function founderProfile(): Promise<import('./founderProfile').FounderProfileStore> {
+  if (!founderProfileStore) {
+    const { FounderProfileStore } = await import('./founderProfile')
+    founderProfileStore = new FounderProfileStore(join(app.getPath('userData'), 'founder-profile.md'))
+  }
+  return founderProfileStore
+}
+const founderText = async (): Promise<string> => (await founderProfile()).get()
+
 function ventureWiring(): VentureOpsWiring {
   return {
     userData: app.getPath('userData'),
+    founder: founderText,
     isPackaged: IS_PACKAGED,
     isE2E: IS_E2E,
     safeStorage,
@@ -2154,6 +2166,7 @@ function registerIpc(): void {
       locale: guideLanguage,
       manual: businessManual,
       knowledge: guideLanguage() === 'en' ? researchKnowledgeEn : researchKnowledge,
+      founder: founderText,
       registerResearch: (folder) => {
         assertNotRecording()
         const project = registerVentureProject(folder, { research: true })
@@ -2807,6 +2820,9 @@ function registerIpc(): void {
       return (await mobileRemoteService()).resetToken()
     },
     'agentSkill:status': async () => (await import('./agentSkill')).agentSkillStatus(agentSkillContext()),
+    // 使っている人の状況（ビジネスリサーチ・ビジネスの前提）。画面の「あなたの状況」で読み書きする
+    'profile:get': async () => ({ text: await founderText() }),
+    'profile:set': async (text) => ({ text: await (await founderProfile()).set(text) }),
     'agentSkill:install': async (agents) => {
       // Agent の設定のフォルダへ書くので、利用者が押した直後だけ
       if (!gestures.consume('choice')) throw new UserFacingError(t('errors.needsUserAction'))

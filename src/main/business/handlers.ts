@@ -27,6 +27,8 @@ export interface BusinessDeps {
   confirm: ConfirmFn
   /** 人の判断の正本を置くフォルダ（userData/business-approvals）と HMAC の鍵。省略時は起動中だけ */
   ledger?: { dir: string; key: () => Promise<Buffer> }
+  /** 使っている人の状況（Ferret の「あなたの状況」）。context.md に入れる */
+  founder?: () => Promise<string>
 }
 
 export { SEND_TICKET_MS } from './sendPass'
@@ -49,7 +51,7 @@ export function businessHandlers(deps: BusinessDeps): BusinessHandlers {
     const root = deps.root()
     if (!root) throw new UserFacingError('プロジェクトのフォルダを開いてください。')
     if (!cached || cached.root !== root) {
-      cached = new BusinessStore({ root, manual: deps.manual, ledger: ledgerFor(root), confirm: deps.confirm, pageOrigin: async () => originOf(await deps.pages.endpoint()), ...(deps.now ? { now: deps.now } : {}) })
+      cached = new BusinessStore({ root, manual: deps.manual, ledger: ledgerFor(root), confirm: deps.confirm, pageOrigin: async () => originOf(await deps.pages.endpoint()), ...(deps.founder ? { founder: deps.founder } : {}), ...(deps.now ? { now: deps.now } : {}) })
     }
     return cached
   }

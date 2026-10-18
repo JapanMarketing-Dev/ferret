@@ -44,6 +44,8 @@ export interface ResearchDeps {
   knowledge: string
   /** ゲートの人の判断の正本を置くフォルダ（userData/research-gates）と HMAC の鍵。省略時は起動中だけ */
   ledger?: { dir: string; key: () => Promise<Buffer> }
+  /** 使っている人の状況（Ferret の「あなたの状況」）。リサーチの前提として context.md に入れる */
+  founder?: () => Promise<string>
   /** 「参入先を決め切る」を送ったターミナルを、決め切るまで止めない見張り（keepGoing.ts。どの Agent でも） */
   keepGoing?: { start(job: KeepGoingJob): unknown }
 }
@@ -113,7 +115,7 @@ export function researchHandlers(deps: ResearchDeps): ResearchHandlers {
   }
   const storeFor = (root: string): ResearchStore => {
     if (!cached || cached.root !== root) {
-      cached = new ResearchStore({ root, locale: deps.locale, knowledge: deps.knowledge, ledger: ledgerFor(root), ...(deps.now ? { now: deps.now } : {}) })
+      cached = new ResearchStore({ root, locale: deps.locale, knowledge: deps.knowledge, ledger: ledgerFor(root), ...(deps.founder ? { founder: deps.founder } : {}), ...(deps.now ? { now: deps.now } : {}) })
     }
     return cached
   }

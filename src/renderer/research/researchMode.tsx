@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { FileText, FolderPlus, Plus, Search, X } from 'lucide-react'
+import { FileText, FolderPlus, Plus, Search, UserRound, X } from 'lucide-react'
 import type { AppMode, ProjectsState, WorkspaceState } from '@shared/types'
 import { Button, EmptyState, ErrorBoundary, IconButton, useToast } from '../ui'
 import { errorMessage } from '../lib/errors'
 import { useT } from '../lib/i18n'
 import { latestResearchProject, researchProjects } from '../lib/businessShell'
 import { ResearchWorkspace } from './ResearchWorkspace'
+import { FounderProfileModal } from './Modals'
 
 /**
  * 上のモード切替（エディタ・フィードバック・ビジネスリサーチ）の「ビジネスリサーチ」。選んだときだけ中央にリサーチの画面を出す。
@@ -100,6 +101,7 @@ export function ResearchModeView({ projects, workspace, onOpenProject, files }: 
   const current = list.find((p) => p.id === workspace.projectId) ?? null
   const run = (task: () => Promise<unknown>) => { void task().catch((err: unknown) => toast({ tone: 'danger', message: errorMessage(err) })) }
   const add = () => run(() => window.ade.invoke('research:addProject'))
+  const [profileOpen, setProfileOpen] = useState(false)
   const fileTabs = files?.tabs ?? []
   const showingFile = files?.activeId != null && fileTabs.some((f) => f.id === files.activeId)
   return (
@@ -113,6 +115,9 @@ export function ResearchModeView({ projects, workspace, onOpenProject, files }: 
             </button>
           ))}
           {list.length > 0 && <IconButton size="sm" label={t('research.sidebar.add')} title={t('research.sidebar.add')} icon={<Plus size={14} strokeWidth={1.5} />} onClick={add} data-testid="research-mode-add" />}
+          <button type="button" className="rs-mode__folder rs-mode__profile" title={t('research.profile.title')} onClick={() => setProfileOpen(true)} data-testid="research-mode-profile">
+            <UserRound size={12} strokeWidth={1.75} /><span>{t('research.profile.button')}</span>
+          </button>
           {fileTabs.length > 0 && <span className="rs-mode__sep" aria-hidden="true" />}
           {fileTabs.map((f) => (
             <span key={f.id} className="rs-mode__file" data-active={f.id === files?.activeId ? 'true' : undefined}>
@@ -125,6 +130,7 @@ export function ResearchModeView({ projects, workspace, onOpenProject, files }: 
           ))}
         </div>
       )}
+      {profileOpen && <FounderProfileModal onClose={() => setProfileOpen(false)} />}
       <div className="rs-mode__body">
         {showingFile ? (
           files?.view

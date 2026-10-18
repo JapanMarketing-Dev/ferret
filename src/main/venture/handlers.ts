@@ -417,7 +417,8 @@ export function ventureHandlers(deps: VentureHandlerDeps): VentureOpsHandlers {
       const { store } = await venture()
       const loaded = await store.loadFull(lastPeriod, localDate(now()))
       const locale = w.locale()
-      return { id, text: renderVenturePrompt(id, promptContext(loaded, locale), locale) }
+      const founder = (await w.founder?.().catch(() => '')) ?? ''
+      return { id, text: renderVenturePrompt(id, { ...promptContext(loaded, locale), founder }, locale) }
     },
 
     'venture:armSend': async (raw) => {

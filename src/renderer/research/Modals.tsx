@@ -6,11 +6,12 @@ import { canPromote } from '@shared/research/gates'
 import { orchestraList } from '@shared/orchestras'
 import type { Project } from '@shared/types'
 import { errorMessage } from '../lib/errors'
-import { useT } from '../lib/i18n'
+import { useLocale, useT } from '../lib/i18n'
 import { Badge, Button, Modal, useToast } from '../ui'
 import { useResearchApi } from './api'
 import { NumField, Txt } from './fields'
 import { folderNameFrom, folderNameIssue } from './view'
+import { FOUNDER_PROFILE_MAX, founderProfileIsEmpty, founderProfileTemplate } from '@shared/founderProfile'
 
 function RsModal({ label, children, testId, onClose, foot }: { label: string; children: ReactNode; testId: string; onClose: () => void; foot: ReactNode }) {
   return (
@@ -248,6 +249,51 @@ export function UnsavedModal({ id, onChoose }: { id: string; onChoose: (choice: 
       foot={<><Button variant="ghost" onClick={() => onChoose('cancel')}>{t('research.ws.cancel')}</Button><Button variant="danger" onClick={() => onChoose('discard')} data-testid="research-unsaved-discard">{t('research.unsaved.discard')}</Button><Button variant="primary" onClick={() => onChoose('save')} data-testid="research-unsaved-save">{t('research.ws.save')}</Button></>}
     >
       <p>{t('research.unsaved.body', { id })}</p>
+    </RsModal>
+  )
+}
+
+/**
+ * あなたの状況（使っている人の経験・今のビジネス・資産・時間とお金・目標・やらないこと）。すべてのリサーチとビジネスで共通の前提。
+ * Ferret が context.md と依頼の材料に入れ、Agent はそれを前提に参入先を探す（@shared/founderProfile）
+ */
+export function FounderProfileModal({ onClose }: { onClose: () => void }) {
+  const t = useT()
+  const locale = useLocale()
+  const toast = useToast()
+  const [text, setText] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let stopped = false
+    void window.ade.invoke('profile:get').then(({ text: saved }) => {
+      if (!stopped) setText(saved.trim() ? saved : founderProfileTemplate(locale === 'en' ? 'en' : 'ja'))
+    }).catch((err: unknown) => toast({ tone: 'danger', message: errorMessage(err) }))
+    return () => { stopped = true }
+  }, [locale, toast])
+  const save = async () => {
+    if (text === null) return
+    setBusy(true)
+    try {
+      await window.ade.invoke('profile:set', founderProfileIsEmpty(text) ? '' : text)
+      toast({ tone: 'success', message: t('research.profile.saved') })
+      onClose()
+    } catch (err) {
+      toast({ tone: 'danger', message: errorMessage(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <RsModal
+      label={t('research.profile.title')}
+      testId="research-profile"
+      onClose={onClose}
+      foot={<><Button variant="ghost" onClick={onClose}>{t('research.ws.cancel')}</Button><Button variant="primary" disabled={text === null} busy={busy} onClick={() => void save()} data-testid="research-profile-save">{t('research.profile.save')}</Button></>}
+    >
+      <p className="biz-muted">{t('research.profile.hint')}</p>
+      <div className="biz-form">
+        <Txt label={t('research.profile.field')} value={text ?? ''} onChange={(v) => setText(v.slice(0, FOUNDER_PROFILE_MAX))} rows={18} mono testId="research-profile-text" />
+      </div>
     </RsModal>
   )
 }

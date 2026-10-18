@@ -22,6 +22,8 @@ export type VentureOpsHandlers = { [C in keyof VentureIpcRequests]: (...args: Pa
 
 export interface VentureOpsWiring {
   userData: string
+  /** 使っている人の状況（Ferret の「あなたの状況」）。依頼の材料に入れる */
+  founder?(): Promise<string>
   isPackaged: boolean
   isE2E: boolean
   safeStorage: SafeStorage

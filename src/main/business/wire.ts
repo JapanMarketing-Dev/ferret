@@ -45,6 +45,8 @@ export interface VentureWiring {
   knowledge: string
   registerResearch: ResearchDeps['registerResearch']
   registerBusiness: ResearchDeps['registerBusiness']
+  /** 使っている人の状況（Ferret の「あなたの状況」。リサーチ・ビジネスの context.md に入れる） */
+  founder?: () => Promise<string>
 }
 
 export function ventureHandlers(w: VentureWiring): BusinessHandlers & ResearchHandlers {
@@ -80,7 +82,8 @@ export function ventureHandlers(w: VentureWiring): BusinessHandlers & ResearchHa
       // Agent へ送る: アプリの窓での本物の操作の直後に1回だけ。承認・公開: main が読んだ中身をネイティブのダイアログで確かめる
       consentSend: () => w.consume('send'),
       confirm,
-      ledger: { dir: join(w.userData, 'business-approvals'), key: () => ledgerKey.key() }
+      ledger: { dir: join(w.userData, 'business-approvals'), key: () => ledgerKey.key() },
+      ...(w.founder ? { founder: w.founder } : {})
     }),
     ...researchHandlers({
       root: w.root,
@@ -103,7 +106,8 @@ export function ventureHandlers(w: VentureWiring): BusinessHandlers & ResearchHa
       manual: w.manual,
       knowledge: w.knowledge,
       ledger: { dir: join(w.userData, 'research-gates'), key: () => ledgerKey.key() },
-      keepGoing
+      keepGoing,
+      ...(w.founder ? { founder: w.founder } : {})
     })
   }
 }

@@ -50,6 +50,7 @@ import {
   type ResearchRecordKind,
   type ScoreKey
 } from './model'
+import { founderSection } from '../founderProfile'
 import type { ResearchPromptId } from './ipc'
 
 export type ResearchLocale = 'ja' | 'en'
@@ -393,13 +394,13 @@ export function conclusionDoneConditions(locale: ResearchLocale, nextExperimentI
   return pick(
     locale,
     `1. 参入先が1つ（候補の ID）。「A か B」にしない。場面（どんな企業の・誰が・何が起きたとき・どんな成果を必要とし・今はどう対処しているか）、売るもの、価格の仮説、最初の集客経路が書いてある。
-2. 選ばなかった候補（除外済みを除く）すべてに、選ばなかった理由が1行ずつある。参入先を含む上位3件は比較表で、勝負を分けた点と証拠の ID がある。
+2. 選ばなかった候補（除外済みを除く）すべてに、選ばなかった理由が1行ずつある。参入先を含む上位3件は比較表で、勝負を分けた点・使っている人の状況との合い方・証拠の ID がある。
 3. 参入先の成立条件がすべて、根拠の証拠の ID（aiInference でない）で支持されているか、反証が無いうえで「未確認」と明記され確かめ方が書いてある。反証が残る（refuted の）条件がある候補は選ばない。
 4. 残る不確かさが「実際に使うか・払うか」のように市場実験でしか確かめられないものだけになっている（ネットで調べられることが残っていない）。
 5. 最初の市場実験を experiments/ に status: planned で設計してある（次の ID は ${nextExperimentId}。方法・対象・数・合格条件・中止条件を数字で）。不合格のときに次に参入する候補（第2候補）も書いてある。
 6. 人が決めること（ゲートの判定・実験の実施）を短いチェックリストで書いてある。`,
     `1. Exactly one entry (a candidate ID), never "A or B", with its scene (at what kind of company, who, when what happens, what outcome they need, how they handle it now), what you sell, a price hypothesis and the first acquisition channel.
-2. Every candidate not chosen (except dropped ones) has a one-line reason. The top 3 including the entry are compared in a table with what decided it and evidence IDs.
+2. Every candidate not chosen (except dropped ones) has a one-line reason. The top 3 including the entry are compared in a table with what decided it, the fit with the person, and evidence IDs.
 3. Every condition of the entry is supported by evidence IDs (not aiInference), or has no counter-evidence and is marked "unverified" with how to check it. Never choose a candidate with a refuted condition.
 4. The only uncertainties left are ones only a market experiment can answer, such as "will they actually use it and pay" (nothing left that desk research can check).
 5. The first market experiment is designed in experiments/ with status: planned (next ID ${nextExperimentId}; method, target, numbers, pass and stop conditions in numbers), and the candidate to enter next if it fails (the runner-up) is named.
@@ -501,7 +502,8 @@ function candidateSection(c: Candidate, data: ResearchData, locale: ResearchLoca
   return lines
 }
 
-export function researchContextMarkdown(data: ResearchData, now: string, locale: ResearchLocale): string {
+/** founder は使っている人の状況（@shared/founderProfile。空なら「未記入」と書く） */
+export function researchContextMarkdown(data: ResearchData, now: string, locale: ResearchLocale, founder = ''): string {
   const r = data.research
   const ordered = contextOrder(data.candidates)
   const detailed = ordered.filter((c) => c.stage !== 'dropped').slice(0, CONTEXT_DETAIL_LIMIT)
@@ -521,6 +523,7 @@ export function researchContextMarkdown(data: ResearchData, now: string, locale:
       `Goal: settle on exactly one market to enter (people want "where do we enter", not the verification process). Write the decision in ${RESEARCH_CONCLUSION_FILE} and end every task by updating it.`
     ),
     '',
+    ...founderSection(founder, locale),
     `- ${pick(locale, '対象範囲', 'Scope')}: ${r.scope || 'U'}`,
     `- ${pick(locale, '候補の段階ごとの数', 'Candidates by stage')}: ${counts}`,
     `- ${pick(locale, 'ファンネルの目安', 'Funnel targets')}: ${Object.entries(r.funnelTargets).map(([k, v]) => `${k} ${v}`).join(' → ')}`,
