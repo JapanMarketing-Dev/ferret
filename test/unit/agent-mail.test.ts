@@ -71,7 +71,8 @@ describe('宛先の名前', () => {
   const custom = [{ id: 'custom:my-bot' as const, name: 'My Bot', command: 'bot', args: '' }]
   it.each([
     ['codex', 'codex'], ['Codex', 'codex'], [' CODEX ', 'codex'], ['claude', 'claude'], ['Claude Code', 'claude'], ['claude-code', 'claude'],
-    ['cc', 'claude'], ['gemini', 'gemini'], ['gemini-cli', 'gemini'], ['my bot', 'custom:my-bot'], ['custom:my-bot', 'custom:my-bot'], ['my-bot', 'custom:my-bot']
+    ['cc', 'claude'], ['gemini', 'gemini'], ['gemini-cli', 'gemini'], ['my bot', 'custom:my-bot'], ['custom:my-bot', 'custom:my-bot'], ['my-bot', 'custom:my-bot'],
+    ['hermes', 'hermes'], ['Hermes Agent', 'hermes'], ['openclaw', 'openclaw'], ['clawdbot', 'openclaw']
   ])('%s → %s', (name, agent) => {
     expect(normalizeAgentTarget(name, custom)).toBe(agent)
   })

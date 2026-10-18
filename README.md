@@ -135,16 +135,16 @@ Ferret launches CLI agents in its built-in terminals, on the subscriptions you a
     <td align="center" width="16%"><a href="https://github.com/mistralai/mistral-vibe"><img src="docs/images/agents/mistral-vibe.png" width="32" height="32" alt=""><br><sub>Mistral Vibe</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/QwenLM/qwen-code"><img src="docs/images/agents/qwen-code.png" width="32" height="32" alt=""><br><sub>Qwen Code</sub></a></td>
     <td align="center" width="16%"><a href="https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/"><img src="docs/images/agents/rovo.png" width="32" height="32" alt=""><br><sub>Rovo Dev</sub></a></td>
+    <td align="center" width="16%"><a href="https://docs.openclaw.ai/"><img src="docs/images/agents/openclaw.png" width="32" height="32" alt=""><br><sub>OpenClaw</sub></a></td>
     <td align="center" width="16%"><a href="https://aider.chat/docs/install.html"><img src="docs/images/agents/aider.svg" width="32" height="32" alt=""><br><sub>Aider</sub></a></td>
-    <td align="center" width="16%"><a href="https://ante.run/start/quickstart/"><img src="docs/images/agents/ante.png" width="32" height="32" alt=""><br><sub>Ante</sub></a></td>
   </tr>
   <tr>
+    <td align="center" width="16%"><a href="https://ante.run/start/quickstart/"><img src="docs/images/agents/ante.png" width="32" height="32" alt=""><br><sub>Ante</sub></a></td>
     <td align="center" width="16%"><a href="https://docs.blackbox.ai/features/blackbox-cli/getting-started"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>BLACKBOX CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://forgecode.dev/docs/"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>ForgeCode</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/google-gemini/gemini-cli"><img src="docs/images/agents/gemini.png" width="32" height="32" alt=""><br><sub>Gemini CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://junie.jetbrains.com/docs/junie-cli.html"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>Junie CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/letta-ai/letta-code"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>Letta Code</sub></a></td>
-    <td align="center" width="16%"><a href="https://github.com/openclaw/openclaw"><img src="docs/images/agents/openclaw.png" width="32" height="32" alt=""><br><sub>OpenClaw</sub></a></td>
   </tr>
   <tr>
     <td align="center" width="16%"><a href="https://docs.openhands.dev/openhands/usage/cli/installation"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>OpenHands CLI</sub></a></td>

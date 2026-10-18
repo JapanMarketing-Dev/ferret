@@ -74,6 +74,8 @@ export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'amp',
   'droid',
   'kiro',
+  'hermes',
+  'openclaw',
   'aider',
   'ante',
   'aug',
@@ -91,7 +93,6 @@ export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'gemini',
   'goose',
   'grok',
-  'hermes',
   'junie',
   'kilo',
   'kimi',
@@ -101,7 +102,6 @@ export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'muse',
   'omp',
   'openclaude',
-  'openclaw',
   'openhands',
   'pi',
   'prime-agent',
@@ -374,6 +374,8 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     homepageUrl: 'https://github.com/xai-org/grok-build',
     verified: true
   },
+  // DeepSeek の公式の連携先（api-docs.deepseek.com/quick_start/agent_integrations/hermes）。hermes setup で DeepSeek を選ぶ。
+  // v0.22.2 の --tui で、貼り付け→Enter の送信と ESC+CR・LF の改行を確かめた（2026-10）
   hermes: {
     label: 'Hermes Agent',
     detectCmd: 'hermes',
@@ -381,7 +383,8 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     yoloArgs: '--yolo',
     install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash',
     homepageUrl: 'https://hermes-agent.nousresearch.com/docs/',
-    verified: true
+    verified: true,
+    popular: true
   },
   junie: {
     label: 'Junie CLI',
@@ -461,14 +464,17 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     homepageUrl: 'https://openclaude.gitlawb.com/',
     verified: false
   },
+  // DeepSeek の公式の連携先（api-docs.deepseek.com/quick_start/agent_integrations/openclaw）。openclaw onboard で DeepSeek を選ぶ。
+  // 2026.10.4 の chat（Gateway 不要）で、貼り付け→Enter の送信と ESC+CR・LF の改行を確かめた（2026-10）。Node 24.16+ が要る
   openclaw: {
     label: 'OpenClaw',
     detectCmd: 'openclaw',
     launchCmd: 'openclaw chat',
     yoloArgs: '',
     install: 'curl -fsSL https://openclaw.ai/install.sh | bash',
-    homepageUrl: 'https://github.com/openclaw/openclaw',
-    verified: true
+    homepageUrl: 'https://docs.openclaw.ai/',
+    verified: true,
+    popular: true
   },
   openhands: {
     label: 'OpenHands CLI',

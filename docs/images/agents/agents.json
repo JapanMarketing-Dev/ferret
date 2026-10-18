@@ -206,6 +206,12 @@
       "icon": "docs/images/agents/rovo.png"
     },
     {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "homepageUrl": "https://docs.openclaw.ai/",
+      "icon": "docs/images/agents/openclaw.png"
+    },
+    {
       "id": "aider",
       "name": "Aider",
       "homepageUrl": "https://aider.chat/docs/install.html",
@@ -246,12 +252,6 @@
       "name": "Letta Code",
       "homepageUrl": "https://github.com/letta-ai/letta-code",
       "icon": null
-    },
-    {
-      "id": "openclaw",
-      "name": "OpenClaw",
-      "homepageUrl": "https://github.com/openclaw/openclaw",
-      "icon": "docs/images/agents/openclaw.png"
     },
     {
       "id": "openhands",

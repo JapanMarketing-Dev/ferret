@@ -37,6 +37,9 @@ describe('カタログ（Orca の既定値）', () => {
     // Gemini CLI の個人ログインの終了で、Google の Agent は Antigravity（agy 1.3.4 の --help で確認）を主要に置く
     expect(AGENT_CATALOG.antigravity).toMatchObject({ detectCmd: 'agy', yoloArgs: '--dangerously-skip-permissions', popular: true })
     expect(AGENT_CATALOG.gemini.popular).toBeUndefined()
+    // DeepSeek の公式の連携先（Hermes Agent・OpenClaw）を主要に置く。どちらも対話の画面を開くサブコマンドで起動する
+    expect(AGENT_CATALOG.hermes).toMatchObject({ detectCmd: 'hermes', launchCmd: 'hermes --tui', yoloArgs: '--yolo', popular: true })
+    expect(AGENT_CATALOG.openclaw).toMatchObject({ detectCmd: 'openclaw', launchCmd: 'openclaw chat', yoloArgs: '', popular: true })
     // Cursor の CLI は agent に改名（旧名 cursor-agent も見つける）
     expect(AGENT_CATALOG.cursor).toMatchObject({ detectCmd: 'agent', aliases: ['cursor-agent'], yoloArgs: '--force' })
     expect(AGENT_CATALOG.devin).toMatchObject({ detectCmd: 'devin', yoloArgs: '--permission-mode bypass --respect-workspace-trust false' })

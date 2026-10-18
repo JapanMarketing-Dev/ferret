@@ -115,6 +115,7 @@ const TARGET_ALIASES: Record<string, string> = {
   'gemini-cli': 'gemini',
   agy: 'antigravity',
   'antigravity-cli': 'antigravity',
+  clawdbot: 'openclaw',
   'copilot-cli': 'copilot',
   'cursor-agent': 'cursor',
   'github-copilot': 'copilot'
