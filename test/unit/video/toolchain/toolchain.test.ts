@@ -322,7 +322,8 @@ describe('toolStatus', () => {
     setPath(bin);
     const s = await toolStatus();
     expect(Object.keys(s).sort()).toEqual(['ffmpeg', 'ffprobe', 'fonts', 'whisper-cli', 'whisper-model', 'whisper-model-small']);
-    expect(s.ffmpeg).toEqual({ installed: true, path: fake, source: 'path', version: '7.1-test', libass: false });
+    // the Windows fake is a .cmd, which is never started without a shell, so its version and filters stay unknown there
+    expect(s.ffmpeg).toEqual(WIN ? { installed: true, path: fake, source: 'path' } : { installed: true, path: fake, source: 'path', version: '7.1-test', libass: false });
     expect(s.ffprobe.installed).toBe(false);
   });
 });

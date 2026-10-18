@@ -473,11 +473,16 @@ export interface ToolState {
 function execVersion(bin: string): Promise<string | undefined> {
   // ffmpeg / ffprobe / whisper are executables (never .cmd shims), so they run directly without a shell
   return new Promise((res) => {
-    execFile(bin, ['-version'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
-      if (err) return res(undefined);
-      const m = /version\s+(\S+)/.exec(String(stdout));
-      res(m?.[1]);
-    });
+    try {
+      execFile(bin, ['-version'], { timeout: 5000, windowsHide: true }, (err, stdout) => {
+        if (err) return res(undefined);
+        const m = /version\s+(\S+)/.exec(String(stdout));
+        res(m?.[1]);
+      });
+    } catch {
+      // Windows refuses to start a .cmd / .bat without a shell (EINVAL, thrown before any callback): no version
+      res(undefined);
+    }
   });
 }
 

@@ -1,5 +1,7 @@
 // 動画づくりのチャネル（video: で始まる。正本は src/video/app/shared/ipc.ts）
 import { VIDEO_IPC_EVENT_CHANNELS, VIDEO_IPC_REQUEST_CHANNELS, type VideoIpcEvents, type VideoIpcRequests } from '@video/app/shared/ipc'
+// ビジネス（venture: で始まる。正本は src/shared/venture/ipc.ts）
+import { VENTURE_IPC_CHANNELS, VENTURE_IPC_EVENTS, type VentureIpcEvents, type VentureIpcRequests } from './venture/ipc'
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
@@ -95,7 +97,7 @@ import { RESEARCH_IPC_CHANNELS, RESEARCH_IPC_EVENTS, type ResearchIpcEvents, typ
  * チャネル名・引数・戻り値のずれはコンパイルエラーになる。
  */
 /** ビジネス（business:*）とビジネスリサーチ（research:*）は src/shared/business/ipc.ts・src/shared/research/ipc.ts に置く */
-export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, ResearchIpcRequests {
+export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, ResearchIpcRequests, VentureIpcRequests {
   'app:ready': () => StartupTiming
   'app:settings': () => Settings
   /** settings.json の場所と、壊れているか（~/.ferret/settings.json。src/main/settingsFile.ts） */
@@ -624,7 +626,7 @@ export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, Rese
   'feedback:captureWindow': () => { type: 'image/png' | 'image/jpeg'; base64: string; width: number; height: number }
 }
 
-export interface IpcEvents extends VideoIpcEvents, BusinessIpcEvents, ResearchIpcEvents {
+export interface IpcEvents extends VideoIpcEvents, BusinessIpcEvents, ResearchIpcEvents, VentureIpcEvents {
   'browser:stateChanged': (state: BrowserState) => void
   /** 内蔵ブラウザから利用者へ短く知らせる（タブの上限など） */
   'browser:notice': (message: string) => void
@@ -851,7 +853,8 @@ export const IPC_REQUEST_CHANNELS = [
   'github:repoCreateInfo', 'github:createPrivateRepo', 'settings:github',
   'star:star', 'star:openWeb', 'star:later', 'star:never', 'star:fromMenu',
   'feedback:environment', 'feedback:account', 'feedback:submit', 'feedback:captureWindow',
-  ...VIDEO_IPC_REQUEST_CHANNELS
+  ...VIDEO_IPC_REQUEST_CHANNELS,
+  ...VENTURE_IPC_CHANNELS
 ] as const satisfies readonly IpcRequestChannel[]
 
 export const IPC_EVENT_CHANNELS = [
@@ -888,5 +891,6 @@ export const IPC_EVENT_CHANNELS = [
   'update:status',
   'remote:changed',
   'editor:saveForQuit', 'editor:revealUnsaved',
-  ...VIDEO_IPC_EVENT_CHANNELS
+  ...VIDEO_IPC_EVENT_CHANNELS,
+  ...VENTURE_IPC_EVENTS
 ] as const satisfies readonly IpcEventChannel[]

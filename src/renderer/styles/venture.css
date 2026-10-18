@@ -1,0 +1,871 @@
+/*
+ * ビジネス（venture）の画面。接頭辞は vt-。色・寸法は tokens.css の変数だけを使う（ライト・ダークは変数が切り替える）。
+ * 表は .vt-table-scroll の中で横に送り、狭い幅でも画面を崩さない。
+ */
+
+/* ── 入口（ビジネスでないオーケストラ）───────────────────── */
+.vt-host {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.vt-host__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.vt-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-3) var(--space-6);
+  border-bottom: var(--size-border) solid var(--color-border);
+  background: var(--color-bg-panel);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.vt-band__text {
+  flex: 1;
+  min-width: 160px;
+}
+
+.vt-band--muted {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 全体の枠 ─────────────────────────────────────── */
+.vt {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.vt__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-6) 0;
+  border-bottom: var(--size-border) solid var(--color-border);
+}
+
+.vt__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.vt__title {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vt__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-6) var(--space-6) 96px;
+}
+
+.vt__body--orchestra {
+  overflow: hidden;
+  padding: 0;
+}
+
+.vt-tabs {
+  display: flex;
+  overflow-x: auto;
+  gap: var(--space-1);
+  margin-bottom: -1px;
+}
+
+.vt-tabs__tab {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--size-tabbar);
+  padding: 0 var(--space-5);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-md);
+  cursor: pointer;
+}
+
+.vt-tabs__tab:hover {
+  color: var(--color-text);
+}
+
+.vt-tabs__tab.is-selected {
+  border-bottom-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.vt-tabs__tab:focus-visible {
+  outline: 1px solid var(--color-border-focus);
+  outline-offset: -2px;
+}
+
+.vt-tabs__tab .count-badge {
+  position: static;
+}
+
+.vt-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  max-width: 640px;
+}
+
+/* ── 共通の部品 ─────────────────────────────────────── */
+.vt-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 1100px;
+  min-width: 0;
+  margin: 0 auto;
+}
+
+.vt-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5) var(--space-6);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+}
+
+.vt-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.vt-card__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+}
+
+.vt-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.vt-subtitle {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.vt-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+}
+
+.vt-wrap {
+  flex-wrap: wrap;
+}
+
+.vt-spacer {
+  flex: 1;
+}
+
+.vt-grow {
+  flex: 1;
+  min-width: 160px;
+}
+
+.vt-muted {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.vt-small {
+  font-size: var(--font-size-xs);
+}
+
+.vt-mono {
+  font-family: var(--font-mono);
+}
+
+.vt-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.vt-nowrap {
+  white-space: nowrap;
+}
+
+.vt-ellipsis {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vt-clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  max-width: 360px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.vt-text-danger {
+  color: var(--color-danger);
+}
+
+.vt-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vt-pre {
+  overflow: auto;
+  max-height: 360px;
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 文の注意（ok 緑・warning 黄・danger 赤・info 青） */
+.vt-issue {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+  font-size: var(--font-size-sm);
+}
+
+.vt-issue--ok {
+  border-left-color: var(--color-success);
+  background: var(--color-success-quiet);
+}
+
+.vt-issue--warning {
+  border-left-color: var(--color-warning);
+  background: var(--color-warning-quiet);
+}
+
+.vt-issue--danger {
+  border-left-color: var(--color-danger);
+  background: var(--color-danger-quiet);
+}
+
+.vt-issue--info {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-wash);
+}
+
+/* ── 入力 ──────────────────────────────────────────── */
+.vt-label,
+.vt-field > span {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.vt-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 140px;
+}
+
+.vt-field--wide {
+  grid-column: 1 / -1;
+}
+
+.vt-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.vt-form-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.vt-select {
+  height: var(--size-control);
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 var(--space-4);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-md);
+}
+
+.vt-select:focus-visible,
+.vt-textarea:focus-visible {
+  border-color: var(--color-border-focus);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--color-border-focus);
+}
+
+.vt-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-normal);
+  resize: vertical;
+}
+
+.vt-textarea--mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 表 ──────────────────────────────────────────── */
+.vt-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.vt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-md);
+}
+
+.vt-table th,
+.vt-table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--size-border) solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.vt-table th {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+}
+
+.vt-table th.vt-num,
+.vt-table td.vt-num {
+  text-align: right;
+}
+
+.vt-tr--danger td {
+  background: var(--color-danger-quiet);
+}
+
+.vt-tr--danger td:first-child {
+  box-shadow: inset 2px 0 0 var(--color-danger);
+}
+
+.vt-tr--warning td:first-child {
+  box-shadow: inset 2px 0 0 var(--color-warning);
+}
+
+/* ── 数の札 ─────────────────────────────────────────── */
+.vt-stats {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.vt-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
+.vt-stat--warning {
+  border-color: var(--color-warning-border);
+}
+
+.vt-stat--danger {
+  border-color: var(--color-danger);
+}
+
+.vt-stat__value {
+  overflow: hidden;
+  font-size: var(--font-size-2xl);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vt-stat--compact .vt-stat__value {
+  font-size: var(--font-size-lg);
+  white-space: normal;
+}
+
+.vt-stat__label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.vt-stat__hint {
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+/* ── 注意 ──────────────────────────────────────────── */
+.vt-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vt-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+}
+
+.vt-alert > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.vt-alert--danger {
+  border-color: var(--color-danger);
+  background: var(--color-danger-quiet);
+}
+
+.vt-alert--danger > svg {
+  color: var(--color-danger);
+}
+
+.vt-alert--warning {
+  border-color: var(--color-warning-border);
+  border-left-color: var(--color-warning);
+  background: var(--color-warning-quiet);
+}
+
+.vt-alert--warning > svg {
+  color: var(--color-warning);
+}
+
+.vt-alert__text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.vt-alert__refs {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+/* ── フェーズ ─────────────────────────────────────────── */
+.vt-phase {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.vt-phase__step {
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
+.vt-phase__step.is-current {
+  border-color: var(--color-accent-line);
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.vt-phase__icon {
+  flex: none;
+  color: var(--color-text-faint);
+}
+
+.vt-phase__step--ok .vt-phase__icon {
+  color: var(--color-success);
+}
+
+.vt-phase__step--fail .vt-phase__icon {
+  color: var(--color-danger);
+}
+
+.vt-phase__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.vt-phase__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── ファネル ─────────────────────────────────────────── */
+.vt-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vt-funnel__row {
+  display: grid;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  grid-template-columns: minmax(96px, 150px) minmax(80px, 1fr) 80px 64px minmax(72px, auto) minmax(0, auto);
+  font-size: var(--font-size-md);
+}
+
+.vt-funnel__row.is-bottleneck {
+  background: var(--color-danger-quiet);
+  box-shadow: inset 2px 0 0 var(--color-danger);
+}
+
+.vt-funnel__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vt-funnel__bar {
+  overflow: hidden;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+}
+
+.vt-funnel__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+
+.vt-funnel__row--low .vt-funnel__bar > span {
+  background: var(--color-warning);
+}
+
+.vt-funnel__row--stuck .vt-funnel__bar > span,
+.vt-funnel__row.is-bottleneck .vt-funnel__bar > span {
+  background: var(--color-danger);
+}
+
+.vt-funnel__row--noData .vt-funnel__count {
+  color: var(--color-text-faint);
+}
+
+.vt-funnel__sub {
+  grid-column: 1 / -1;
+}
+
+/* ── 予算のバー ─────────────────────────────────────────── */
+.vt-budget__month {
+  min-width: 160px;
+}
+
+.vt-meter {
+  display: block;
+  overflow: hidden;
+  height: 6px;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+}
+
+.vt-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+}
+
+.vt-meter--warning > span {
+  background: var(--color-warning);
+}
+
+.vt-meter--danger > span {
+  background: var(--color-danger);
+}
+
+/* ── 承認 ──────────────────────────────────────────── */
+.vt-kinds {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.vt-kinds li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.vt-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vt-approval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+
+.vt-approval--pending {
+  border-left: 3px solid var(--color-warning);
+}
+
+.vt-approval--changed {
+  border-left: 3px solid var(--color-danger);
+}
+
+.vt-approval--rejected {
+  opacity: 0.75;
+}
+
+.vt-approval__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.vt-approval__title {
+  min-width: 0;
+  font-weight: var(--font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.vt-approval__detail summary {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.vt-approval__detail[open] summary {
+  margin-bottom: var(--space-3);
+}
+
+/* ── 業務 ──────────────────────────────────────────── */
+.vt-streams {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 1280px;
+  margin: 0 auto;
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+
+.vt-streams__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-self: start;
+}
+
+.vt-streams__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--size-row);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: var(--font-size-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vt-streams__item:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.vt-streams__item.is-selected {
+  background: var(--color-surface-selected);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+  color: var(--color-text);
+}
+
+.vt-streams__item:focus-visible {
+  outline: 1px solid var(--color-border-focus);
+  outline-offset: -1px;
+}
+
+.vt-streams__item .count-badge {
+  position: static;
+}
+
+.vt-streams__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vt-streams__main {
+  margin: 0;
+}
+
+/* ── メンバー ─────────────────────────────────────────── */
+.vt-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+}
+
+.vt-member__name {
+  font-weight: var(--font-weight-medium);
+}
+
+/* ── Agent への依頼 ─────────────────────────────────────── */
+.vt-agent .vt-select {
+  width: 100%;
+}
+
+.vt-agent .vt-row .vt-select {
+  flex: 1;
+  width: auto;
+  min-width: 160px;
+}
+
+.vt-agent__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ── 狭い幅 ─────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .vt__head,
+  .vt__body {
+    padding-right: var(--space-5);
+    padding-left: var(--space-5);
+  }
+
+  .vt-streams {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .vt-streams__nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .vt-streams__item {
+    flex: none;
+  }
+
+  .vt-funnel__row {
+    grid-template-columns: minmax(80px, 1fr) 64px 56px;
+  }
+
+  .vt-funnel__bar,
+  .vt-funnel__target,
+  .vt-funnel__status {
+    grid-column: 1 / -1;
+  }
+}

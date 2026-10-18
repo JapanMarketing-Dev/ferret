@@ -6,10 +6,13 @@ import { trackChecks } from '@video/cli/commands/media.js';
 import { fnv36, piiMaskId } from '@video/cli/pii.js';
 import { createMcpServer } from '@video/cli/mcp.js';
 import { readTimeline, type Project } from '@video/cli/project.js';
+import { whichSync } from '@video/toolchain';
 import { Sandbox } from './helpers.js';
 
 // sfx apply / masks from-analysis / multicam material / edit split-for-switch / tracks apply / bench / track checks.
 // No ffmpeg needed: library sounds carry their duration in a sidecar and analysis files are written by hand.
+// Only the built-in sfx set is synthesized with ffmpeg on first use, so the checks on it need ffmpeg (CI has none).
+const hasFfmpeg = !!(process.env.FERRET_VIDEO_FFMPEG || whichSync('ffmpeg'));
 
 let sb: Sandbox;
 let dir: string;
@@ -101,20 +104,25 @@ describe('sfx apply', () => {
     expect(d.json.added).toBeGreaterThan(0);
     expect(JSON.stringify(timeline())).toBe(before);
     // the built-in set covers every kind the template uses: nothing is reported missing
-    expect(d.json.warnings.join(' ')).not.toMatch(/no library sound|ライブラリに無い/);
+    if (hasFfmpeg) expect(d.json.warnings.join(' ')).not.toMatch(/no library sound|ライブラリに無い/);
+    else expect(d.json.warnings.join(' ')).toMatch(/built-in sfx: ffmpeg not found/);
     const first = await run(['sfx', 'apply']);
     const kept = await run(['sfx', 'apply', '--keep']);
     expect(kept.json.removed).toBe(0);
     expect(timeline().audio.sfx.length).toBeGreaterThanOrEqual(first.json.added);
   });
 
-  it('an empty library is filled by the built-in set (no download); same seed → same placement', async () => {
+  it.skipIf(!hasFfmpeg)('an empty library is filled by the built-in set (no download)', async () => {
     await seed();
     const r = await run(['sfx', 'apply']);
     expect(r.json).toMatchObject({ ok: true });
     expect(r.json.library).toBeGreaterThanOrEqual(21);
     expect(r.json.added).toBeGreaterThan(0);
     expect(r.json.sfx.every((x: { asset: string }) => /_builtin_/.test(x.asset))).toBe(true);
+  });
+
+  it('same seed → same placement', async () => {
+    await seed();
     sound(join(dir, 'assets', 'sfx'), 'whoosh', 'a.wav');
     sound(join(dir, 'assets', 'sfx'), 'pop', 'b.wav');
     const a = await run(['sfx', 'apply', '--seed', 'x', '--dry-run']);

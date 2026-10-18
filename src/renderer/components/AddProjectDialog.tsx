@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Folder, FolderGit2, KeyRound, Laptop, Lock, Network, Server, X } from 'lucide-react'
+import { ArrowLeft, Briefcase, Folder, FolderGit2, KeyRound, Laptop, Lock, Network, Server, X } from 'lucide-react'
 import type { Project, ProjectsState } from '@shared/types'
 import { cloneRepoName, normalizeCloneUrl, tildePath, type CloneFailureKind, type GitHubRepoList, type ProjectSource, type SshConfigHost } from '@shared/projectSource'
 import { checkSshTarget } from '@shared/sshCommand'
@@ -8,6 +8,7 @@ import { errorMessage } from '../lib/errors'
 import { useT } from '../lib/i18n'
 import { Button, Field, IconButton, Modal, Progress, Segmented, useToast } from '../ui'
 import { GITLAB_COM, type Forge } from '@shared/forge'
+import { VentureCreateStep } from '../venture/VentureCreateStep'
 
 /**
  * 「プロジェクトを追加」。自分の PC で開く / GitHub・GitLab から取得 / SSH で開く の3つから選ぶ。
@@ -20,7 +21,7 @@ import { GITLAB_COM, type Forge } from '@shared/forge'
  *
  * 開いている間は、呼び出し側が内蔵ブラウザのビューを隠す（Modal はネイティブのビューの下になるため）。
  */
-type Step = 'choose' | 'github' | 'ssh' | 'orchestra'
+type Step = 'choose' | 'github' | 'ssh' | 'orchestra' | 'venture'
 
 /** 前回の保存先（この端末だけの好み） */
 const PARENT_KEY = 'ferret.cloneParent'
@@ -51,7 +52,7 @@ export function AddProjectDialog({ onClose, onAdded }: {
     <div className="rv-modal__panel apd" data-testid="add-project-dialog">
       <header className="rv-modal__head apd__head">
         {step !== 'choose' && <IconButton size="sm" label={t('projectSource.back')} icon={<ArrowLeft size={14} strokeWidth={1.5} />} onClick={() => setStep('choose')} data-testid="add-project-back" />}
-        <h2>{t(step === 'github' ? 'projectSource.choose.github' : step === 'ssh' ? 'projectSource.choose.ssh' : step === 'orchestra' ? 'orchestra.create' : 'projectSource.addChooseTitle')}</h2>
+        <h2>{t(step === 'github' ? 'projectSource.choose.github' : step === 'ssh' ? 'projectSource.choose.ssh' : step === 'orchestra' ? 'orchestra.create' : step === 'venture' ? 'venture.choice' : 'projectSource.addChooseTitle')}</h2>
         <IconButton label={t('common.close')} icon={<X size={16} />} onClick={onClose} />
       </header>
       {step === 'choose' && <div className="apd__choices">
@@ -61,8 +62,10 @@ export function AddProjectDialog({ onClose, onAdded }: {
         <ChoiceButton icon={<Server size={18} strokeWidth={1.5} />} title={t('projectSource.choose.ssh')} hint={t('projectSource.choose.sshHint')} onClick={() => setStep('ssh')} testId="add-project-ssh" />
         <p className="apd__group">{t('projectSource.groupOrchestra')}</p>
         <ChoiceButton icon={<Network size={18} strokeWidth={1.5} />} title={t('orchestra.create')} hint={t('orchestra.createHint')} onClick={() => setStep('orchestra')} testId="add-orchestra" />
+        <ChoiceButton icon={<Briefcase size={18} strokeWidth={1.5} />} title={t('venture.choice')} hint={t('venture.choiceHint')} onClick={() => setStep('venture')} testId="add-venture" />
       </div>}
       {step === 'orchestra' && <OrchestraStep onDone={(state) => { onClose(); onAdded(state, 'local') }} />}
+      {step === 'venture' && <VentureCreateStep onDone={(state) => { onClose(); onAdded(state, 'local') }} />}
       {step === 'github' && <GitHubStep onDone={(state) => { onClose(); onAdded(state, 'github') }} />}
       {step === 'ssh' && <SshStep onDone={(state) => { onClose(); onAdded(state, 'ssh') }} />}
     </div>

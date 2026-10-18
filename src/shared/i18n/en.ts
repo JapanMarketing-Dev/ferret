@@ -8,10 +8,13 @@
  */
 import { videoEn } from './video'
 import { researchEn } from '../research/messages.en'
+import { ventureEn } from './venture'
 
 export const en = {
   // 動画づくり（src/shared/i18n/video/。キーは video. で始まる）
   ...videoEn,
+  // ビジネス（src/shared/i18n/venture/。キーは venture. で始まる）
+  ...ventureEn,
   'common.cancel': 'Cancel',
   'onboarding.permissions.subtitleOther': 'Windows and Linux don\'t ask for these permissions in advance. You can continue.',
   'ai.key.envHint': 'You can also use the {{env}} environment variable (or .env).',

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
 import {
   formatElapsed, formatMegabytes, hasAnythingToRecord, initialSelection, litSegments, resolutionOf, selectionAfterDevices, videoFolderName
 } from '../../../../src/video/app/shared/record/view'
@@ -81,12 +82,14 @@ describe('selection', () => {
 
 describe('main helpers', () => {
   it('recorder pages are read from the asar, not the unpacked folder', () => {
+    // join() uses the OS separator (backslashes on Windows), so the expected paths are built the same way
+    const asar = '/Applications/Ferret.app/Contents/Resources/app.asar/out'
     expect(recorderAssets('/Applications/Ferret.app/Contents/Resources/app.asar.unpacked/out')).toEqual({
-      html: '/Applications/Ferret.app/Contents/Resources/app.asar/out/video-recorder/index.html',
-      region: '/Applications/Ferret.app/Contents/Resources/app.asar/out/video-recorder/region.html',
-      preload: '/Applications/Ferret.app/Contents/Resources/app.asar/out/preload/videoRecorder.js'
+      html: join(asar, 'video-recorder', 'index.html'),
+      region: join(asar, 'video-recorder', 'region.html'),
+      preload: join(asar, 'preload', 'videoRecorder.js')
     })
-    expect(recorderAssets('/dev/ferret/out').html).toBe('/dev/ferret/out/video-recorder/index.html')
+    expect(recorderAssets('/dev/ferret/out').html).toBe(join('/dev/ferret/out', 'video-recorder', 'index.html'))
   })
   it('ingest messages: last line, progress lines skipped', () => {
     expect(ingestMessage({ code: 0, stdout: 'a\nregistered 3 source(s)\n', stderr: '' })).toEqual({ ok: true, message: 'registered 3 source(s)' })

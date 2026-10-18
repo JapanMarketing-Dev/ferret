@@ -1,10 +1,12 @@
 import type { Messages } from './en'
 import { videoJa } from './video'
 import { researchJa } from '../research/messages.ja'
+import { ventureJa } from './venture'
 
 /** 日本語の辞書。キーは en.ts が正本 */
 export const ja: Messages = {
   ...videoJa,
+  ...ventureJa,
   'common.cancel': 'キャンセル',
   'onboarding.permissions.subtitleOther': 'Windows と Linux では、これらの許可を前もって求められません。そのまま進めます。',
   'ai.key.envHint': '環境変数 {{env}}（.env でも可）も使えます。',

@@ -112,6 +112,8 @@ const { Component: SettingsPage, preload: preloadSettingsPage } = preloadable<Pr
 // 動画づくり（src/video/app/renderer/）。動画のチャンネルのプロジェクトで「動画」のタブを開いたときだけ読む
 const VideoWorkspace = lazy(() => import('@video/app/renderer/VideoWorkspace'))
 const { Component: OrchestraDashboard, preload: preloadOrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
+// ビジネス（src/renderer/venture/）。オーケストラのダッシュボードを包み、ビジネスならビジネスの画面にする
+const { Component: VentureOrOrchestra } = preloadable<PropsOf<typeof import('./venture/VentureOrOrchestra').VentureOrOrchestra>>(() => import('./venture/VentureOrOrchestra').then((m) => ({ default: m.VentureOrOrchestra })))
 const { Component: OnboardingFlow } = preloadable<PropsOf<typeof import('./onboarding/OnboardingFlow').OnboardingFlow>>(() => import('./onboarding/OnboardingFlow').then((m) => ({ default: m.OnboardingFlow })))
 const { Component: MeetingImportDialog } = preloadable<PropsOf<typeof import('./components/MeetingImportDialog').MeetingImportDialog>>(() => import('./components/MeetingImportDialog').then((m) => ({ default: m.MeetingImportDialog })))
 const { Component: Gallery } = preloadable<PropsOf<typeof import('./gallery/Gallery').Gallery>>(() => import('./gallery/Gallery').then((m) => ({ default: m.Gallery })))
@@ -1376,6 +1378,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
               />
               {centerTab === 'dashboard' && isOrchestra ? (
                 <ErrorBoundary name="orchestra"><Suspense fallback={<div className="editor-area" />}>
+                  <VentureOrOrchestra projectId={workspace.projectId} projects={projects.projects} onOpenFile={files.open} onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)} orchestra={
                   <OrchestraDashboard
                     projects={projects.projects}
                     onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)}
@@ -1385,6 +1388,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                     onStartRound={() => void run(() => productRound.start())}
                     onOpenFile={files.open}
                   />
+                  } />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'business' && ventureTab === 'business' ? (
                 <VentureCenter projectId={workspace.projectId ?? null} />

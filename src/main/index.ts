@@ -11,6 +11,8 @@ import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
 // 動画づくり（src/video/app/main/。入口はこの1つ）
 import { createVideoIpcHandlers, startVideo, stopVideo, videoCaptureActive, videoTerminalEnv } from '@video/app/main/ipc'
 import type { VideoMainContext } from '@video/app/main/context'
+// ビジネス（venture: のチャネル。src/main/venture/。入口はこの1つ）
+import { ventureForBusiness, ventureOpsHandlers, type VentureOpsWiring } from './venture/wire'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
@@ -659,13 +661,41 @@ function registerVentureProject(folder: string, patch: Partial<Project>): Projec
 }
 
 /**
- * 「プロジェクトにする」（src/main/research/handlers.ts の research:promote）で作ったビジネスのフォルダの行き先。差し替えの口はここ1か所。
- * いまは指定のオーケストラ（無ければ先頭）にプロジェクトとして入れる（開かない。画面が開き直す）
+ * ビジネス（src/main/venture/）が使う Ferret 本体の口。フォルダの登録・オーケストラにする・開くはここだけで行う
  */
-function registerPromotedBusiness(folder: string, name: string, orchestraId: string | null): { projectId: string } {
-  const orchestras = orchestraList(currentSettings().projects)
-  const orchestra = orchestraId && orchestras.some((o) => o.id === orchestraId) ? orchestraId : orchestras[0]?.id
-  return { projectId: registerVentureProject(folder, { name, ...(orchestra ? { orchestraId: orchestra } : {}) }).id }
+function ventureWiring(): VentureOpsWiring {
+  return {
+    userData: app.getPath('userData'),
+    isPackaged: IS_PACKAGED,
+    isE2E: IS_E2E,
+    safeStorage,
+    dialog,
+    window: () => mainWindow,
+    root: () => (workspace.folderPath && !isRemoteWorkspace() ? workspace.folderPath : null),
+    openProjectId: () => workspace.projectId ?? null,
+    projects: () => currentSettings().projects,
+    registerFolder: (folder, options) => {
+      const { projects, project } = upsertProjectFolder(currentSettings().projects, folder)
+      const merged: Project = options.orchestra
+        ? { ...project, ...(options.name ? { name: options.name } : {}), orchestrator: true, editorWorkspace: true }
+        : { ...project, ...(options.name ? { name: options.name } : {}), ...(options.orchestraId && !project.editorWorkspace ? { orchestraId: options.orchestraId } : {}) }
+      updateSettings({ projects: projects.map((p) => (p.id === merged.id ? merged : p)) })
+      syncEditorWorkspace()
+      send('projects:changed', projectsState())
+      return merged
+    },
+    openProject: (id) => {
+      const project = currentSettings().projects.find((p) => p.id === id)
+      if (project && workspace.projectId !== id) openProject(project)
+    },
+    projectsState,
+    assertNotRecording,
+    terminals: () => terminals,
+    // 送るボタンを押した直後だけ（gestures の 'send'。1回きり）
+    consentSend: () => gestures.consume('send'),
+    locale: guideLanguage,
+    notify: () => send('venture:changed')
+  }
 }
 
 /** ファイルエディタの IPC が触ってよい根。未選択なら断る */
@@ -2073,8 +2103,11 @@ function registerIpc(): void {
         openProject(project)
         return { projectId: project.id }
       },
-      registerBusiness: registerPromotedBusiness
+      // 「プロジェクトにする」はビジネス（オーケストラ粒度。src/main/venture/）を作り、その中にビジネス記録を入れる
+      registerBusiness: ventureForBusiness(ventureWiring())
     }),
+    // ビジネス（venture: のチャネル。src/main/venture/wire.ts）
+    ...ventureOpsHandlers(ventureWiring()),
     'app:ready': () => reportInteractive(),
     // 平文の apiKey は renderer へ渡さない
     'app:settings': () => redactKeys({ ...currentSettings() }),

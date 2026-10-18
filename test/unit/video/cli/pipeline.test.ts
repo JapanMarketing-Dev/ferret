@@ -200,12 +200,14 @@ describe.skipIf(!hasFfmpeg)('thumbnails and feedback (ffmpeg)', () => {
   let env: Record<string, string>;
   const run = (args: string[], extra: Record<string, string> = {}) => sb.run([...args, '--json'], { cwd: dir, env: { ...env, ...extra } });
   const timeline = () => JSON.parse(readFileSync(join(dir, 'timeline.json'), 'utf8'));
-  const filters = execFileSync(ffmpeg!, ['-hide_banner', '-filters']).toString();
-  const decoders = execFileSync(ffmpeg!, ['-hide_banner', '-decoders']).toString();
-  const canTypeset = /\sass\s/.test(filters) || /\s(svg|librsvg)\s/.test(decoders);
+  // the describe body runs even when the suite is skipped (no ffmpeg), so ffmpeg is only asked inside the hooks and tests
+  let canTypeset = false;
   const probeSize = (f: string) => execFileSync(process.env.FERRET_VIDEO_FFPROBE ?? whichSync('ffprobe')!, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', f]).toString().trim();
 
   beforeAll(async () => {
+    const filters = execFileSync(ffmpeg!, ['-hide_banner', '-filters']).toString();
+    const decoders = execFileSync(ffmpeg!, ['-hide_banner', '-decoders']).toString();
+    canTypeset = /\sass\s/.test(filters) || /\s(svg|librsvg)\s/.test(decoders);
     sb = new Sandbox();
     dir = join(sb.root, 'p');
     bin = join(sb.root, 'fakebin');
