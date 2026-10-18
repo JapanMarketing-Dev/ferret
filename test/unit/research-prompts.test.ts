@@ -307,12 +307,37 @@ describe('雛形の YAML が model の形に合う', () => {
     }
   }
 
-  it('雛形はどの依頼にも1つ以上ある（learning は書く場所の説明だけ）', () => {
-    for (const id of RESEARCH_PROMPT_IDS.filter((x) => x !== 'learning')) expect(yamlBlocks(researchPromptTemplate(id, 'ja')).length).toBeGreaterThan(0)
+  it('雛形はどの依頼にも1つ以上ある（learning は書く場所の説明だけ。decide は結論の Markdown の形）', () => {
+    for (const id of RESEARCH_PROMPT_IDS.filter((x) => x !== 'learning' && x !== 'decide')) expect(yamlBlocks(researchPromptTemplate(id, 'ja')).length).toBeGreaterThan(0)
+    for (const locale of LOCALES) expect(researchPromptTemplate('decide', locale)).toContain('```markdown')
+  })
+})
+
+describe('参入先を決め切る（decide）', () => {
+  it.each(LOCALES)('%s: 候補なしで穴が残らず、どの記録の状態でも送れる', (locale) => {
+    for (const data of [emptyData(), fullData()]) expect(buildResearchPrompt('decide', data, null, locale).missing).toEqual([])
+    expect(promptNeedsCandidate('decide')).toBe(false)
+  })
+
+  it('ja: 1つに決める・止まってよい条件・「まだ決められない」で終えない・結論のファイルと最後の返事の形', () => {
+    const t = researchPromptTemplate('decide', 'ja')
+    for (const s of ['参入する市場を1つに決め切って', '検証の過程ではなく', 'conclusion.md', '「A か B」にしない', '上位3件は比較表', 'refuted の）条件がある候補は選ばない', '市場実験でしか確かめられないものだけ', 'status: planned', '第2候補', '止まってよいのは、上の6つを満たしたときだけ', '「まだ決められない」で終えない', '人に「続けますか」と聞かない', '調べた経過は書かない']) expect(t).toContain(s)
+  })
+
+  it('en: the same commitments', () => {
+    const t = researchPromptTemplate('decide', 'en')
+    for (const s of ['settle on exactly one market to enter', 'never "A or B"', 'Never choose a candidate with a refuted condition', 'Stop only when all six hold', 'Never end with "cannot decide yet"', 'do not ask people whether to continue', 'Leave out the research log']) expect(t).toContain(s)
   })
 })
 
 describe('researchAgentRules', () => {
+  it.each(LOCALES)('%s: どの依頼にもゴール（参入先を1つに決め切る）が入り、conclusion.md を書いてよい', (locale) => {
+    const r = researchAgentRules(locale)
+    expect(r).toContain(locale === 'ja' ? '参入する市場を1つに決め切る' : 'settle on exactly one market to enter')
+    expect(r).toContain(locale === 'ja' ? '書いてよいのは conclusion.md' : 'You may write only conclusion.md')
+    for (const id of RESEARCH_PROMPT_IDS) expect(buildResearchPrompt(id, fullData(), 'C001', locale).text).toContain('conclusion.md')
+  })
+
   it.each(LOCALES)('%s: 送らない・ゲートを書かない・事実と推論・証拠の種類・aiInference・根拠のない点数', (locale) => {
     const r = researchAgentRules(locale)
     for (const g of EVIDENCE_GRADES) expect(r).toContain(g)

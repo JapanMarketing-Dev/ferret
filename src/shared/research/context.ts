@@ -23,6 +23,7 @@ import {
   READING_KEYS,
   READING_LEVELS,
   PRINCIPLE_KEYS,
+  RESEARCH_CONCLUSION_FILE,
   RESEARCH_CONTEXT_FILE,
   RESEARCH_FILE,
   RESEARCH_KNOWLEDGE_FILE,
@@ -369,6 +370,7 @@ const num = (v: number | null) => (v === null ? 'null' : String(v))
 
 function promptLabel(id: ResearchPromptId, locale: ResearchLocale): string {
   const labels: Record<ResearchPromptId, [string, string]> = {
+    decide: ['参入先を決め切る（結論まで止まらない）', 'Decide where to enter (do not stop until concluded)'],
     discover: ['候補を出す（既存支出から）', 'Discover candidates (from existing spending)'],
     who: ['1 顧客・企業の発見（Who）', '1 Find customers and companies (Who)'],
     what: ['2 需要・支出・不満の証拠（What）', '2 Evidence of demand, spending, complaints (What)'],
@@ -381,6 +383,28 @@ function promptLabel(id: ResearchPromptId, locale: ResearchLocale): string {
   }
   const [ja, en] = labels[id]
   return pick(locale, ja, en)
+}
+
+/**
+ * 参入先を「決め切った」とみなす条件（6つ）。「参入先を決め切る」の依頼と .research/README.md の両方に入れる
+ * （AGENTS.md だけを読んだ Agent も README から辿れる）
+ */
+export function conclusionDoneConditions(locale: ResearchLocale, nextExperimentId: string): string {
+  return pick(
+    locale,
+    `1. 参入先が1つ（候補の ID）。「A か B」にしない。場面（どんな企業の・誰が・何が起きたとき・どんな成果を必要とし・今はどう対処しているか）、売るもの、価格の仮説、最初の集客経路が書いてある。
+2. 選ばなかった候補（除外済みを除く）すべてに、選ばなかった理由が1行ずつある。参入先を含む上位3件は比較表で、勝負を分けた点と証拠の ID がある。
+3. 参入先の成立条件がすべて、根拠の証拠の ID（aiInference でない）で支持されているか、反証が無いうえで「未確認」と明記され確かめ方が書いてある。反証が残る（refuted の）条件がある候補は選ばない。
+4. 残る不確かさが「実際に使うか・払うか」のように市場実験でしか確かめられないものだけになっている（ネットで調べられることが残っていない）。
+5. 最初の市場実験を experiments/ に status: planned で設計してある（次の ID は ${nextExperimentId}。方法・対象・数・合格条件・中止条件を数字で）。不合格のときに次に参入する候補（第2候補）も書いてある。
+6. 人が決めること（ゲートの判定・実験の実施）を短いチェックリストで書いてある。`,
+    `1. Exactly one entry (a candidate ID), never "A or B", with its scene (at what kind of company, who, when what happens, what outcome they need, how they handle it now), what you sell, a price hypothesis and the first acquisition channel.
+2. Every candidate not chosen (except dropped ones) has a one-line reason. The top 3 including the entry are compared in a table with what decided it and evidence IDs.
+3. Every condition of the entry is supported by evidence IDs (not aiInference), or has no counter-evidence and is marked "unverified" with how to check it. Never choose a candidate with a refuted condition.
+4. The only uncertainties left are ones only a market experiment can answer, such as "will they actually use it and pay" (nothing left that desk research can check).
+5. The first market experiment is designed in experiments/ with status: planned (next ID ${nextExperimentId}; method, target, numbers, pass and stop conditions in numbers), and the candidate to enter next if it fails (the runner-up) is named.
+6. What people must decide (gate judgements, running the experiment) is written as a short checklist.`
+  )
 }
 
 export function researchPromptLabel(id: ResearchPromptId, locale: ResearchLocale): string {
@@ -490,6 +514,12 @@ export function researchContextMarkdown(data: ResearchData, now: string, locale:
     `# ${pick(locale, 'いまの状況', 'Current state')}（${r.name}）`,
     '',
     pick(locale, `更新: ${now}（Ferret が送るたびに書き直す。手で直さない）`, `Updated: ${now} (Ferret rewrites this on every send; do not edit by hand)`),
+    '',
+    pick(
+      locale,
+      `ゴール: 参入する市場を1つに決め切る（人が求めているのは検証の過程ではなく「結局どこに参入するか」）。結論は ${RESEARCH_CONCLUSION_FILE} に書き、どの作業もその更新で終える。`,
+      `Goal: settle on exactly one market to enter (people want "where do we enter", not the verification process). Write the decision in ${RESEARCH_CONCLUSION_FILE} and end every task by updating it.`
+    ),
     '',
     `- ${pick(locale, '対象範囲', 'Scope')}: ${r.scope || 'U'}`,
     `- ${pick(locale, '候補の段階ごとの数', 'Candidates by stage')}: ${counts}`,
@@ -789,11 +819,20 @@ export function researchReadme(locale: ResearchLocale): string {
       'G1–G3 can mostly be judged by desk research; G4 onwards needs market experiments. A gate cannot pass before the previous one has. A high score never skips G4 (purchase verification).'
     ),
     '',
+    p('## 参入先を決め切った条件（conclusion.md）', '## When the entry decision is settled (conclusion.md)'),
+    '',
+    p(
+      'このリサーチの成果物は conclusion.md（参入する市場を1つに決めた結論）。次の6つをすべて満たしたら決め切ったとみなす。満たすまで調べ続け、どの作業も conclusion.md の更新で終える。',
+      'The output of this research is conclusion.md (the decision on the one market to enter). It is settled when all six of the following hold. Keep researching until they do, and end every task by updating conclusion.md.'
+    ),
+    '',
+    conclusionDoneConditions(locale, p('context.md の「次の ID」', '"Next IDs" in context.md')),
+    '',
     p('## 書いてよいファイル', '## What you may write'),
     '',
     p(
-      '- Agent が書いてよい: candidates/（上の表で「Agent・人」の欄）、evidence/、experiments/（status: planned の設計だけ。metrics は書かない）。本文に提案・未確認のことを書く。\n- 人だけが変える: research.yaml、候補の stage・gates・dropReason・who.conditions・decision・execution の confirmed、実験の status・metrics・interviews。\n- Ferret が書く: .research/、principles/、promotedTo。',
-      '- Agents may write: candidates/ (fields marked "agent, person"), evidence/, experiments/ (designs with status: planned only; never metrics). Put proposals and open questions in the body.\n- People only: research.yaml; candidate stage, gates, dropReason, who.conditions, decision, execution confirmed; experiment status, metrics, interviews.\n- Ferret writes: .research/, principles/, promotedTo.'
+      '- Agent が書いてよい: conclusion.md（参入先の結論。リサーチの最終の成果物で、決め切るまで書き直す）、candidates/（上の表で「Agent・人」の欄）、evidence/、experiments/（status: planned の設計だけ。metrics は書かない）。本文に提案・未確認のことを書く。\n- 人だけが変える: research.yaml、候補の stage・gates・dropReason・who.conditions・decision・execution の confirmed、実験の status・metrics・interviews。\n- Ferret が書く: .research/、principles/、promotedTo。',
+      '- Agents may write: conclusion.md (the entry decision, the final output of the research; keep rewriting it until settled), candidates/ (fields marked "agent, person"), evidence/, experiments/ (designs with status: planned only; never metrics). Put proposals and open questions in the body.\n- People only: research.yaml; candidate stage, gates, dropReason, who.conditions, decision, execution confirmed; experiment status, metrics, interviews.\n- Ferret writes: .research/, principles/, promotedTo.'
     ),
     '',
     p('## しないこと', '## Never do'),

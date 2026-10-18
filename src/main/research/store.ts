@@ -51,7 +51,8 @@ import type { ResearchIssue, ResearchPromptId, ResearchPromptView, ResearchSaveR
 import { RESEARCH_PROMPT_IDS } from '@shared/research/ipc'
 import { coerceResearch, coerceResearchRecord, emptyResearch, hasResearchErrors, validateResearchRecord, type ResearchFix } from '@shared/research/records'
 import { canDecideGate } from '@shared/research/gates'
-import { buildResearchPrompt, researchAgentRules } from '@shared/research/prompts'
+import { STOP_HOOK_SCRIPT_FILE, STOP_HOOK_SETTINGS_FILE, STOP_HOOK_STATE_DIR, mergeStopHookSettings, stopHookScript } from '@shared/research/stopHook'
+import { buildResearchPrompt, researchAgentRules, researchGoal } from '@shared/research/prompts'
 import { researchContextMarkdown, researchReadme } from '@shared/research/context'
 import { MAX_RECORD_BYTES, RecordParseError, dumpYaml, formatRecordFile, parseRecordFile, parseYaml } from '@shared/business/format'
 import { t, type TranslationKey } from '@shared/i18n'
@@ -71,7 +72,7 @@ export const BLOCK_END = '<!-- ferret-research:end -->'
 /** アプリが書いたファイルの印（これがあるファイルだけ書き直す。人が書いたファイルは上書きしない） */
 export const GENERATED_MARK = '<!-- ferret-research:generated -->'
 /** git の管理から外すもの（.git/info/exclude。コミットされない手元だけの除外） */
-export const RESEARCH_GIT_EXCLUDES = [`${RESEARCH_SENT_DIR}/`, `${RESEARCH_TRASH_DIR}/`] as const
+export const RESEARCH_GIT_EXCLUDES = [`${RESEARCH_SENT_DIR}/`, `${RESEARCH_TRASH_DIR}/`, `${STOP_HOOK_STATE_DIR}/`] as const
 const GIT_HEADER = '# Ferret が追記（ビジネスリサーチの送った履歴とゴミ箱を git の管理から外す）'
 
 export const LIMITS = {
@@ -160,13 +161,17 @@ export function agentBlock(locale: Locale): string {
         '## Ferret business research',
         '',
         `This folder is a Ferret business research. Before working, read \`${RESEARCH_CONTEXT_FILE}\` (current status) and \`${RESEARCH_README_FILE}\` (record format and which files you may write). How to research and judge: \`${RESEARCH_KNOWLEDGE_FILE}\`.`,
-        'Do not send anything outside, log in, pay, apply or publish. Do not mark gates as pass and do not change candidate stages: people decide them in Ferret.'
+        'Do not send anything outside, log in, pay, apply or publish. Do not mark gates as pass and do not change candidate stages: people decide them in Ferret.',
+        '',
+        researchGoal('en')
       ]
     : [
         '## Ferret のビジネスリサーチ',
         '',
         `このフォルダは Ferret のビジネスリサーチの記録です。作業の前に \`${RESEARCH_CONTEXT_FILE}\`（いまの状況）と \`${RESEARCH_README_FILE}\`（記録の形式・書いてよいファイル）を読んでください。調べ方と判定の基準は \`${RESEARCH_KNOWLEDGE_FILE}\`。`,
-        '外部への送信・ログイン・課金・応募・公開はしません。ゲートを pass にすること・候補の段階を変えることはしません（人が Ferret で決めます）。'
+        '外部への送信・ログイン・課金・応募・公開はしません。ゲートを pass にすること・候補の段階を変えることはしません（人が Ferret で決めます）。',
+        '',
+        researchGoal('ja')
       ]
   return [BLOCK_START, ...body, BLOCK_END].join('\n')
 }
@@ -444,6 +449,7 @@ export class ResearchStore {
     if (this.knowledge) await this.writeGenerated(RESEARCH_KNOWLEDGE_FILE, knowledgeCopy(this.knowledge, localDate(now)), (a, b) => stripStamp(a) === stripStamp(b))
     await this.writeGenerated(RESEARCH_README_FILE, `${GENERATED_MARK}\n${researchReadme(locale)}`)
     for (const file of AGENT_FILES) await this.upsertAgentFile(file, locale)
+    await this.writeStopHook()
     await ensureBusinessGitExclude(this.fs, RESEARCH_GIT_EXCLUDES, GIT_HEADER)
   }
 
@@ -457,6 +463,26 @@ export class ResearchStore {
     if ((await this.fs.kind(rel)) !== 'file') return
     const current = await this.fs.readText(rel, LIMITS.agentFileBytes).catch(() => null)
     if (current?.includes(GENERATED_MARK) && !same(current, content)) await this.fs.write(rel, content)
+  }
+
+  /**
+   * 「参入先を決め切る」を最後までやらせる Claude Code の Stop フック（@shared/research/stopHook）。
+   * スクリプトは印があるときだけ書き直し、.claude/settings.json は足すだけ（読めない・リンク・大きすぎるなら触らない）
+   */
+  private async writeStopHook(): Promise<void> {
+    await this.writeGenerated(STOP_HOOK_SCRIPT_FILE, stopHookScript(GENERATED_MARK))
+    const kind = await this.fs.kind(STOP_HOOK_SETTINGS_FILE)
+    if (kind !== null && kind !== 'file') return
+    let current: string | null = null
+    if (kind === 'file') {
+      try {
+        current = await this.fs.readText(STOP_HOOK_SETTINGS_FILE, LIMITS.agentFileBytes)
+      } catch {
+        return
+      }
+    }
+    const next = mergeStopHookSettings(current)
+    if (next !== null) await this.fs.write(STOP_HOOK_SETTINGS_FILE, next)
   }
 
   /** CLAUDE.md・AGENTS.md に印の間を足す・差し替える。リンクは触らない。大きすぎる・読めないファイルは書かない */
@@ -673,6 +699,8 @@ export class ResearchStore {
       // 守ること（researchAgentRules）は main が付ける。画面から来た本文の末尾に無ければ足す（消して送れない）
       const rules = researchAgentRules(this.locale()).trim()
       const body = r.text.trimEnd().endsWith(rules) ? r.text : `${r.text.trimEnd()}\n\n${rules}`
+      // 前の版で作ったフォルダにも、いまの案内（CLAUDE.md・AGENTS.md の印の間・README）を送る前に入れる
+      await this.writeScaffold(now)
       await this.writeContext(loaded.data, now)
       let outcome: SendOutcome
       try {

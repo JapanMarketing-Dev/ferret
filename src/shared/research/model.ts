@@ -754,6 +754,8 @@ export const RESEARCH_FILE = 'research.yaml'
 export const RESEARCH_META_DIR = '.research'
 export const RESEARCH_CONTEXT_FILE = '.research/context.md'
 export const RESEARCH_README_FILE = '.research/README.md'
+/** 参入先の結論（Agent が書き、決め切るまで更新し続ける。リサーチの最終の成果物） */
+export const RESEARCH_CONCLUSION_FILE = 'conclusion.md'
 export const RESEARCH_SENT_DIR = '.research/sent'
 export const RESEARCH_TRASH_DIR = '.research/trash'
 /** 集客の5原則のナレッジの写し（正本は docs/business-research/knowledge.md。Agent が読む） */

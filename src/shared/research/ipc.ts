@@ -34,7 +34,7 @@ export type ResearchSaveResult = { ok: true; snapshot: ResearchSnapshot; issues:
  * そのあとは市場探索の6機能（model.ts の RESEARCH_SECTIONS）に対応する。6 は実験の設計（experiment）と学び（learning）の2つ。
  * evaluate は証拠の評価（読む5観点・成立条件の表）。収集（who〜why）と評価は別の工程・別の依頼にする
  */
-export const RESEARCH_PROMPT_IDS = ['discover', 'who', 'what', 'where', 'why', 'evaluate', 'ranking', 'experiment', 'learning'] as const
+export const RESEARCH_PROMPT_IDS = ['decide', 'discover', 'who', 'what', 'where', 'why', 'evaluate', 'ranking', 'experiment', 'learning'] as const
 export type ResearchPromptId = (typeof RESEARCH_PROMPT_IDS)[number]
 
 export interface ResearchPromptView {

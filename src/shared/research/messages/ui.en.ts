@@ -473,6 +473,8 @@ export const researchUiEn = {
   'research.agent.launchFailed': 'Could not start {{agent}}',
   'research.agent.launching': 'Waiting for the agent to start',
   'research.agent.rule': 'Agents research and write records only. They do not send anything outside, sign in, pay or apply, and they never pass gates: you do.',
+  'research.prompt.decide.title': 'Decide where to enter',
+  'research.prompt.decide.desc': 'Compare all candidates and settle on one market to enter. The agent keeps going until the done conditions hold and writes the decision to conclusion.md.',
   'research.prompt.discover.title': 'Find candidates from existing spend',
   'research.prompt.discover.desc': 'Look for markets where companies already pay for software, data or digital BPO, and add candidates.',
   'research.prompt.who.title': '1 Find customers and companies',

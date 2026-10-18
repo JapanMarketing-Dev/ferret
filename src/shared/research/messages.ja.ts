@@ -8,6 +8,7 @@ export const researchJa: Record<keyof typeof researchEn, string> = {
   'research.mode.label': 'ビジネスリサーチ',
   'research.mode.title': '作る価値のある事業を探します。見込みのある候補は、オーケストラのプロジェクトになります',
   'research.mode.folders': 'リサーチのフォルダ',
+  'research.mode.closeFile': '{{name}} を閉じる',
   'research.mode.emptyTitle': 'ビジネスリサーチを始める',
   'research.mode.pickTitle': 'リサーチのフォルダを選ぶ',
   'research.sidebar.add': 'リサーチのフォルダを追加',

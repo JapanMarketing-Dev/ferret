@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { FolderPlus, Plus, Search } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { FileText, FolderPlus, Plus, Search, X } from 'lucide-react'
 import type { AppMode, ProjectsState, WorkspaceState } from '@shared/types'
 import { Button, EmptyState, ErrorBoundary, IconButton, useToast } from '../ui'
 import { errorMessage } from '../lib/errors'
@@ -33,9 +33,14 @@ export function useResearchMode(projects: ProjectsState, workspace: WorkspaceSta
   const projectsRef = useRef(projects)
   projectsRef.current = projects
 
-  // リサーチのフォルダを開いた（起動時に戻した・ほかから切り替えた）ら、リサーチの画面にする
+  // リサーチのフォルダを開いた（起動時に戻した・ほかから切り替えた）ら、リサーチの画面にする。
+  // 左のプロジェクトの一覧などでリサーチでないプロジェクトへ切り替えたら、リサーチの画面を閉じてそのプロジェクトをエディタで出す
   useEffect(() => {
     if (current?.research) setActive(true)
+    else if (current) {
+      setActive(false)
+      previous.current = null
+    }
   }, [current?.id, current?.research])
   // 録画などでフィードバックへ移ったら、リサーチの画面は閉じる
   useEffect(() => {
@@ -71,29 +76,59 @@ export function useResearchMode(projects: ProjectsState, workspace: WorkspaceSta
   return { active, enter, leave, openProject }
 }
 
-/** 中央の画面（リサーチのフォルダの切り替え ＋ 開いているリサーチ） */
-export function ResearchModeView({ projects, workspace, onOpenProject }: { projects: ProjectsState; workspace: WorkspaceState; onOpenProject: (id: string) => void }) {
+/** リサーチの画面の帯に並べる、開いているファイルのタブ */
+export interface ResearchFileTabs {
+  tabs: ReadonlyArray<{ id: string; name: string; path: string; dirty: boolean }>
+  /** 中身を出しているファイル（null はリサーチの画面を出している） */
+  activeId: string | null
+  onSelect: (id: string) => void
+  onClose: (id: string) => void
+  /** フォルダのタブを選んだ（リサーチの画面に戻る） */
+  onShowResearch: () => void
+  /** activeId のファイルの中身（エディタ） */
+  view: ReactNode
+}
+
+/**
+ * 中央の画面（リサーチのフォルダの切り替え ＋ 開いているリサーチ）。
+ * 右のファイルツリーで開いたファイルは、エディタへ移らずに同じ帯へタブとして並べ、ここで中身を出す
+ */
+export function ResearchModeView({ projects, workspace, onOpenProject, files }: { projects: ProjectsState; workspace: WorkspaceState; onOpenProject: (id: string) => void; files?: ResearchFileTabs }) {
   const t = useT()
   const toast = useToast()
   const list = researchProjects(projects.projects)
   const current = list.find((p) => p.id === workspace.projectId) ?? null
   const run = (task: () => Promise<unknown>) => { void task().catch((err: unknown) => toast({ tone: 'danger', message: errorMessage(err) })) }
   const add = () => run(() => window.ade.invoke('research:addProject'))
+  const fileTabs = files?.tabs ?? []
+  const showingFile = files?.activeId != null && fileTabs.some((f) => f.id === files.activeId)
   return (
     <div className="rs-mode" data-testid="research-mode">
-      {list.length > 0 && (
+      {(list.length > 0 || fileTabs.length > 0) && (
         <div className="rs-mode__bar" role="tablist" aria-label={t('research.mode.folders')}>
           {list.map((p) => (
-            <button key={p.id} type="button" role="tab" aria-selected={p.id === current?.id} className="rs-mode__folder" title={p.folderPath}
-              onClick={() => { if (p.id !== current?.id) run(() => window.ade.invoke('project:switch', p.id)) }} data-testid={`research-mode-folder-${p.id}`}>
+            <button key={p.id} type="button" role="tab" aria-selected={p.id === current?.id && !showingFile} className="rs-mode__folder" title={p.folderPath}
+              onClick={() => { if (p.id !== current?.id) run(() => window.ade.invoke('project:switch', p.id)); else files?.onShowResearch() }} data-testid={`research-mode-folder-${p.id}`}>
               <Search size={12} strokeWidth={1.75} /><span>{p.name}</span>
             </button>
           ))}
-          <IconButton size="sm" label={t('research.sidebar.add')} title={t('research.sidebar.add')} icon={<Plus size={14} strokeWidth={1.5} />} onClick={add} data-testid="research-mode-add" />
+          {list.length > 0 && <IconButton size="sm" label={t('research.sidebar.add')} title={t('research.sidebar.add')} icon={<Plus size={14} strokeWidth={1.5} />} onClick={add} data-testid="research-mode-add" />}
+          {fileTabs.length > 0 && <span className="rs-mode__sep" aria-hidden="true" />}
+          {fileTabs.map((f) => (
+            <span key={f.id} className="rs-mode__file" data-active={f.id === files?.activeId ? 'true' : undefined}>
+              <button type="button" role="tab" aria-selected={f.id === files?.activeId} className="rs-mode__folder" title={f.path}
+                onClick={() => files?.onSelect(f.id)} data-testid={`research-mode-file-${f.path}`}>
+                <FileText size={12} strokeWidth={1.75} /><span>{f.dirty ? `● ${f.name}` : f.name}</span>
+              </button>
+              <IconButton size="sm" label={t('research.mode.closeFile', { name: f.name })} icon={<X size={12} strokeWidth={1.75} />} onClick={() => files?.onClose(f.id)} />
+            </span>
+          ))}
         </div>
       )}
       <div className="rs-mode__body">
-        {current ? (
+        {showingFile ? (
+          files?.view
+        ) : current ? (
           <ErrorBoundary name="research"><ResearchWorkspace projectKey={current.id} onOpenProject={onOpenProject} /></ErrorBoundary>
         ) : (
           <div className="editor-area">

@@ -56,6 +56,15 @@ describe('サイドバーの木', () => {
     expect(rows.find((r) => r.project.id === 'O2')).toMatchObject({ collapsed: true, childCount: 4 })
     expect(treeRows([p('x'), p('y')], [p('x'), p('y')], new Set()).map((r) => [r.project.id, r.depth])).toEqual([['x', 0], ['y', 0]])
   })
+
+  it('ビジネスリサーチのフォルダは、オーケストラに入れず最後に depth 0 で並べる。動かせず、落とし先にもならない', () => {
+    const all = [...ALL, p('r', { research: true })]
+    const rows = treeRows(all, all, new Set(['O2']))
+    expect(rows.map((r) => [r.project.id, r.depth])).toEqual([['O1', 0], ['a', 1], ['b', 1], ['f', 1], ['O2', 0], ['r', 0]])
+    expect(orchestraMembers(all, 'O1').map((x) => x.id)).not.toContain('r')
+    expect(treeDrop(all, rows, 'r', 'O1', 'before')).toBeNull()
+    expect(treeDrop(all, rows, 'a', 'r', 'after')).toBeNull()
+  })
 })
 
 describe('移す・並べ替える', () => {

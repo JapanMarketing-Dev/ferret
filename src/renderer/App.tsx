@@ -30,7 +30,7 @@ import { exitBrowserFocus, initLayout, setLayout, togglePanelShown, useBrowserFo
 import { FileExplorer } from './components/FileExplorer'
 import { QuickOpen } from './components/QuickOpen'
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
-import { useOpenFiles } from './editor/useOpenFiles'
+import { fileTabId, useOpenFiles } from './editor/useOpenFiles'
 import { isHtmlPath, projectPathFromPageUrl } from '@shared/htmlPreview'
 import { FeedbackToolbar, type AnnotationTool } from './components/FeedbackToolbar'
 import { ReviewTargetsPanel } from './components/ReviewTargetsPanel'
@@ -492,6 +492,26 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   /** ビューに場所を譲ってよい条件。ひとつでも欠けたら 0 サイズにして隠す */
   // 上のモード切替の「ビジネスリサーチ」（選んだときだけ中央をリサーチの画面にする。src/renderer/research/researchMode.tsx）
   const researchMode = useResearchMode(projects, workspace, mode)
+  // リサーチの画面で開いたファイル。エディタへ移らずに、リサーチの画面の帯のタブで中身を出す
+  const [researchFile, setResearchFile] = useState(false)
+  const researchActiveRef = useRef(researchMode.active)
+  researchActiveRef.current = researchMode.active
+  useEffect(() => {
+    if (!researchMode.active) setResearchFile(false)
+  }, [researchMode.active])
+  // クイックオープンなど、ファイルツリー以外から開いたときも、リサーチの画面のままその中身を出す（入ったときに前からあったタブは出さない）
+  const lastCenterTab = useRef(centerTab)
+  useEffect(() => {
+    if (lastCenterTab.current === centerTab) return
+    lastCenterTab.current = centerTab
+    if (researchActiveRef.current && isFileTab(centerTab)) setResearchFile(true)
+  }, [centerTab])
+  /** 右のファイルツリーから開く。リサーチの画面では HTML もソースで開く（内蔵ブラウザはリサーチの画面では出ないため） */
+  const openFromTree = useCallback((path: string) => {
+    if (!researchActiveRef.current) return files.open(path)
+    files.openSource(path)
+    setResearchFile(true)
+  }, [files])
   const viewVisible =
     !researchMode.active && !anyModalOpen && !gallery && !onboardingOpen && !targetPickerOpen && !addTrackOpen && !footerPopoverOpen && !splitDragging && !projectMenuOpen && !urlDialogOpen && !tabMenuOpen && !projectDialogOpen && !quickOpenOpen && !files.pendingClose && emptyReason === null && (mode === 'feedback' || (centerTab === 'browser' && !videoOpen))
 
@@ -1353,7 +1373,18 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
             <section className="pane pane--browser external-drop-host" aria-label={t('app.reviewTarget')} data-testid="center-pane" {...editorDrop.props}>
               {editorDrop.over && <ExternalDropOverlay label={t(markdownActive ? 'drop.editor.markdownHint' : 'drop.editor.hint')} testId="editor-file-drop" align="top" />}
               <ErrorBoundary name="center">
-              {researchMode.active ? <ResearchModeView projects={projects} workspace={workspace} onOpenProject={researchMode.openProject} /> : videoOpen && workspace.folderPath ? (
+              {researchMode.active ? <ResearchModeView projects={projects} workspace={workspace} onOpenProject={researchMode.openProject} files={{
+                tabs: files.files.map((f) => ({ id: f.id, name: f.name, path: f.path, dirty: f.dirty })),
+                activeId: researchFile && isFileTab(centerTab) ? (files.activeFile?.id ?? null) : null,
+                onSelect: (id) => { setCenterTab(fileTabId(id)); setResearchFile(true) },
+                onClose: files.requestClose,
+                onShowResearch: () => setResearchFile(false),
+                view: files.activeFile && (
+                  <ErrorBoundary name="editor"><Suspense fallback={<div className="editor-area" />}>
+                    <FileEditor file={files.activeFile} editor={files} />
+                  </Suspense></ErrorBoundary>
+                )
+              }} /> : videoOpen && workspace.folderPath ? (
                 /* 上のモード切替の「動画」。選んでいる間は中央のタブの代わりに動画の画面を出す（src/video/app/renderer/） */
                 <ErrorBoundary name="video"><Suspense fallback={<div className="editor-area" />}>
                   <VideoWorkspace folderPath={workspace.folderPath} projectName={workspace.folderName ?? ''} reviewRecording={recording || recordBusy}
@@ -1491,7 +1522,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
               projectId={workspace.projectId ?? null}
               activePath={files.activeFile?.path ?? null}
               dirtyPaths={files.dirtyPaths}
-              onOpen={files.open}
+              onOpen={openFromTree}
               onOpenSource={files.openSource}
               onQuickOpen={() => setQuickOpenOpen(true)}
               onRenamed={files.followRename}

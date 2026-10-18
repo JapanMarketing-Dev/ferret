@@ -10,6 +10,7 @@ export const researchEn = {
   'research.mode.label': 'Business research',
   'research.mode.title': 'Find businesses worth building. Promising candidates become projects in an orchestra',
   'research.mode.folders': 'Research folders',
+  'research.mode.closeFile': 'Close {{name}}',
   'research.mode.emptyTitle': 'Start business research',
   'research.mode.pickTitle': 'Choose a research folder',
   'research.sidebar.add': 'Add research folder',

@@ -132,16 +132,16 @@ export type WorkspaceTab = (typeof WORKSPACE_TABS)[number]
 /** 区分ごとの Agent への依頼。概要は discover（候補を出す入口）、6 は実験の設計と学び */
 export function promptsForTab(tab: WorkspaceTab): ResearchPromptId[] {
   switch (tab) {
-    case 'overview': return ['discover', 'evaluate']
+    case 'overview': return ['decide', 'discover', 'evaluate']
     case 'experiment': return ['experiment', 'learning']
     case 'evidence': return ['evaluate', 'what', 'why']
     default: return [tab]
   }
 }
 
-/** 依頼が候補を要るか（discover は要らない。learning・evaluate は全体でもよい） */
+/** 依頼が候補を要るか（decide・discover は要らない。learning・evaluate は全体でもよい） */
 export function promptNeedsCandidate(id: ResearchPromptId): boolean {
-  return id !== 'discover' && id !== 'learning' && id !== 'evaluate'
+  return id !== 'decide' && id !== 'discover' && id !== 'learning' && id !== 'evaluate'
 }
 
 /** 区分の番号（1〜6。概要・証拠台帳は null） */

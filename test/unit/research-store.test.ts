@@ -140,6 +140,29 @@ describe('init', () => {
     const ex = read('.git/info/exclude')
     expect(ex.match(/\.research\/sent\//g)).toHaveLength(1)
     expect(ex).toContain('.research/trash/')
+    expect(ex).toContain('.research/stop-hook/')
+  })
+
+  it('Stop フック: スクリプトと .claude/settings.json を書き、利用者の設定は残す。印の無いスクリプトは書き直さない', async () => {
+    write('.claude/settings.json', JSON.stringify({ model: 'opus' }))
+    await init()
+    expect(read('.research/stop-check.mjs')).toContain('ferret-research:generated')
+    const settings = JSON.parse(read('.claude/settings.json')) as { model: string; hooks: { Stop: Array<{ hooks: Array<{ command: string }> }> } }
+    expect(settings.model).toBe('opus')
+    expect(settings.hooks.Stop[0]!.hooks[0]!.command).toContain('.research/stop-check.mjs')
+    // 2回目も重ねない
+    await init()
+    expect((JSON.parse(read('.claude/settings.json')) as typeof settings).hooks.Stop).toHaveLength(1)
+    write('.research/stop-check.mjs', '// 自分で直した')
+    await init()
+    expect(read('.research/stop-check.mjs')).toBe('// 自分で直した')
+  })
+
+  it('agentBlock: どの言語でも、ゴール（参入先を1つに決め切る・結論は conclusion.md・決め切るまで止まらない）を書く', () => {
+    expect(agentBlock('ja')).toContain('参入する市場を1つに決め切る')
+    expect(agentBlock('ja')).toContain('止まらない')
+    expect(agentBlock('en')).toContain('settle on exactly one market to enter')
+    expect(agentBlock('en')).toContain('conclusion.md')
   })
 
   it('upsertBlock: 空・印なし・印あり', () => {
@@ -489,6 +512,20 @@ describe('依頼と送信', () => {
     const withRules = sent[0]!.text
     await store.send({ promptId: 'who', candidateId: 'C001', text: withRules, target: { kind: 'active' } }, ok)
     expect(sent[2]!.text).toBe(withRules)
+  })
+
+  it('send: 前の版の案内のままの CLAUDE.md・AGENTS.md も、送る前にいまの案内（参入先を決め切るゴール）へ書き直す', async () => {
+    write('AGENTS.md', `# 自分のメモ\n\n${BLOCK_START}\n古い案内\n${BLOCK_END}\n`)
+    await store.send({ promptId: 'decide', candidateId: null, text: '本文', target: { kind: 'active' } }, ok)
+    const agents = read('AGENTS.md')
+    expect(agents).toContain('# 自分のメモ')
+    expect(agents).not.toContain('古い案内')
+    expect(agents).toContain('参入する市場を1つに決め切る')
+    expect(agents).toContain('conclusion.md')
+    expect(read('.research/context.md')).toContain('ゴール: 参入する市場を1つに決め切る')
+    // 決め切った条件は README にもある（AGENTS.md だけを読んだ Agent も辿れる）
+    expect(read('.research/README.md')).toContain('## 参入先を決め切った条件（conclusion.md）')
+    expect(read('.research/README.md')).toContain('「A か B」にしない')
   })
 
   it('送れなければ ok:false で履歴を残さない（例外も送れなかったとして返す）', async () => {

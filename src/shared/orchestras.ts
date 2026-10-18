@@ -102,10 +102,10 @@ export interface TreeRow {
 
 /**
  * サイドバーに並べる行。オーケストラ → その子（shown の順）を字下げして続ける。畳んだオーケストラの子は出さない。
- * オーケストラに属さないもの（オーケストラが1つも無いとき）は最後に depth 0 で並べる
+ * オーケストラに属さないもの（オーケストラが1つも無いとき）は最後に depth 0 で並べる。
+ * ビジネスリサーチのフォルダは、どのオーケストラにも入れず、いちばん最後に depth 0 で並べる（選ぶとビジネスリサーチの画面で開く）
  */
 export function treeRows(all: readonly Project[], shownAll: readonly Project[], collapsed: ReadonlySet<string>): TreeRow[] {
-  // ビジネスリサーチのフォルダはオーケストラの木に入れない（サイドバーの上の「ビジネスリサーチ」に並ぶ）
   const shown = shownAll.filter((p) => !p.research)
   const groups = orchestraTree(all, shown)
   const placed = new Set(groups.flatMap((g) => [g.orchestra.id, ...g.children.map((c) => c.id)]))
@@ -114,7 +114,8 @@ export function treeRows(all: readonly Project[], shownAll: readonly Project[], 
       { project: g.orchestra, depth: 0, collapsed: collapsed.has(g.orchestra.id), childCount: g.children.length },
       ...(collapsed.has(g.orchestra.id) ? [] : g.children.map((c): TreeRow => ({ project: c, depth: 1 })))
     ]),
-    ...shown.filter((p) => !placed.has(p.id)).map((p): TreeRow => ({ project: p, depth: 0 }))
+    ...shown.filter((p) => !placed.has(p.id)).map((p): TreeRow => ({ project: p, depth: 0 })),
+    ...shownAll.filter((p) => p.research).map((p): TreeRow => ({ project: p, depth: 0 }))
   ]
 }
 
@@ -129,6 +130,8 @@ export function treeDrop(all: readonly Project[], rows: readonly TreeRow[], drag
   const dragging = all.find((p) => p.id === draggingId)
   const target = all.find((p) => p.id === targetId)
   if (!dragging || !target || draggingId === targetId) return null
+  // ビジネスリサーチのフォルダはオーケストラに入れない（動かさず、ほかのものの落とし先にもしない）
+  if (dragging.research || target.research) return null
   if (isOrchestra(dragging)) {
     if (!isOrchestra(target)) return null
     const list = orchestraList(all).filter((o) => o.id !== draggingId)

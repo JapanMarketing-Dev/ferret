@@ -49,8 +49,8 @@ export function AgentPanel({ prompts, candidateId, candidateTitle, refreshKey, o
 
   const needsCandidate = promptNeedsCandidate(promptId)
   const blocked = needsCandidate && candidateId === null
-  // discover は候補を出す入口なので候補に結び付けない。learning は選んでいればその候補、無ければ全体
-  const forCandidate = promptId === 'discover' ? null : candidateId
+  // decide（全候補から参入先を決める）・discover（候補を出す入口）は候補に結び付けない。learning は選んでいればその候補、無ければ全体
+  const forCandidate = promptId === 'decide' || promptId === 'discover' ? null : candidateId
   const key = `${promptId}:${forCandidate ?? ''}`
   const editing = prompt !== null && prompt.key === key && prompt.text !== prompt.base
   const editingRef = useRef(false)

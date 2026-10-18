@@ -1507,3 +1507,23 @@
 .rs-list-table th {
   white-space: nowrap;
 }
+
+/* リサーチの画面で開いたファイルのタブ（フォルダのタブの右。閉じるボタン付き） */
+.rs-mode__sep {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-1);
+  background: var(--color-border);
+}
+
+.rs-mode__file {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.rs-mode__file[data-active='true'] {
+  background: var(--color-bg-elevated);
+}

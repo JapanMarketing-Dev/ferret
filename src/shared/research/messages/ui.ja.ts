@@ -475,6 +475,8 @@ export const researchUiJa: Record<keyof typeof researchUiEn, string> = {
   'research.agent.launchFailed': '{{agent}} を起動できませんでした',
   'research.agent.launching': 'Agent の起動を待っています',
   'research.agent.rule': 'Agent は調べて記録を書くだけです。外部への送信・ログイン・課金・応募はせず、ゲートを pass にもしません（決めるのは人です）。',
+  'research.prompt.decide.title': '参入先を決め切る',
+  'research.prompt.decide.desc': '全候補を比べて、参入する市場を1つに決めます。決め切った条件を満たすまで Agent は止まらず、結論を conclusion.md に書きます。',
   'research.prompt.discover.title': '既存の支出から候補を出す',
   'research.prompt.discover.desc': '企業がすでにソフトウェア・データ・デジタル BPO に払っている市場を探し、候補を足します。',
   'research.prompt.who.title': '1 顧客・企業を見つける',

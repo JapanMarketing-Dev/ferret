@@ -259,13 +259,13 @@ describe('区分と依頼', () => {
       }
     }
     expect([...used].sort()).toEqual([...RESEARCH_PROMPT_IDS].sort())
-    expect(promptsForTab('overview')).toEqual(['discover', 'evaluate'])
+    expect(promptsForTab('overview')).toEqual(['decide', 'discover', 'evaluate'])
     expect(promptsForTab('evidence')[0]).toBe('evaluate')
     expect(promptsForTab('experiment')).toEqual(['experiment', 'learning'])
   })
 
-  it('discover・learning・evaluate だけは候補が無くても送れる', () => {
-    expect(RESEARCH_PROMPT_IDS.filter((id) => !promptNeedsCandidate(id)).sort()).toEqual(['discover', 'evaluate', 'learning'])
+  it('decide・discover・learning・evaluate だけは候補が無くても送れる', () => {
+    expect(RESEARCH_PROMPT_IDS.filter((id) => !promptNeedsCandidate(id)).sort()).toEqual(['decide', 'discover', 'evaluate', 'learning'])
   })
 })
 
