@@ -135,23 +135,26 @@ Ferret launches CLI agents in its built-in terminals, on the subscriptions you a
     <td align="center" width="16%"><a href="https://github.com/mistralai/mistral-vibe"><img src="docs/images/agents/mistral-vibe.png" width="32" height="32" alt=""><br><sub>Mistral Vibe</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/QwenLM/qwen-code"><img src="docs/images/agents/qwen-code.png" width="32" height="32" alt=""><br><sub>Qwen Code</sub></a></td>
     <td align="center" width="16%"><a href="https://support.atlassian.com/rovo/docs/install-and-run-rovo-dev-cli-on-your-device/"><img src="docs/images/agents/rovo.png" width="32" height="32" alt=""><br><sub>Rovo Dev</sub></a></td>
+    <td align="center" width="16%"><a href="https://api-docs.deepseek.com/quick_start/agent_integrations/hermes"><img src="docs/images/agents/deepseek.png" width="32" height="32" alt=""><br><sub>DeepSeek</sub></a></td>
     <td align="center" width="16%"><a href="https://docs.openclaw.ai/"><img src="docs/images/agents/openclaw.png" width="32" height="32" alt=""><br><sub>OpenClaw</sub></a></td>
-    <td align="center" width="16%"><a href="https://aider.chat/docs/install.html"><img src="docs/images/agents/aider.svg" width="32" height="32" alt=""><br><sub>Aider</sub></a></td>
   </tr>
   <tr>
+    <td align="center" width="16%"><a href="https://aider.chat/docs/install.html"><img src="docs/images/agents/aider.svg" width="32" height="32" alt=""><br><sub>Aider</sub></a></td>
     <td align="center" width="16%"><a href="https://ante.run/start/quickstart/"><img src="docs/images/agents/ante.png" width="32" height="32" alt=""><br><sub>Ante</sub></a></td>
     <td align="center" width="16%"><a href="https://docs.blackbox.ai/features/blackbox-cli/getting-started"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>BLACKBOX CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://forgecode.dev/docs/"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>ForgeCode</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/google-gemini/gemini-cli"><img src="docs/images/agents/gemini.png" width="32" height="32" alt=""><br><sub>Gemini CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://junie.jetbrains.com/docs/junie-cli.html"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>Junie CLI</sub></a></td>
-    <td align="center" width="16%"><a href="https://github.com/letta-ai/letta-code"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>Letta Code</sub></a></td>
   </tr>
   <tr>
+    <td align="center" width="16%"><a href="https://github.com/letta-ai/letta-code"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>Letta Code</sub></a></td>
     <td align="center" width="16%"><a href="https://docs.openhands.dev/openhands/usage/cli/installation"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>OpenHands CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/PrimeIntellect-ai/prime-agent"><img src="docs/images/agents/prime-agent.png" width="32" height="32" alt=""><br><sub>Prime Agent</sub></a></td>
     <td align="center" width="16%"><a href="https://docs.qoder.com/cli/installation"><img src="docs/images/agents/qoder.png" width="32" height="32" alt=""><br><sub>Qoder CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://github.com/RooCodeInc/Roo-Code/tree/main/apps/cli"><img src=".github/assets/agent-generic.svg" width="32" height="32" alt=""><br><sub>Roo Code CLI</sub></a></td>
     <td align="center" width="16%"><a href="https://docs.trae.cn/cli_get-started-with-trae-code-cli-2"><img src="docs/images/agents/trae.png" width="32" height="32" alt=""><br><sub>Trae CLI</sub></a></td>
+  </tr>
+  <tr>
     <td align="center"><sub>…and any CLI agent</sub></td>
   </tr>
 </table>

@@ -75,6 +75,7 @@ export const BUILTIN_AGENTS: readonly BuiltinAgent[] = [
   'droid',
   'kiro',
   'hermes',
+  'deepseek',
   'openclaw',
   'aider',
   'ante',
@@ -463,6 +464,18 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     install: 'npm install -g @gitlawb/openclaude@latest',
     homepageUrl: 'https://openclaude.gitlawb.com/',
     verified: false
+  },
+  // DeepSeek のモデルで動かす Hermes Agent（DeepSeek の案内どおりの組み合わせ）。Hermes の既定のモデルに関係なく
+  // DeepSeek を使うよう、起動のたびに --provider deepseek と DeepSeek の案内のモデルを渡す。キーは hermes setup で入れる DEEPSEEK_API_KEY
+  deepseek: {
+    label: 'DeepSeek',
+    detectCmd: 'hermes',
+    launchCmd: 'hermes --tui --provider deepseek -m deepseek-v4-pro',
+    yoloArgs: '--yolo',
+    install: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash',
+    homepageUrl: 'https://api-docs.deepseek.com/quick_start/agent_integrations/hermes',
+    verified: true,
+    popular: true
   },
   // DeepSeek の公式の連携先（api-docs.deepseek.com/quick_start/agent_integrations/openclaw）。openclaw onboard で DeepSeek を選ぶ。
   // 2026.10.4 の chat（Gateway 不要）で、貼り付け→Enter の送信と ESC+CR・LF の改行を確かめた（2026-10）。Node 24.16+ が要る

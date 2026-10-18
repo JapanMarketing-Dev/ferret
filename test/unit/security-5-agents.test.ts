@@ -77,8 +77,9 @@ describe('security-5 [2] 権限確認を省く引数・フォルダの信頼は�
       const command = canonicalLaunchCommand(agent, defaultLaunchConfig(agent).command, 'posix')
       expect(command.ok, agent).toBe(true)
       const words = command.ok ? command.words.map((w) => w.value) : []
-      // 画面を選ぶだけのフラグ（確かめたもの）のほかは、フラグを置かない
-      expect(words.slice(1).filter((w) => w.startsWith('-') && !(agent === 'hermes' && w === '--tui')), agent).toEqual([])
+      // 画面とモデルを選ぶだけのフラグ（確かめたもの）のほかは、フラグを置かない
+      const screenOrModel = (w: string): boolean => (agent === 'hermes' && w === '--tui') || (agent === 'deepseek' && ['--tui', '--provider', '-m'].includes(w))
+      expect(words.slice(1).filter((w) => w.startsWith('-') && !screenOrModel(w)), agent).toEqual([])
       expect(findPermissionFlags(agent, words.slice(1)).filter((m) => m.kind !== 'mode'), agent).toEqual([])
     }
     expect(AGENT_CATALOG.muse.trustArgs).toBe('--trust-workspace')

@@ -206,6 +206,12 @@
       "icon": "docs/images/agents/rovo.png"
     },
     {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "homepageUrl": "https://api-docs.deepseek.com/quick_start/agent_integrations/hermes",
+      "icon": "docs/images/agents/deepseek.png"
+    },
+    {
       "id": "openclaw",
       "name": "OpenClaw",
       "homepageUrl": "https://docs.openclaw.ai/",

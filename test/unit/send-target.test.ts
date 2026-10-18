@@ -108,7 +108,7 @@ describe('宛先の決め方（main）', () => {
 
 describe('未対応の Agent（Enter で送信されると確かめていない）', () => {
   it('確かめた Agent だけ Enter を送る。ほかの組み込み・カスタム・不明は貼るだけ', () => {
-    for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'copilot', 'opencode', 'antigravity', 'hermes', 'openclaw'] as TuiAgent[]) expect(agentSubmitsPaste(agent), agent).toBe(true)
+    for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'copilot', 'opencode', 'antigravity', 'hermes', 'deepseek', 'openclaw'] as TuiAgent[]) expect(agentSubmitsPaste(agent), agent).toBe(true)
     for (const agent of ['aider', 'goose', 'custom:my-bot'] as TuiAgent[]) expect(agentSubmitsPaste(agent), agent).toBe(false)
     expect(agentSubmitsPaste(null)).toBe(false)
   })

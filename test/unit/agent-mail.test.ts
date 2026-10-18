@@ -72,7 +72,7 @@ describe('宛先の名前', () => {
   it.each([
     ['codex', 'codex'], ['Codex', 'codex'], [' CODEX ', 'codex'], ['claude', 'claude'], ['Claude Code', 'claude'], ['claude-code', 'claude'],
     ['cc', 'claude'], ['gemini', 'gemini'], ['gemini-cli', 'gemini'], ['my bot', 'custom:my-bot'], ['custom:my-bot', 'custom:my-bot'], ['my-bot', 'custom:my-bot'],
-    ['hermes', 'hermes'], ['Hermes Agent', 'hermes'], ['openclaw', 'openclaw'], ['clawdbot', 'openclaw']
+    ['hermes', 'hermes'], ['Hermes Agent', 'hermes'], ['openclaw', 'openclaw'], ['clawdbot', 'openclaw'], ['deepseek', 'deepseek'], ['DeepSeek', 'deepseek']
   ])('%s → %s', (name, agent) => {
     expect(normalizeAgentTarget(name, custom)).toBe(agent)
   })

@@ -220,6 +220,7 @@ export type BuiltinAgent =
   | 'cursor'
   | 'copilot'
   | 'devin'
+  | 'deepseek'
   | 'opencode'
   | 'amp'
   | 'droid'

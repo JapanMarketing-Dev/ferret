@@ -39,6 +39,8 @@ describe('カタログ（Orca の既定値）', () => {
     expect(AGENT_CATALOG.gemini.popular).toBeUndefined()
     // DeepSeek の公式の連携先（Hermes Agent・OpenClaw）を主要に置く。どちらも対話の画面を開くサブコマンドで起動する
     expect(AGENT_CATALOG.hermes).toMatchObject({ detectCmd: 'hermes', launchCmd: 'hermes --tui', yoloArgs: '--yolo', popular: true })
+    // DeepSeek は、Hermes Agent を DeepSeek のモデルで起動する項目（DeepSeek の名前で探せるように）
+    expect(AGENT_CATALOG.deepseek).toMatchObject({ label: 'DeepSeek', detectCmd: 'hermes', launchCmd: 'hermes --tui --provider deepseek -m deepseek-v4-pro', yoloArgs: '--yolo', popular: true })
     expect(AGENT_CATALOG.openclaw).toMatchObject({ detectCmd: 'openclaw', launchCmd: 'openclaw chat', yoloArgs: '', popular: true })
     // Cursor の CLI は agent に改名（旧名 cursor-agent も見つける）
     expect(AGENT_CATALOG.cursor).toMatchObject({ detectCmd: 'agent', aliases: ['cursor-agent'], yoloArgs: '--force' })
