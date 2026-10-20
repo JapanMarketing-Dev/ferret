@@ -1,6 +1,7 @@
 import { delay } from '@shared/delay'
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, normalize, resolve } from 'node:path'
 import { errorKind, reportHandled } from '@shared/report'
@@ -96,13 +97,38 @@ export function applyClaudeFolderTrust(config: Record<string, unknown>, folderKe
  */
 const MAX_TRUST_CONFIG_BYTES = 32 * 1024 * 1024
 
-function readJsonObject(path: string): Record<string, unknown> | null {
+async function readJsonObject(path: string): Promise<Record<string, unknown> | null> {
   try {
-    if (statSync(path).size > MAX_TRUST_CONFIG_BYTES) return null
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+    if ((await stat(path)).size > MAX_TRUST_CONFIG_BYTES) return null
+    const parsed: unknown = JSON.parse(await readFile(path, 'utf8'))
     return isRecord(parsed) ? parsed : null
   } catch {
     // 無い・壊れている設定は書き換えない（想定内。エージェントが自分で確認を出す）
+    return null
+  }
+}
+
+/**
+ * 最後に読んだ Claude の設定の、信頼済みのフォルダの一覧（大きさと更新時刻が同じあいだだけ使う）。
+ * 起動の直後にいくつものプロジェクトの Agent を続けて開くと、そのたびに何十 MB の ~/.claude.json を JSON にしていた
+ * （FERRET-M 0.7.6：起動から数秒で Agent を十数個）。書き換えたら更新時刻が変わるので、次は読み直す
+ */
+let claudeTrustProbe: { path: string; size: number; mtimeMs: number; trusted: ReadonlySet<string> } | null = null
+
+function trustedKeysOf(config: Record<string, unknown>): Set<string> {
+  const trusted = new Set<string>()
+  if (!isRecord(config.projects)) return trusted
+  for (const [key, entry] of Object.entries(config.projects)) {
+    if (isRecord(entry) && entry.hasTrustDialogAccepted === true) trusted.add(key)
+  }
+  return trusted
+}
+
+async function fileStamp(path: string): Promise<{ size: number; mtimeMs: number } | null> {
+  try {
+    const st = await stat(path)
+    return { size: st.size, mtimeMs: st.mtimeMs }
+  } catch {
     return null
   }
 }
@@ -161,11 +187,19 @@ export async function grantClaudeFolderTrust(configFile: string, folderKeys: rea
   const probeTarget = resolveFileTarget(configFile)
   if (probeTarget === 'missing') return 'missing-config'
   if (probeTarget === 'unreadable') return 'unreadable'
-  const probe = readJsonObject(probeTarget)
-  if (!probe) return 'unreadable'
-  // ほとんどの起動では書くことが無いので、そのときはロックも取らない
-  const planned = applyClaudeFolderTrust(probe, folderKeys)
-  if (planned.kind !== 'changed') return planned.kind === 'refuse' ? 'unreadable' : 'unchanged'
+  const stamp = await fileStamp(probeTarget)
+  const cached = stamp && claudeTrustProbe?.path === probeTarget && claudeTrustProbe.size === stamp.size && claudeTrustProbe.mtimeMs === stamp.mtimeMs
+    ? claudeTrustProbe
+    : null
+  if (cached && folderKeys.some((key) => cached.trusted.has(key))) return 'unchanged'
+  if (!cached) {
+    const probe = await readJsonObject(probeTarget)
+    if (!probe) return 'unreadable'
+    if (stamp) claudeTrustProbe = { path: probeTarget, ...stamp, trusted: trustedKeysOf(probe) }
+    // ほとんどの起動では書くことが無いので、そのときはロックも取らない
+    const planned = applyClaudeFolderTrust(probe, folderKeys)
+    if (planned.kind !== 'changed') return planned.kind === 'refuse' ? 'unreadable' : 'unchanged'
+  }
 
   const release = await acquireClaudeLock(configFile)
   if (!release) return 'locked'
@@ -174,7 +208,7 @@ export async function grantClaudeFolderTrust(configFile: string, folderKeys: rea
     const target = resolveFileTarget(configFile)
     if (target === 'missing') return 'missing-config'
     if (target === 'unreadable' || target !== probeTarget) return 'unreadable'
-    const current = readJsonObject(target)
+    const current = await readJsonObject(target)
     if (!current) return 'unreadable'
     const change = applyClaudeFolderTrust(current, folderKeys)
     if (change.kind === 'refuse') return 'unreadable'
@@ -323,6 +357,7 @@ const trustedThisSession = new Set<string>()
 /** テスト用：覚えた組み合わせを忘れる */
 export function resetTrustMemo(): void {
   trustedThisSession.clear()
+  claudeTrustProbe = null
 }
 
 export async function applyAgentWorkspaceTrust(args: {

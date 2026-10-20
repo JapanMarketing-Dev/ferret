@@ -132,6 +132,8 @@ export function hasVisibleIdle(tail: string): boolean {
  * （実際の出力を採って確認した）。
  */
 export function stripAnsi(data: string): string {
+  // どのターミナルの出力も main で毎回ここを通る。エスケープが無ければ 8 回の置き換えを飛ばす
+  if (!data.includes('\x1b')) return data
   return (
     data
       // OSC（タイトル・ハイパーリンク）

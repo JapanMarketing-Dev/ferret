@@ -67,6 +67,15 @@ tags と添付で分かること（どれも利用者の内容は含まない）
 | main が止まった理由 | タグ `block.ipc` / `block.slowop` / `block.heap` / `block.ax` / `block.cpulimit`（OS が CPU を絞っていた上限）、contexts.block。Windows でターミナルを閉じた ConPTY の同期の処理は `pty:kill` の重い処理として出る |
 | main の直近のログ | クラッシュの issue の Attachments の `main-log.txt`（見出し付きの行だけ・伏せ字済み） |
 
+### main の停止（`Main event loop blocked`）を直すときの決まり
+
+- まずパンくずの `slow op` の `op` と `ms` を見る。同期の処理（`ps`・`which:*`・`settings:save`・`pty:kill`・`gc:*`）がそのまま止まりの長さに近ければ、それが原因
+  - 例：0.7.6 の macOS の 5.9s は、ターミナルを閉じたときの同期の `ps`（`slow op ps 5963ms`。FERRET-21 の ETIMEDOUT も同じ）。0.7.7 で非同期にした
+  - `block.ipc` / contexts.block の inflight は「止まった間に待たされていた IPC」で、原因とは限らない（非同期の `fs:gitStatus` などが巻き添えで長く見える）
+- main では子プロセスを同期で起動しない（`execFileSync`・`execSync`・`spawnSync`）・同期のダイアログを使わない。`test/unit/main-blocking-policy.test.ts` が落とす。どうしても要るときはそのテストの ALLOWED に理由と一緒に足す
+- `opendir` は直接使わない（Windows で落ちる。FERRET-1Q）。`src/main/dirEntries.ts` の `readDirEntries` を使う（`test/unit/dir-entries.test.ts` が落とす）
+- スリープ（`powerMonitor.suspend`）の後の長い遅れは止まりではない。Windows は resume が届かないことがあるので、suspend からの時間でも外す（0.7.6 の Windows の 1839.6s。`shouldReportEventLoopBlock` の msSinceSuspend）
+
 ## 6. 確認用の起動
 
 画面にダイアログを出さないよう、必ず `ADE_E2E=1 ADE_SYNTHETIC_MIC=1 FERRET_SENTRY_FORCE=1` を付け、一時の `--user-data-dir` で起動する（動いている dev は使わない）。

@@ -455,6 +455,8 @@ export const QUIT_GRACE_MS = 30_000
  *   appActive … 遅れの前後ともアプリが前面か。裏にいる間は macOS の App Nap・タイマーのまとめでタイマーが数秒遅れる
  *     （前面に戻した瞬間に溜まった遅れで発火するので、前の回も前面だったかで見る。裏に回って数分後に 2.0s・4.0s）
  *   msSinceResume … スリープから戻ってからの時間（null は戻っていない）。戻った直後のタイマーの遅れは止まりではない
+ *   msSinceSuspend … スリープに入ってからの時間（null は入っていない）。遅れの間にスリープに入ったなら止まりではない
+ *     （Windows は resume が届かないことがある。0.7.6 の Windows：suspend の 2 秒後から 1839.6s、resume は無いまま lock-screen）
  *   msSinceQuitRequest … 閉じる操作（before-quit）からの時間（null は閉じていない）。QUIT_GRACE_MS のあいだは終了の途中
  */
 export function shouldReportEventLoopBlock(s: {
@@ -464,11 +466,13 @@ export function shouldReportEventLoopBlock(s: {
   appActive: boolean
   msSinceResume: number | null
   msSinceQuitRequest?: number | null
+  msSinceSuspend?: number | null
 }): boolean {
   if (s.lagMs <= s.thresholdMs) return false
   if (s.quitting || !s.appActive) return false
   if (s.msSinceQuitRequest != null && s.msSinceQuitRequest < QUIT_GRACE_MS + s.lagMs) return false
   if (s.msSinceResume !== null && s.msSinceResume < RESUME_GRACE_MS + s.lagMs) return false
+  if (s.msSinceSuspend != null && s.msSinceSuspend < RESUME_GRACE_MS + s.lagMs) return false
   return true
 }
 /** 同じ種類の性能の異常を続けて送らない間隔 */

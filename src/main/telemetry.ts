@@ -233,6 +233,7 @@ export function watchEventLoop(threshold: number): void {
   // 閉じる操作（before-quit）から will-quit までの片付けの止まりは送らない（shouldReportEventLoopBlock の msSinceQuitRequest）
   let quitRequestedAt: number | null = null
   let resumedAt: number | null = null
+  let suspendedAt: number | null = null
   // OS が掛けている CPU の速度の上限（止まりの手がかり。eventLoopBlockContext の cpuSpeedLimit）
   let cpuSpeedLimit: number | null = null
   const isActive = (): boolean => app.isReady() && BrowserWindow.getFocusedWindow() !== null
@@ -243,7 +244,7 @@ export function watchEventLoop(threshold: number): void {
   void app.whenReady().then(() => {
     // powerMonitor は ready の後でしか使えない
     powerMonitor.on('resume', () => { resumedAt = performance.now() })
-    powerMonitor.on('suspend', () => { resumedAt = null })
+    powerMonitor.on('suspend', () => { resumedAt = null; suspendedAt = performance.now() })
     powerMonitor.on('speed-limit-change', (details: { limit?: unknown }) => { cpuSpeedLimit = typeof details?.limit === 'number' ? details.limit : null })
   })
   // 補助技術の切り替え（FERRET-M では 25 秒ごとに来ていた）。パンくずには残さないので、最後の時刻だけ覚える
@@ -269,7 +270,8 @@ export function watchEventLoop(threshold: number): void {
     activeAtLastTick = activeNow
     const report = shouldReportEventLoopBlock({
       lagMs: lag, thresholdMs: threshold, quitting, appActive,
-      msSinceQuitRequest: quitRequestedAt === null ? null : now - quitRequestedAt, msSinceResume: resumedAt === null ? null : now - resumedAt
+      msSinceQuitRequest: quitRequestedAt === null ? null : now - quitRequestedAt, msSinceResume: resumedAt === null ? null : now - resumedAt,
+      msSinceSuspend: suspendedAt === null ? null : now - suspendedAt
     })
     if (report && anomalyGate('event-loop')) {
       // 手がかり：まだ終わっていない IPC（長い順の上位3つ）、直前に終わった重い処理（同期の fs・ps・which・GC など）、メモリの量、補助技術

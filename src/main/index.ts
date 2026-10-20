@@ -3797,7 +3797,8 @@ async function main(): Promise<void> {
   browser = new EmbeddedBrowser()
   browser.onStateChange((state) => {
     // WS-1 復元用に、実際に表示しているURLを控える（入力そのままではなく正規化後）
-    if (state.url && state.url !== 'about:blank') updateSettings({ url: state.url })
+    // 題名・読み込みの変化でも届く。URL が同じなら設定を書き直さない（題名が毎秒変わるページで毎秒保存していた）
+    if (state.url && state.url !== 'about:blank' && state.url !== currentSettings().url) updateSettings({ url: state.url })
     recordProjectUrl(state)
     send('browser:stateChanged', state)
     for (const listener of browserTabListeners) listener()

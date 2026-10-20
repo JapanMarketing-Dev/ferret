@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  resetTrustMemo,
   applyAgentWorkspaceTrust,
   applyClaudeFolderTrust,
   grantClaudeFolderTrust,
@@ -22,6 +23,7 @@ let home: string
 let project: string
 
 beforeEach(() => {
+  resetTrustMemo()
   root = mkdtempSync(join(tmpdir(), 'ade-trust-'))
   home = join(root, 'home')
   project = join(root, 'work', 'my-app')
@@ -74,6 +76,21 @@ describe('Claude Code の設定', () => {
     // Windows には POSIX の権限が無い（常に 0o666 と返る）ので、権限の確認は macOS / Linux だけ
     if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
     expect(await grantClaudeFolderTrust(file, [project])).toBe('unchanged')
+  })
+
+  it('続けて開くときは前に読んだ信頼の一覧を使い、外で書き換えられたら読み直す', async () => {
+    const file = join(home, '.claude.json')
+    const other = join(root, 'work', 'other')
+    mkdirSync(other, { recursive: true })
+    writeFileSync(file, JSON.stringify({ projects: { [project]: { hasTrustDialogAccepted: true } } }))
+    expect(await grantClaudeFolderTrust(file, [project])).toBe('unchanged')
+    // 別のフォルダは前の一覧に無いので、ロックを取って読み直して足す
+    expect(await grantClaudeFolderTrust(file, [other])).toBe('granted')
+    expect(JSON.parse(readFileSync(file, 'utf8')).projects[other]).toEqual({ hasTrustDialogAccepted: true })
+    // Claude が書き換えた（信頼を外した）。大きさが変わるので読み直す
+    writeFileSync(file, JSON.stringify({ projects: {}, note: 'rewritten by claude' }))
+    expect(await grantClaudeFolderTrust(file, [project])).toBe('granted')
+    expect(JSON.parse(readFileSync(file, 'utf8')).note).toBe('rewritten by claude')
   })
 
   it('壊れた JSON は書き換えない。Claude のロックが取られていれば書かない', async () => {

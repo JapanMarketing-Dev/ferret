@@ -1,7 +1,7 @@
 import { BROWSER_BIN_ENV } from '@shared/browserAutomationEnv'
 import { delay } from '@shared/delay'
 import { shellQuote, sshShellSpec, type SshTarget } from '@shared/sshCommand'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { win32 } from 'node:path'
 import { promisify } from 'node:util'
@@ -387,7 +387,7 @@ export class TerminalManager {
     // 終了通知が kill の中で届いても待ちが残らないよう、先に登録してから kill する
     const entry: { pty: IPty; descendants: number[] } = { pty, descendants: [] }
     this.awaitingExit.set(id, entry)
-    entry.descendants = killPtyTree(pty, 'SIGHUP')
+    killPtyTree(pty, 'SIGHUP', entry)
   }
 
   private spareEnabled(): boolean {
@@ -541,7 +541,7 @@ export class TerminalManager {
         // 会話を続けて起動する（タブを戻したとき）。Claude Code は続ける会話がこのフォルダに無ければ普通に起動する。
         // SSH のプロジェクトでは手元から会話を確かめられないので、Claude Code は続けない
         const resume = options.resume === true && (agent !== 'claude' ||
-          (sphere.kind !== 'ssh' && hasClaudeConversation(cwd, accountEnv.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR)))
+          (sphere.kind !== 'ssh' && await hasClaudeConversation(cwd, accountEnv.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR)))
         const policy = resolveAgentLaunchPolicy({ agent, command: configured.command, args: configured.args, projectId, skipPermissions: prefs.skipPermissions, shell: startupShell, resume })
         if (!policy.ok) throw new UserFacingError(t('terminal.errors.launch', { agent: label, error: policy.error }))
         trustFolder = policy.trustFolder
@@ -952,9 +952,10 @@ export class TerminalManager {
     this.onSessionClosed?.(id)
     this.failover?.closed(id)
     // kill してから onExit が届くまでを「後始末中」として数える。
-    // 子孫PIDは、シェルが死んで辿れなくなる前のものを控えておく。
-    const descendants = killPtyTree(session.pty, 'SIGHUP')
-    this.awaitingExit.set(id, { pty: session.pty, descendants })
+    // 子孫PIDは、シェルが死んで辿れなくなる前のものを控えておく（ps は非同期。届いたら entry に入る）。
+    const entry: { pty: IPty; descendants: number[] } = { pty: session.pty, descendants: [] }
+    this.awaitingExit.set(id, entry)
+    killPtyTree(session.pty, 'SIGHUP', entry)
   }
 
   private notifyExitWaiters(): void {
@@ -1017,7 +1018,7 @@ export class TerminalManager {
       // SIGHUP を無視するシェルが残っていたら、強制終了に切り替える
       const escalateTimer = setTimeout(() => {
         for (const entry of this.awaitingExit.values()) {
-          killPtyTree(entry.pty, 'SIGKILL', entry.descendants)
+          killPtyTree(entry.pty, 'SIGKILL', entry)
         }
       }, escalateAfterMs)
       escalateTimer.unref?.()
@@ -1040,27 +1041,51 @@ export class TerminalManager {
  *
  * シェルを落とすと子プロセスの親は init に付け替えられ、辿れなくなる。
  * そのため kill の**前**に呼び、結果を控えておく。
+ *
+ * ps は非同期で起動する。同期の ps は、起動直後にエージェントを何十個も立ち上げている最中などに数秒かかり、
+ * その間 main が止まっていた（FERRET-M 0.7.6：ps 5963ms、FERRET-21：ETIMEDOUT）
  */
-/** 直前の ps の結果。終了時に全部のタブを続けて閉じるとき、タブの数だけ同期の ps で main を止めない */
+/** 直前の ps の結果。終了時に全部のタブを続けて閉じるとき、タブの数だけ ps を起動しない */
 let psListingCache: { at: number; listing: string } | null = null
+/** 起動中の ps。同時に閉じたタブは同じ結果を待つ */
+let psListingInflight: Promise<string | null> | null = null
 const PS_LISTING_REUSE_MS = 500
+/** ps を待つ上限。超えたら子孫を数えずに、シェルのプロセスグループだけを落とす */
+const PS_TIMEOUT_MS = 3000
 
-function descendantPids(root: number): number[] {
-  let listing: string
-  try {
-    if (psListingCache && Date.now() - psListingCache.at < PS_LISTING_REUSE_MS) listing = psListingCache.listing
-    else {
-      // 同期の ps（main が止まる）。重ければ手がかりとして控える
-      listing = timedSync('ps', () => execFileSync('ps', ['-Ao', 'pid=,ppid='], { encoding: 'utf8', timeout: 1000 }))
-      psListingCache = { at: Date.now(), listing }
+function freshProcessListing(now = Date.now()): string | null {
+  return psListingCache && now - psListingCache.at < PS_LISTING_REUSE_MS ? psListingCache.listing : null
+}
+
+function processListing(): Promise<string | null> {
+  const cached = freshProcessListing()
+  if (cached !== null) return Promise.resolve(cached)
+  if (psListingInflight) return psListingInflight
+  psListingInflight = new Promise((resolve) => {
+    try {
+      execFile('ps', ['-Ao', 'pid=,ppid='], { encoding: 'utf8', timeout: PS_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+        psListingInflight = null
+        if (err) {
+          // 子プロセスを数えられないだけで、終了処理はプロセスグループへのシグナルで続ける。
+          // 時間切れ（killed）は負荷の高いときの想定内なので送らない。失敗の文は ps の stderr を含むので、種類だけを送る
+          if (!(err as { killed?: boolean }).killed) reportHandled(errorKind(err), { area: 'terminal', op: 'list child processes' })
+          resolve(null)
+          return
+        }
+        psListingCache = { at: Date.now(), listing: stdout }
+        resolve(stdout)
+      })
+    } catch (err) {
+      psListingInflight = null
+      reportHandled(errorKind(err), { area: 'terminal', op: 'list child processes' })
+      resolve(null)
     }
-  } catch (err) {
-    // 子プロセスを数えられないだけで、終了処理は pty.kill で続ける
-    // 失敗の文は ps の stderr を含むので、種類だけを送る
-    reportHandled(errorKind(err), { area: 'terminal', op: 'list child processes' })
-    return []
-  }
+  })
+  return psListingInflight
+}
 
+/** ps -Ao pid=,ppid= の出力から、root の子孫の PID を集める（純粋関数。テストから使う） */
+export function descendantsFromListing(listing: string, root: number, self: number = process.pid): number[] {
   const children = new Map<number, number[]>()
   for (const line of listing.split('\n')) {
     const matched = /^\s*(\d+)\s+(\d+)\s*$/.exec(line)
@@ -1073,12 +1098,14 @@ function descendantPids(root: number): number[] {
   }
 
   const found: number[] = []
+  const seen = new Set<number>([root])
   const stack = [root]
   while (stack.length > 0) {
     const current = stack.pop() as number
     for (const child of children.get(current) ?? []) {
-      // 念のため自分自身とinitは触らない
-      if (child <= 1 || child === process.pid) continue
+      // 念のため自分自身とinitは触らない。壊れた出力で輪になっても止まる
+      if (child <= 1 || child === self || seen.has(child)) continue
+      seen.add(child)
       found.push(child)
       stack.push(child)
     }
@@ -1098,9 +1125,12 @@ function descendantPids(root: number): number[] {
  * Windows には同じ概念が無い。node-pty の `kill()` はコンソールに付いたものしか畳まないので、
  * 先に taskkill /T でシェルの子孫ごと終わらせてから `kill()` する（windowsTreeKill.ts）。
  *
- * @param known 以前に列挙した子孫。シェルが先に死んで辿れなくなった場合に使う
+ * POSIX では子孫を ps で数えてから落とす（ps は非同期。main を止めない）。強制終了（SIGKILL）は待たずに、
+ * 控えてある子孫とプロセスグループをすぐ落とす。
+ *
+ * @param entry 控えてある子孫。列挙した結果をここへ足す（シェルが先に死んで辿れなくなった場合に使う）
  */
-function killPtyTree(pty: IPty, signal: NodeJS.Signals, known: readonly number[] = []): number[] {
+function killPtyTree(pty: IPty, signal: NodeJS.Signals, entry: { descendants: number[] } = { descendants: [] }): void {
   if (process.platform === 'win32') {
     // 同じ PTY の kill は1回だけ（閉じるときの taskkill の後と、終了時の強制終了の両方から来る）。
     // node-pty の kill は毎回ネイティブの表を引き、コンソールのプロセス一覧を取る子プロセスも起動する
@@ -1118,29 +1148,31 @@ function killPtyTree(pty: IPty, signal: NodeJS.Signals, known: readonly number[]
     if (!command) killPty()
     // 子孫が無い・すでに終わっているときも taskkill は失敗で返るだけ。どちらでも ConPTY を閉じる
     else execFile(command.file, command.args, { timeout: 3000, windowsHide: true }, killPty)
-    return []
+    return
   }
 
-  const descendants = [...new Set([...known, ...descendantPids(pty.pid)])]
-  for (const pid of descendants) {
+  const kill = (listing: string | null): void => {
+    if (listing !== null) entry.descendants = [...new Set([...entry.descendants, ...descendantsFromListing(listing, pty.pid)])]
+    for (const pid of entry.descendants) {
+      try {
+        process.kill(pid, signal)
+      } catch {
+        /* すでに終了している */
+      }
+    }
     try {
-      process.kill(pid, signal)
+      process.kill(-pty.pid, signal)
     } catch {
-      /* すでに終了している */
+      try {
+        pty.kill(signal)
+      } catch {
+        /* すでに終了している */
+      }
     }
   }
-
-  try {
-    process.kill(-pty.pid, signal)
-  } catch {
-    try {
-      pty.kill(signal)
-    } catch {
-      /* すでに終了している */
-    }
-  }
-
-  return descendants
+  const cached = freshProcessListing()
+  if (cached !== null || signal === 'SIGKILL') kill(cached)
+  else void processListing().then(kill)
 }
 
 /**

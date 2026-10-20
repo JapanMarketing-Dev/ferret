@@ -387,15 +387,15 @@ describe('TerminalRestoreStore（userData のファイル）', () => {
     expect(parseRestoreFile(readFileSync(file, 'utf8')).session).toEqual(snapshot())
   })
 
-  it('Claude Code の会話があるフォルダだけ --continue で続ける', () => {
+  it('Claude Code の会話があるフォルダだけ --continue で続ける', async () => {
     const config = fresh()
     const cwd = fresh()
-    expect(hasClaudeConversation(cwd, config)).toBe(false)
+    expect(await hasClaudeConversation(cwd, config)).toBe(false)
     const conversations = join(config, 'projects', claudeProjectDirName(cwd))
     mkdirSync(conversations, { recursive: true })
-    expect(hasClaudeConversation(cwd, config)).toBe(false)
+    expect(await hasClaudeConversation(cwd, config)).toBe(false)
     writeFileSync(join(conversations, 'a.jsonl'), '{}\n')
-    expect(hasClaudeConversation(cwd, config)).toBe(true)
+    expect(await hasClaudeConversation(cwd, config)).toBe(true)
   })
 })
 

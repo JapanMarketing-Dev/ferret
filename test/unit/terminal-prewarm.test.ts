@@ -126,14 +126,15 @@ describe.runIf(posix)('先に起動しておくシェル', () => {
     context = 'b'
     const tab = await manager.create({ size: SIZE })
     expect(tab.history).toBeUndefined()
-    expect(ptys[0]!.kill).toHaveBeenCalled()
+    // 子孫を ps（非同期）で数えてから落とす
+    await vi.waitFor(() => expect(ptys[0]!.kill).toHaveBeenCalled())
     expect(ptys).toHaveLength(2)
   })
 
   it('プロジェクトを替えたら捨てる', async () => {
     await warm()
     manager.setCwd('/')
-    expect(ptys[0]!.kill).toHaveBeenCalled()
+    await vi.waitFor(() => expect(ptys[0]!.kill).toHaveBeenCalled())
     const tab = await manager.create({ size: SIZE })
     expect(tab.history).toBeUndefined()
   })

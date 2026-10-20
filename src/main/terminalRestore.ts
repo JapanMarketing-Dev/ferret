@@ -1,4 +1,6 @@
-import { readdirSync, realpathSync, rmSync } from 'node:fs'
+import { realpath as realpathCallback, rmSync } from 'node:fs'
+import { promisify } from 'node:util'
+import { readDirEntries } from './dirEntries'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -199,17 +201,24 @@ export class TerminalRestoreStore {
  * 「続ける会話が無い」で終わってしまうので、そのときは普通に起動する。
  * 会話は <設定フォルダ>/projects/<フォルダのパスの英数字以外を - にした名前>/*.jsonl にある（Claude Code 2.1.289 で確認）
  */
-export function hasClaudeConversation(cwd: string, configDir?: string): boolean {
+/** 会話があるかを見る項目の数の上限（.jsonl のほかに作業のフォルダなども並ぶ） */
+const CONVERSATION_SCAN_MAX = 50_000
+
+export async function hasClaudeConversation(cwd: string, configDir?: string): Promise<boolean> {
   const base = configDir || join(homedir(), '.claude')
   const candidates = new Set([cwd])
   try {
-    candidates.add(realpathSync(cwd))
+    // 前と同じ realpath（JS の実装。.native とは Windows のドライブの書き方が違うことがある）を、待てる形で使う
+    candidates.add(await promisify(realpathCallback)(cwd))
   } catch {
     /* 消えたフォルダ（想定内。そのまま調べて、無ければ普通に起動する） */
   }
   for (const candidate of candidates) {
+    // 会話のフォルダには何千もの .jsonl がありうる。同期で並べない（main を止めない）。
+    // opendir は直接使わない（Windows で落ちる。dirEntries.ts）
     try {
-      if (readdirSync(join(base, 'projects', claudeProjectDirName(candidate))).some((name) => name.endsWith('.jsonl'))) return true
+      const { entries } = await readDirEntries(join(base, 'projects', claudeProjectDirName(candidate)), CONVERSATION_SCAN_MAX)
+      if (entries.some((entry) => entry.name.endsWith('.jsonl'))) return true
     } catch {
       /* 会話のフォルダが無い（想定内） */
     }

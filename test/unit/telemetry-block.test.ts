@@ -166,6 +166,12 @@ describe('送る止まりと送らない遅れ（FERRET-M: 0.4.1・0.4.4 の mac
     expect(shouldReportEventLoopBlock({ ...base, lagMs: 4000, appActive: false })).toBe(false)
   })
 
+  it('遅れの間にスリープに入ったなら、resume が届かなくても送らない（0.7.6 の Windows の 1839.6s）', () => {
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 1_839_600, msSinceSuspend: 1_839_600 + 2000, msSinceResume: null })).toBe(false)
+    // スリープがずっと前なら、今の遅れは止まり
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 5000, msSinceSuspend: 3_600_000, msSinceResume: null })).toBe(true)
+  })
+
   it('スリープから戻った直後の遅れは送らない。しばらく経てば送る', () => {
     expect(shouldReportEventLoopBlock({ ...base, msSinceResume: 0 })).toBe(false)
     expect(shouldReportEventLoopBlock({ ...base, msSinceResume: RESUME_GRACE_MS })).toBe(false)
