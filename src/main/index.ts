@@ -94,7 +94,7 @@ import {
 } from './accounts'
 import { attachUsageWindow, getAccountUsage, getUsageState, refreshUsage } from './usage/service'
 import { listAgentResources } from './agentResources'
-import { appVersion, checkForUpdate, usingE2eReleaseServer, verifiedDownload, verifiedFileOfKind } from './updateCheck'
+import { appVersion, checkForUpdate, isSuspendedNetworkError, usingE2eReleaseServer, verifiedDownload, verifiedFileOfKind } from './updateCheck'
 import { AutoUpdater } from './autoUpdate'
 import { installMethodFor } from '@shared/appUpdate'
 import { sanitizeLayout } from '@shared/layout'
@@ -1770,7 +1770,8 @@ function autoUpdater(): AutoUpdater {
       if (status.progress.phase === 'ready' && !installSync) void install().then((m) => { installSync = m }).catch(() => undefined)
       send('update:status', status)
     },
-    report: (err, op) => reportHandled(err, { area: 'update', op }),
+    // スリープに入るところで OS が止めたダウンロードは送らない（次の確認でやり直す。FERRET-1N）
+    report: (err, op) => { if (!isSuspendedNetworkError(err)) reportHandled(err, { area: 'update', op }) },
     failedMessage: () => t('update.errors.download')
   })
   return autoUpdates

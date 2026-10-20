@@ -67,6 +67,16 @@ describe('checkForUpdate', () => {
     for (let i = 0; i < UPDATE_NETWORK_REPORT_AFTER; i++) await checkForUpdate(fail, 'darwin', () => true)
     expect(handled.mock.calls.map((c) => c[1].op)).toEqual(['check update: network'])
   })
+  it('スリープに入るところで OS が止めた通信（ERR_NETWORK_IO_SUSPENDED）は、続いても数えない・送らない（FERRET-1N 0.6.30 の Windows）', async () => {
+    const handled = captured()
+    const suspended = (async () => { throw new Error('net::ERR_NETWORK_IO_SUSPENDED') }) as unknown as typeof fetch
+    for (let i = 0; i < UPDATE_NETWORK_REPORT_AFTER + 2; i++) expect((await checkForUpdate(suspended, 'win32', () => true)).state).toBe('error')
+    expect(handled).not.toHaveBeenCalled()
+    // ほかの失敗の数え方は変わらない
+    const fail = (async () => { throw new Error('net::ERR_CONNECTION_RESET') }) as unknown as typeof fetch
+    for (let i = 0; i < UPDATE_NETWORK_REPORT_AFTER; i++) await checkForUpdate(fail, 'win32', () => true)
+    expect(handled).toHaveBeenCalledTimes(1)
+  })
   it('時間切れが続けば timeout として送る', async () => {
     const handled = captured()
     const slow = (async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }) }) as unknown as typeof fetch

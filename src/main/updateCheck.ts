@@ -264,6 +264,11 @@ export function verifiedFileOfKind(kind: VerifiedDownload['kind']): VerifiedDown
  * UPDATE_NETWORK_REPORT_AFTER 回続いたときに1度だけ送る（配信元の不調には気づける）。配信元から返事が来たら数え直す
  */
 let networkFailures = 0
+
+/** スリープに入るところで OS が通信を止めた失敗か（単体テストから使う） */
+export function isSuspendedNetworkError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('ERR_NETWORK_IO_SUSPENDED')
+}
 export const UPDATE_NETWORK_REPORT_AFTER = 3
 
 /** 単体テスト用 */
@@ -312,7 +317,9 @@ export async function checkForUpdate(
     const aborted = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')
     // つながっていない端末の失敗（net::ERR_INTERNET_DISCONNECTED・ERR_NAME_NOT_RESOLVED など）は送らない。画面には「確認できなかった」を出す
     // 続いたときだけ送る（networkFailures の説明）
-    if ((aborted || isOnline()) && ++networkFailures === UPDATE_NETWORK_REPORT_AFTER) reportCheckFailure(aborted ? 'timeout' : 'network', err)
+    // スリープに入るところで OS が通信を止めた失敗（net::ERR_NETWORK_IO_SUSPENDED）は数えない。
+    // 寝たり起きたりを繰り返す端末で続けて3回になり、送られていた（FERRET-1N 0.6.30 の Windows）
+    if ((aborted || isOnline()) && !isSuspendedNetworkError(err) && ++networkFailures === UPDATE_NETWORK_REPORT_AFTER) reportCheckFailure(aborted ? 'timeout' : 'network', err)
     return { state: 'error', current, message: aborted ? t('update.errors.timeout') : t('update.errors.network') }
   } finally {
     clearTimeout(timer)
