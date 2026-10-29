@@ -74,7 +74,21 @@ tags と添付で分かること（どれも利用者の内容は含まない）
   - `block.ipc` / contexts.block の inflight は「止まった間に待たされていた IPC」で、原因とは限らない（非同期の `fs:gitStatus` などが巻き添えで長く見える）
 - main では子プロセスを同期で起動しない（`execFileSync`・`execSync`・`spawnSync`）・同期のダイアログを使わない。`test/unit/main-blocking-policy.test.ts` が落とす。どうしても要るときはそのテストの ALLOWED に理由と一緒に足す
 - `opendir` は直接使わない（Windows で落ちる。FERRET-1Q）。`src/main/dirEntries.ts` の `readDirEntries` を使う（`test/unit/dir-entries.test.ts` が落とす）
+- OS が CPU の速度に上限を掛けている間（`block.cpulimit`）は、遅れを上限で割り戻してから閾値と比べる（下限 25%）。0.7.8 の Windows の上限 50% 未満のときの 1.1〜1.5s は送らない（`shouldReportEventLoopBlock` の cpuSpeedLimit）
+- ターミナルを開くときの同期の処理は `pty:load`（node-pty のネイティブモジュールの読み込み）と `pty:spawn`（Windows の ConPTY の起動）の重い処理として出る。
+  0.7.8 の Windows で更新後の最初のシェルのタブが 10.4s 止まった（FERRET-M）ので、更新後の初回起動では操作可能になった後に node-pty の `.node` を裏で読んで OS の検査を先に済ませる（`prereadNodePtyBinaries`）。
+  それでも `pty:load` / `pty:spawn` が長ければ、node-pty を別のプロセス（utilityProcess）へ移すことを考える
 - スリープ（`powerMonitor.suspend`）の後の長い遅れは止まりではない。Windows は resume が届かないことがあるので、suspend からの時間でも外す（0.7.6 の Windows の 1839.6s。`shouldReportEventLoopBlock` の msSinceSuspend）
+
+### 送らない失敗（再発の防止）
+
+- 中断・時間切れ（`AbortError`・`TimeoutError`。`errorKind` を通したものも）は `reportHandled` が送らない（FERRET-23：本文の読み込み中の時間切れを「応答の形の変化」として送っていた）。
+  続いた時間切れを知りたいときは、理由だけの例外を作って送る（`updateCheck.ts` の `check update: timeout`）。
+  応答の本文は `fetch` の時間切れが読み込みにも効くので、読み込みの失敗と形の失敗を分ける（`usage/fetchers.ts` の `readUsageBody`）
+- GPU プロセスが GPU の文脈を失って自分から終わったもの（終了コード 34。macOS・Linux は 34 << 8 = 8704）は Chromium が起動し直すので、
+  10分に3回続いたときだけ送る（FERRET-24。`isGpuContextLostExit`・`createGpuContextLostGate`）
+- 起動の遅さ：更新直後の初回は、画面の JS の読み込み（`browser:attached` → `renderer:firstIpc`。冷えた app.asar を OS が検査しながら読む）も数えない（FERRET-K の 0.7.8 の Windows）。
+  節目 `renderer:painted`（画面が最初のデータを描いた時刻）と `interactive` の差は main の順番待ち
 
 ## 6. 確認用の起動
 

@@ -1120,7 +1120,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
       setProjectsLoaded(true)
       setBrowserState(state)
       requestAnimationFrame(() => {
-        void window.ade.invoke('app:ready').then((timing) => {
+        // 描いた時刻も渡す（main の順番待ちと分けるため。起動の内訳の renderer:painted）
+        void window.ade.invoke('app:ready', Date.now()).then((timing) => {
           console.log(`[startup] 操作可能まで ${timing.totalMs}ms`, timing.marks)
         })
       })

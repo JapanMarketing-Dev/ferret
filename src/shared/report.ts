@@ -48,9 +48,21 @@ export function setReporter(next: Reporter | null): void {
   seen = new WeakSet()
 }
 
-/** catch して続ける箇所の失敗を送る。想定外の失敗だけに使う（想定内なら理由のコメントを付けて送らない） */
+/**
+ * 中断・時間切れ（AbortController・AbortSignal.timeout）。自分で止めた・相手が遅かっただけで、Ferret の不具合ではない。
+ * errorKind を通したもの（name だけを持つ Error）も同じ名前で見分ける
+ */
+export function isAbortError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name
+  return name === 'AbortError' || name === 'TimeoutError'
+}
+
+/**
+ * catch して続ける箇所の失敗を送る。想定外の失敗だけに使う（想定内なら理由のコメントを付けて送らない）。
+ * 中断・時間切れは送らない（Sentry FERRET-23: 本文の読み込み中の時間切れを「応答の形の変化」として送っていた）
+ */
 export function reportHandled(err: unknown, where: ReportWhere, level: 'warning' | 'error' = 'warning'): void {
-  if (!reporter || isUserFacingError(err) || isIpcRelay(err)) return
+  if (!reporter || isUserFacingError(err) || isIpcRelay(err) || isAbortError(err)) return
   if (err && typeof err === 'object') {
     if (seen.has(err)) return
     seen.add(err)

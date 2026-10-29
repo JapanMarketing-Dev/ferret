@@ -3,7 +3,8 @@ import { delay } from '@shared/delay'
 import { shellQuote, sshShellSpec, type SshTarget } from '@shared/sshCommand'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { win32 } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { dirname, join, win32 } from 'node:path'
 import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import type { IPty } from 'node-pty'
@@ -37,7 +38,7 @@ import { agentInProcessTree, hasForegroundChild, isShellProcess, parseProcessRow
 import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import { reportMainError } from './telemetry'
-import { flow, reportHandled, timedSync, errorKind } from '@shared/report'
+import { flow, noteSlowOp, reportHandled, timedSync, errorKind } from '@shared/report'
 import { exitWhenDoneCommand } from '@shared/agentInstall'
 import { isKnownCliInstallCommand } from '@shared/cliTools'
 import { DECISION_ENV_PREFIXES } from '@shared/decision'
@@ -167,7 +168,9 @@ let nodePtyPromise: Promise<typeof import('node-pty')> | null = null
 
 async function loadNodePty(): Promise<typeof import('node-pty')> {
   if (!nodePtyPromise) {
-    nodePtyPromise = import('node-pty').catch((err: unknown) => {
+    // ネイティブモジュールの読み込みは main を止める（Windows は更新直後に OS の検査が入る）。重ければ pty:load として控える（FERRET-M）
+    const start = Date.now()
+    nodePtyPromise = import('node-pty').finally(() => noteSlowOp('pty:load', Date.now() - start)).catch((err: unknown) => {
       nodePtyPromise = null
       throw new Error(
         t('terminal.errors.nodePty'),
@@ -176,6 +179,36 @@ async function loadNodePty(): Promise<typeof import('node-pty')> {
     })
   }
   return nodePtyPromise
+}
+
+/**
+ * 更新した直後の Windows で、node-pty のネイティブモジュール（conpty.node など）を裏で先に読んでおく。
+ * 新しい .node は最初に開くときに OS（Defender）が検査し、最初のタブを開いたときの読み込み（main の中で同期）が長く止まる
+ * （0.7.8 の Windows：更新後の最初のシェルのタブで 10.4s。FERRET-M）。ファイルを libuv のスレッドで読んで、検査を先に済ませる。
+ * 読み込み（dlopen）はしない。見つからない・読めないファイルは飛ばす
+ */
+export async function prereadNodePtyBinaries(platform: NodeJS.Platform = process.platform, arch: string = process.arch,
+  root: () => string = () => dirname(require.resolve('node-pty/package.json'))): Promise<number> {
+  if (platform !== 'win32') return 0
+  let dir: string
+  try {
+    // 配布版の node-pty は app.asar の外（app.asar.unpacked）にある（electron-builder の asarUnpack）
+    dir = root().replace(/app\.asar(?=[\\/])/, 'app.asar.unpacked')
+  } catch {
+    return 0
+  }
+  let read = 0
+  for (const sub of ['build/Release', `prebuilds/win32-${arch}`]) {
+    for (const name of ['pty.node', 'conpty.node', 'conpty_console_list.node']) {
+      try {
+        await readFile(join(dir, sub, name))
+        read++
+      } catch {
+        // 無いもの（build/Release は配布版に無い）は飛ばす
+      }
+    }
+  }
+  return read
 }
 
 /**
@@ -587,13 +620,15 @@ export class TerminalManager {
     }
     let pty: ReturnType<typeof nodePty.spawn>
     try {
-      pty = nodePty.spawn(shell.file, shell.args, {
+      // Windows の ConPTY の起動は同期。重ければ pty:spawn として控える（0.7.8 の Windows でシェルのタブを開いて 10.4s 止まった。FERRET-M）
+      const env = ptyEnv({ ...launchEnv, ...extraEnv })
+      pty = timedSync('pty:spawn', () => nodePty.spawn(shell.file, shell.args, {
         name: 'xterm-256color',
         cols: Math.max(2, size.cols),
         rows: Math.max(1, size.rows),
         cwd,
-        env: ptyEnv({ ...launchEnv, ...extraEnv })
-      })
+        env
+      }))
       hardenWindowsPty(pty)
     } catch (err) {
       // シェルの名前だけを付ける（パスは送る前に落とす。src/main/telemetry.ts）

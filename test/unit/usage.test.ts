@@ -15,7 +15,7 @@ import {
   usageTone,
   type ProviderRateLimits
 } from '../../src/shared/usage'
-import { mapClaudeUsageResponse, mapCodexUsageResponse, parseResetTimestamp } from '../../src/main/usage/fetchers'
+import { mapClaudeUsageResponse, mapCodexUsageResponse, parseResetTimestamp, readUsageBody } from '../../src/main/usage/fetchers'
 import {
   MIN_REFETCH_MS,
   STALE_THRESHOLD_MS,
@@ -307,5 +307,40 @@ describe('Claude の資格情報の期限', () => {
     expect(parseClaudeCredentials(raw(), 1_000)).toEqual({ token: 'tok', expired: false })
     expect(parseClaudeCredentials('{broken', 1_000)).toBeNull()
     expect(parseClaudeCredentials('{}', 1_000)).toBeNull()
+  })
+})
+
+describe('応答の本文の読み込み（FERRET-23）', () => {
+  /** 本文の途中で err を投げる応答（時間切れ・接続の切断） */
+  function failingBody(err: unknown): Response {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"plan_type":'))
+        controller.error(err)
+      }
+    })
+    return new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+
+  it('読めた JSON はそのまま返す', async () => {
+    expect(await readUsageBody(new Response('{"plan_type":"plus"}'))).toEqual({ failed: false, json: { plan_type: 'plus' } })
+  })
+  it('本文の読み込み中の時間切れ・中断・切断は通信の失敗（形の失敗として送らない）', async () => {
+    for (const err of [
+      new DOMException('The operation timed out.', 'TimeoutError'),
+      new DOMException('This operation was aborted', 'AbortError'),
+      new TypeError('terminated')
+    ]) {
+      expect(await readUsageBody(failingBody(err))).toEqual({ failed: 'network' })
+    }
+  })
+  it('JSON として読めない本文・大きすぎる本文は形の失敗', async () => {
+    const broken = await readUsageBody(new Response('<html>maintenance</html>'))
+    expect(broken.failed).toBe('format')
+    const huge = await readUsageBody(new Response('x'.repeat(2 * 1024 * 1024)))
+    expect(huge.failed).toBe('format')
+  })
+  it('空の本文は形の失敗', async () => {
+    expect((await readUsageBody(new Response(''))).failed).toBe('format')
   })
 })

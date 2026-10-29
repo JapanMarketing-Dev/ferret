@@ -98,7 +98,8 @@ import { RESEARCH_IPC_CHANNELS, RESEARCH_IPC_EVENTS, type ResearchIpcEvents, typ
  */
 /** ビジネス（business:*）とビジネスリサーチ（research:*）は src/shared/business/ipc.ts・src/shared/research/ipc.ts に置く */
 export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, ResearchIpcRequests, VentureIpcRequests {
-  'app:ready': () => StartupTiming
+  /** paintedAt: 画面が最初のデータを描いた時刻（epoch ms。起動の内訳の renderer:painted） */
+  'app:ready': (paintedAt?: number) => StartupTiming
   'app:settings': () => Settings
   /** settings.json の場所と、壊れているか（~/.ferret/settings.json。src/main/settingsFile.ts） */
   'settingsFile:info': () => SettingsFileInfo

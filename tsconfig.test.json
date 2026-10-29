@@ -27,6 +27,7 @@
   },
   "include": [
     "test/unit/**/*",
+    "test/setup/**/*",
     "src/preload/api.d.ts",
     "tools/pipeline/**/*",
     "src/shared/**/*",

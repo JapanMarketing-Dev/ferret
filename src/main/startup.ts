@@ -49,6 +49,16 @@ export function markOnce(name: string): void {
   if (!(name in marks)) mark(name)
 }
 
+/**
+ * 別のプロセス（画面）で起きた時刻（epoch ms）を節目にする。画面が描いた時刻と、main がそれを受けた時刻（interactive）の差が
+ * main の順番待ちになる（FERRET-K: 画面の最初のデータから操作可能までの 3〜4 秒がどちらかを分ける）。
+ * 基準より前・今より後・数でない値は捨てる
+ */
+export function markAt(name: string, epochMs: unknown, now: number = Date.now()): void {
+  if (typeof epochMs !== 'number' || !Number.isFinite(epochMs) || epochMs < origin || epochMs > now) return
+  marks[name] = Math.round(epochMs - origin)
+}
+
 function marksSnapshot(): Record<string, number> {
   return { ...marks }
 }

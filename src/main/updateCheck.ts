@@ -319,7 +319,8 @@ export async function checkForUpdate(
     // 続いたときだけ送る（networkFailures の説明）
     // スリープに入るところで OS が通信を止めた失敗（net::ERR_NETWORK_IO_SUSPENDED）は数えない。
     // 寝たり起きたりを繰り返す端末で続けて3回になり、送られていた（FERRET-1N 0.6.30 の Windows）
-    if ((aborted || isOnline()) && !isSuspendedNetworkError(err) && ++networkFailures === UPDATE_NETWORK_REPORT_AFTER) reportCheckFailure(aborted ? 'timeout' : 'network', err)
+    // 時間切れの例外そのもの（AbortError）は reportHandled が送らないので、続いた時間切れは理由だけの例外で送る
+    if ((aborted || isOnline()) && !isSuspendedNetworkError(err) && ++networkFailures === UPDATE_NETWORK_REPORT_AFTER) reportCheckFailure(aborted ? 'timeout' : 'network', aborted ? undefined : err)
     return { state: 'error', current, message: aborted ? t('update.errors.timeout') : t('update.errors.network') }
   } finally {
     clearTimeout(timer)

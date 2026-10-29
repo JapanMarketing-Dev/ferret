@@ -143,4 +143,28 @@ describe('本番の遅い起動の再発防止（FERRET-1C / FERRET-K）', () =>
     expect(slowStartupReport(startupBreakdown(slowApp(5001)), T, { firstLaunchOfVersion: true })).toEqual({ perf: 'slow-startup', ms: 5001 })
     expect(slowStartupReport(startupBreakdown(slowApp(5001)), T, { systemUptimeMs: 1000 })).toEqual({ perf: 'slow-startup', ms: 5001 })
   })
+
+  // FERRET-K: 0.7.8 Windows・更新直後の初回。画面の JS の読み込み（browser:attached → renderer:firstIpc）が 8.3 秒（いつもは 1.4 秒）
+  const winFirst = fromSentry(1458, 14_356, {
+    'main:loaded': 1606, 'app:ready': 1843, 'browser:attached': 2094, 'renderer:firstIpc': 10_360, 'renderer:loaded': 10_372,
+    'renderer:initialData': 10_988, interactive: 14_356
+  })
+
+  it('画面の JS の読み込みの時間を内訳に持つ。節目が無い・壊れていれば null', () => {
+    expect(startupBreakdown(winFirst).rendererLoadMs).toBe(8266)
+    expect(startupBreakdown(mac).rendererLoadMs).toBeNull()
+    expect(startupBreakdown(timing({ marks: { 'browser:attached': 100, 'renderer:firstIpc': Number.NaN } })).rendererLoadMs).toBeNull()
+    expect(startupBreakdown(timing({ marks: { 'browser:attached': 500, 'renderer:firstIpc': 400 } })).rendererLoadMs).toBe(0)
+  })
+
+  it('FERRET-K の 0.7.8 の形：更新直後の初回は画面の JS の読み込みも数えず、残りのアプリ自身の 4.2 秒で判断する', () => {
+    expect(slowStartupReport(startupBreakdown(winFirst), T, { firstLaunchOfVersion: true })).toBeNull()
+    // 初回でなければ今までどおり数える
+    expect(slowStartupReport(startupBreakdown(winFirst), T)).toEqual({ perf: 'slow-startup', ms: 12_898 })
+  })
+
+  it('初回でも、画面の JS の読み込みを除いたアプリ自身が閾値を超えれば数える', () => {
+    const slow = fromSentry(1000, 20_000, { 'app:ready': 2000, 'browser:attached': 2500, 'renderer:firstIpc': 10_000, interactive: 20_000 })
+    expect(slowStartupReport(startupBreakdown(slow), T, { firstLaunchOfVersion: true })).toEqual({ perf: 'slow-startup', ms: 10_500 })
+  })
 })

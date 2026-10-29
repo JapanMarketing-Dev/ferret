@@ -77,9 +77,9 @@ import { UserFacingError, isStaleChunkError, toUserFacingFileError } from '@shar
 import { IS_PACKAGED } from './runtime'
 import { configDir, currentSettings, flushSettingsSync, loadSettings, readSettingsText, settingsFileInfo, updateSettings, watchSettings, writeSettingsText } from './settings'
 import { envGetter, keepKeyRefs, redactKeys, resolveApiKey, resolveConfiguredKey, resolveEndpointRefs, type KeyRef } from './settingsKeys'
-import { elapsedMs, mark, markOnce, noteLaunchedVersion, reportInteractive, setStartupTags } from './startup'
+import { elapsedMs, mark, markAt, markOnce, noteLaunchedVersion, reportInteractive, setStartupTags } from './startup'
 import { emulationKind } from './emulation'
-import { TerminalManager } from './terminal'
+import { TerminalManager, prereadNodePtyBinaries } from './terminal'
 import { listAgentOptions, warmLoginShellPath } from './agentDetection'
 import { listCliTools } from './cliTools'
 import {
@@ -249,6 +249,10 @@ let extensions: BrowserExtensions | null = null
 /** 直前に探した取り込みの候補（key → 写す元）。画面からはパスを受け取らず、この key だけを受ける */
 let installedExtensions = new Map<string, { id: string; dir: string }>()
 let terminals: TerminalManager | null = null
+/** この起動がその版の初めての起動か（入れた・更新した直後。startup.ts の noteLaunchedVersion） */
+let launchedNewVersion = false
+/** node-pty のファイルを先に読み始めたか（1度だけ） */
+let prereadStarted = false
 /** スマホから操作（src/main/mobileRemote.ts）。入れたときに初めて読み込む */
 let mobileRemote: import('./mobileRemote').MobileRemoteService | null = null
 /** Resource Manager の集計。ターミナル・ブラウザ・プロジェクトは読むだけ */
@@ -2179,7 +2183,15 @@ function registerIpc(): void {
     }),
     // ビジネス（venture: のチャネル。src/main/venture/wire.ts）
     ...ventureOpsHandlers(ventureWiring()),
-    'app:ready': () => reportInteractive(),
+    'app:ready': (paintedAt) => {
+      markAt('renderer:painted', paintedAt)
+      // 更新した直後の Windows は、最初のタブの前に node-pty のファイルを裏で読んで OS の検査を済ませる（操作可能になってから。FERRET-M）
+      if (launchedNewVersion && !prereadStarted) {
+        prereadStarted = true
+        void prereadNodePtyBinaries().catch(() => undefined)
+      }
+      return reportInteractive()
+    },
     // 平文の apiKey は renderer へ渡さない
     'app:settings': () => redactKeys({ ...currentSettings() }),
     'settingsFile:info': () => settingsFileInfo(),
@@ -3544,7 +3556,7 @@ async function main(): Promise<void> {
   // エミュレーション（Rosetta / Prism）で動いているかを、性能の報告のタグに付ける
   setStartupTags({ emulation: emulationKind(process.platform, app.runningUnderARM64Translation) })
   // 入れた・更新した直後の初回は、JS より前の遅れ（OS の検査）を数えない（startup.ts）
-  noteLaunchedVersion(join(app.getPath('userData'), 'last-launch-version'), app.getVersion())
+  launchedNewVersion = noteLaunchedVersion(join(app.getPath('userData'), 'last-launch-version'), app.getVersion())
   // 既定のセッション（アプリの画面・録画ウインドウ・プレビューの iframe）の権限。アプリ自身の画面の本体だけに、
   // 要るものだけを許す。プレビュー（プロジェクトの HTML）や外のページには何も許さない。読み込みの前に入れる
   // media はアプリの窓には音だけ、映像（画面・タブ）は録画ウインドウだけ。カメラはどこにも許さない（captureConsent.ts）

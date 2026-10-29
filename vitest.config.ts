@@ -14,6 +14,8 @@ export default defineConfig({
     environment: 'node',
     // 収録日時はローカル時刻で書くので、CI（UTC）でも手元（日本時間）と同じ結果になるよう固定する
     env: { TZ: 'Asia/Tokyo' },
+    // 親の Ferret のターミナルから受け継いだ変数を消してから流す（手元でだけ落ちるのを防ぐ）
+    setupFiles: ['test/setup/isolateEnv.ts'],
     testTimeout: 10_000
   }
 })

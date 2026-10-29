@@ -15,6 +15,9 @@ import {
   parseSentryTestKinds,
   shouldReportLoadFailure,
   shouldReportProcessGone,
+  isGpuContextLostExit,
+  createGpuContextLostGate,
+  GPU_CONTEXT_LOST_WINDOW_MS,
   renderErrorCapture,
   wrapIpcHandler
 } from '../../src/shared/telemetry'
@@ -118,6 +121,34 @@ describe('集める異常', () => {
     expect(shouldReportProcessGone('launch-failed')).toBe(true)
     expect(shouldReportProcessGone('clean-exit')).toBe(false)
     expect(shouldReportProcessGone('killed')).toBe(false)
+  })
+  it('GPU の文脈を失った終了（終了コード 34。macOS・Linux は 34 << 8 = 8704）を見分ける（FERRET-24）', () => {
+    expect(isGpuContextLostExit({ type: 'GPU', reason: 'abnormal-exit', exitCode: 8704 })).toBe(true)
+    expect(isGpuContextLostExit({ type: 'GPU', reason: 'abnormal-exit', exitCode: 34 })).toBe(true)
+    // 本当に落ちたもの・他のプロセス・他の終了コードは今までどおり送る
+    expect(isGpuContextLostExit({ type: 'GPU', reason: 'crashed', exitCode: 8704 })).toBe(false)
+    expect(isGpuContextLostExit({ type: 'GPU', reason: 'abnormal-exit', exitCode: 1 })).toBe(false)
+    expect(isGpuContextLostExit({ type: 'GPU', reason: 'abnormal-exit', exitCode: 33 << 8 })).toBe(false)
+    expect(isGpuContextLostExit({ type: 'Utility', reason: 'abnormal-exit', exitCode: 8704 })).toBe(false)
+  })
+  it('GPU の文脈を失った終了は、短い間に3回続いたときに1度だけ送る', () => {
+    let now = 0
+    const gate = createGpuContextLostGate(() => now)
+    expect(gate()).toBe(false)
+    now += 60_000
+    expect(gate()).toBe(false)
+    now += 60_000
+    expect(gate()).toBe(true)
+    now += 60_000
+    expect(gate()).toBe(false) // 続きの4回目は送らない
+  })
+  it('GPU の文脈を失った終了が間を空けて起きるなら送らない（1日に数回のスリープ明けなど）', () => {
+    let now = 0
+    const gate = createGpuContextLostGate(() => now)
+    for (let i = 0; i < 10; i++) {
+      expect(gate()).toBe(false)
+      now += GPU_CONTEXT_LOST_WINDOW_MS / 2 + 1
+    }
   })
   it('ErrorBoundary のエラーには境界の名前と componentStack を付ける', () => {
     expect(renderErrorCapture('terminal', '\n    at Bomb\n    at ErrorBoundary')).toEqual({

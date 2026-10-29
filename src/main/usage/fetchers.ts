@@ -3,7 +3,7 @@ import type { AccountAgent } from '@shared/types'
 import { readClaudeAccessToken, readCodexAccessToken } from './credentials'
 import { t } from '@shared/i18n'
 import { errorKind, reportHandled } from '@shared/report'
-import { SMALL_JSON_MAX_BYTES, readBoundedJson } from '../boundedResponse'
+import { ResponseTooLargeError, SMALL_JSON_MAX_BYTES, readBoundedJson } from '../boundedResponse'
 
 /**
  * Claude / Codex の使用量を、それぞれの公式のエンドポイントから読む。
@@ -69,6 +69,19 @@ function httpFailure(provider: AccountAgent, response: Response): ProviderRateLi
 
 function networkFailure(provider: AccountAgent): ProviderRateLimits {
   return failure(provider, 'network', t('usage.errors.network', { name: provider === 'claude' ? 'Claude' : 'Codex' }))
+}
+
+/**
+ * 応答の本文を読む。読む途中で切れた・時間切れ（AbortSignal.timeout は本文の読み込みにも効く）は通信の失敗で、応答の形の変化ではない。
+ * 形の変化として送っていた（Sentry FERRET-23: 'parse codex usage' の AbortError）。JSON として読めない・大きすぎるものだけを形の失敗にする
+ */
+export async function readUsageBody(response: Response): Promise<{ failed: false; json: unknown } | { failed: 'network' } | { failed: 'format'; err: unknown }> {
+  try {
+    return { failed: false, json: await readBoundedJson(response, SMALL_JSON_MAX_BYTES) }
+  } catch (err) {
+    if (err instanceof SyntaxError || err instanceof ResponseTooLargeError) return { failed: 'format', err }
+    return { failed: 'network' }
+  }
 }
 
 // ───────────────────────── Claude ─────────────────────────
@@ -147,8 +160,11 @@ export async function fetchClaudeUsage(request: UsageRequest, configDir?: string
     return networkFailure('claude')
   }
   if (!response.ok) return httpFailure('claude', response)
+  const body = await readUsageBody(response)
+  if (body.failed === 'network') return networkFailure('claude')
   try {
-    return mapClaudeUsageResponse((await readBoundedJson(response, SMALL_JSON_MAX_BYTES)) as ClaudeUsageResponse)
+    if (body.failed) throw body.err
+    return mapClaudeUsageResponse(body.json as ClaudeUsageResponse)
   } catch (err) {
     // 応答の形が変わった（API の変更）。中身は送らない
     reportHandled(errorKind(err), { area: 'usage', op: 'parse claude usage' })
@@ -231,8 +247,11 @@ export async function fetchCodexUsage(request: UsageRequest, codexHome: string):
     return networkFailure('codex')
   }
   if (!response.ok) return httpFailure('codex', response)
+  const body = await readUsageBody(response)
+  if (body.failed === 'network') return networkFailure('codex')
   try {
-    return mapCodexUsageResponse((await readBoundedJson(response, SMALL_JSON_MAX_BYTES)) as CodexUsageResponse) ?? failure('codex', 'unknown', t('usage.errors.badFormat', { name: 'Codex' }))
+    if (body.failed) throw body.err
+    return mapCodexUsageResponse(body.json as CodexUsageResponse) ?? failure('codex', 'unknown', t('usage.errors.badFormat', { name: 'Codex' }))
   } catch (err) {
     reportHandled(errorKind(err), { area: 'usage', op: 'parse codex usage' })
     return failure('codex', 'unknown', t('usage.errors.badFormat', { name: 'Codex' }))

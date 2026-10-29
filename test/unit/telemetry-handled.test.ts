@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { errorKind, flow, isIpcRelay, reportAnomaly, reportHandled, setReporter, type Reporter } from '../../src/shared/report'
+import { errorKind, flow, isAbortError, isIpcRelay, reportAnomaly, reportHandled, setReporter, type Reporter } from '../../src/shared/report'
 import { UserFacingError } from '../../src/shared/errors'
 import {
   ANOMALY_COOLDOWN_MS,
@@ -47,6 +47,27 @@ describe('reportHandled', () => {
     expect(isIpcRelay(relayed)).toBe(true)
     reportHandled(relayed, { area: 'ui', op: 'run action' })
     expect(r.handled).not.toHaveBeenCalled()
+  })
+  it('中断・時間切れは送らない（errorKind を通したものも。FERRET-23）', () => {
+    const r = fakeReporter()
+    setReporter(r)
+    const abort = new DOMException('This operation was aborted', 'AbortError')
+    const timeout = new DOMException('The operation timed out.', 'TimeoutError')
+    const nodeAbort = Object.assign(new Error('The operation was aborted'), { name: 'AbortError', code: 'ABORT_ERR' })
+    for (const err of [abort, timeout, nodeAbort, errorKind(nodeAbort)]) {
+      expect(isAbortError(err)).toBe(true)
+      reportHandled(err, { area: 'usage', op: 'parse codex usage' })
+    }
+    expect(r.handled).not.toHaveBeenCalled()
+  })
+  it('中断・時間切れに似た名前のものや、名前の無い値は送る', () => {
+    const r = fakeReporter()
+    setReporter(r)
+    for (const err of [new Error('AbortError'), new TypeError('terminated'), Object.assign(new Error('x'), { name: 'Aborted' }), 'AbortError', null]) {
+      expect(isAbortError(err)).toBe(false)
+    }
+    reportHandled(new TypeError('terminated'), { area: 'usage', op: 'x' })
+    expect(r.handled).toHaveBeenCalledTimes(1)
   })
   it('同じ例外は1度だけ（catch で送ったあと上で投げ直されても数えない）', () => {
     const r = fakeReporter()

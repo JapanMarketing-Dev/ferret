@@ -34,6 +34,8 @@ import {
   eventLoopBlockContext,
   eventLoopBlockThreshold,
   shouldReportEventLoopBlock,
+  createGpuContextLostGate,
+  isGpuContextLostExit,
   type ScrubContext,
   type SentryTestKind,
   classifyStaleBuild,
@@ -271,7 +273,7 @@ export function watchEventLoop(threshold: number): void {
     const report = shouldReportEventLoopBlock({
       lagMs: lag, thresholdMs: threshold, quitting, appActive,
       msSinceQuitRequest: quitRequestedAt === null ? null : now - quitRequestedAt, msSinceResume: resumedAt === null ? null : now - resumedAt,
-      msSinceSuspend: suspendedAt === null ? null : now - suspendedAt
+      msSinceSuspend: suspendedAt === null ? null : now - suspendedAt, cpuSpeedLimit
     })
     if (report && anomalyGate('event-loop')) {
       // 手がかり：まだ終わっていない IPC（長い順の上位3つ）、直前に終わった重い処理（同期の fs・ps・which・GC など）、メモリの量、補助技術
@@ -313,8 +315,11 @@ function installProcessHooks(): void {
     if (!shouldReportProcessGone(details.reason)) return
     reportMessage(`render-process-gone: ${details.reason}`, 'error', { kind: 'render-process-gone', reason: details.reason, exitCode: String(details.exitCode) })
   })
+  const gpuContextLost = createGpuContextLostGate()
   app.on('child-process-gone', (_e, details) => {
     if (!shouldReportProcessGone(details.reason)) return
+    // GPU の文脈を失った終了は、Chromium が起動し直す。続いたときだけ送る（FERRET-24）
+    if (isGpuContextLostExit(details) && !gpuContextLost()) return
     reportMessage(`child-process-gone: ${details.type} ${details.reason}`, 'error', {
       kind: 'child-process-gone', reason: details.reason, 'process.type': details.type, exitCode: String(details.exitCode), ...(details.name ? { 'process.name': details.name } : {})
     })

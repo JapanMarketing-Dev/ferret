@@ -368,6 +368,34 @@ export function shouldReportProcessGone(reason: string): boolean {
 }
 
 /**
+ * Chromium の GPU プロセスが GPU の文脈を失って自分から終わったときの終了コード（gpu::ExitCode::kGpuExitOnContextLost）。
+ * スリープ明け・ディスプレイの抜き差し・ウインドウの出し入れで GPU のドライバが文脈を捨てると起き、Chromium がすぐ起動し直す（画面は戻る）
+ */
+export const GPU_EXIT_ON_CONTEXT_LOST = 34
+/** これだけの間に GPU_CONTEXT_LOST_REPORT_AFTER 回続いたら送る（Chromium は何度も落ちると GPU を使うのをやめ、描画が重くなる） */
+export const GPU_CONTEXT_LOST_WINDOW_MS = 10 * 60_000
+export const GPU_CONTEXT_LOST_REPORT_AFTER = 3
+
+/** GPU の文脈を失って終わったか。macOS・Linux は waitpid の状態（コード << 8）のまま届く（Sentry FERRET-24: exitCode 8704 = 34 << 8） */
+export function isGpuContextLostExit(details: { type: string; reason: string; exitCode: number }): boolean {
+  return details.type === 'GPU' && details.reason === 'abnormal-exit' &&
+    (details.exitCode === GPU_EXIT_ON_CONTEXT_LOST || details.exitCode === GPU_EXIT_ON_CONTEXT_LOST << 8)
+}
+
+/**
+ * GPU の文脈を失った終了を送るか。1度だけなら Chromium が起動し直して終わるので送らない（パンくずには Electron が残す）。
+ * 短い間に続いたときだけ、続いた回数ちょうどで1度送る（同じ続きで何度も送らない）。now はテストで差し替える
+ */
+export function createGpuContextLostGate(now: () => number = Date.now): () => boolean {
+  let times: number[] = []
+  return () => {
+    const t = now()
+    times = [...times.filter((at) => t - at < GPU_CONTEXT_LOST_WINDOW_MS), t]
+    return times.length === GPU_CONTEXT_LOST_REPORT_AFTER
+  }
+}
+
+/**
  * minimizeNativeCrash を通したネイティブのクラッシュを送るか。main（browser）以外のプロセスが外から止められた（killed）・
  * 正常に終わった（clean-exit）ものは、shouldReportProcessGone と同じく送らない。
  * macOS の Utility が SIGTERM（exitCode 15）で止められたときも crashpad が報告を作り、SDK が「Native crash (Utility, killed)」として送っていた（Sentry FERRET-1V）。
@@ -458,6 +486,9 @@ export const QUIT_GRACE_MS = 30_000
  *   msSinceSuspend … スリープに入ってからの時間（null は入っていない）。遅れの間にスリープに入ったなら止まりではない
  *     （Windows は resume が届かないことがある。0.7.6 の Windows：suspend の 2 秒後から 1839.6s、resume は無いまま lock-screen）
  *   msSinceQuitRequest … 閉じる操作（before-quit）からの時間（null は閉じていない）。QUIT_GRACE_MS のあいだは終了の途中
+ *   cpuSpeedLimit … OS が掛けている CPU の速度の上限（%。powerMonitor の speed-limit-change。null・不明は 100% とみなす）。
+ *     上限が掛かっている間は同じ処理が上限の分だけ長くかかるので、遅れを上限で割り戻してから閾値と比べる
+ *     （0.7.8 の Windows：上限 50% 未満のときの 1.1〜1.5s が続いた。FERRET-M）。下限は CPU_LIMIT_FLOOR（閾値を4倍より緩めない）
  */
 export function shouldReportEventLoopBlock(s: {
   lagMs: number
@@ -467,14 +498,24 @@ export function shouldReportEventLoopBlock(s: {
   msSinceResume: number | null
   msSinceQuitRequest?: number | null
   msSinceSuspend?: number | null
+  cpuSpeedLimit?: number | null
 }): boolean {
-  if (s.lagMs <= s.thresholdMs) return false
+  if (s.lagMs * cpuLimitScale(s.cpuSpeedLimit) <= s.thresholdMs) return false
   if (s.quitting || !s.appActive) return false
   if (s.msSinceQuitRequest != null && s.msSinceQuitRequest < QUIT_GRACE_MS + s.lagMs) return false
   if (s.msSinceResume !== null && s.msSinceResume < RESUME_GRACE_MS + s.lagMs) return false
   if (s.msSinceSuspend != null && s.msSinceSuspend < RESUME_GRACE_MS + s.lagMs) return false
   return true
 }
+/** CPU の速度の上限で割り戻すときの下限（%） */
+export const CPU_LIMIT_FLOOR = 25
+
+/** 遅れに掛ける倍率（上限が無い・分からないなら 1） */
+function cpuLimitScale(limit: number | null | undefined): number {
+  if (limit == null || !Number.isFinite(limit) || limit >= 100) return 1
+  return Math.max(CPU_LIMIT_FLOOR, limit) / 100
+}
+
 /** 同じ種類の性能の異常を続けて送らない間隔 */
 export const ANOMALY_COOLDOWN_MS = 10 * 60 * 1000
 

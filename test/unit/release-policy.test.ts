@@ -277,6 +277,10 @@ describe('ブランチは main だけ（develop は 2026-10-15 に廃止）', ()
     expect(read('.github/workflows/codeql.yml')).toMatch(/branches:\s*\[main\]/)
   })
 
+  it('CodeQL は公開リポジトリだけで動かす（非公開の開発用では Code scanning が使えず毎回失敗していた）', () => {
+    expect(read('.github/workflows/codeql.yml')).toMatch(/^\s+if: github\.repository == 'JapanMarketing-Dev\/ferret'$/m)
+  })
+
   it('公開の squash は main だけを push し、既定の元も main', () => {
     const text = read('scripts/publish-squash.sh')
     expect(text).toContain('SOURCE_REF="${1:-main}"')

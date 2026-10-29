@@ -177,4 +177,21 @@ describe('送る止まりと送らない遅れ（FERRET-M: 0.4.1・0.4.4 の mac
     expect(shouldReportEventLoopBlock({ ...base, msSinceResume: RESUME_GRACE_MS })).toBe(false)
     expect(shouldReportEventLoopBlock({ ...base, msSinceResume: RESUME_GRACE_MS + base.lagMs + 1 })).toBe(true)
   })
+
+  it('OS が CPU の速度に上限を掛けている間は、遅れを上限で割り戻してから比べる（0.7.8 の Windows：上限 50% 未満で 1.1〜1.5s）', () => {
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 1500, cpuSpeedLimit: 40 })).toBe(false)
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 1100, cpuSpeedLimit: 60 })).toBe(false)
+    // 割り戻しても閾値を超える止まりは送る（10.4s のターミナルの作成など）
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 10_400, cpuSpeedLimit: 40 })).toBe(true)
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 2600, cpuSpeedLimit: 40 })).toBe(true)
+  })
+
+  it('上限が無い・分からない・おかしな値なら今までどおり。極端に低い上限でも閾値を4倍より緩めない', () => {
+    for (const cpuSpeedLimit of [null, undefined, 100, 150, Number.NaN]) {
+      expect(shouldReportEventLoopBlock({ ...base, lagMs: 1100, cpuSpeedLimit })).toBe(true)
+    }
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 4100, cpuSpeedLimit: 5 })).toBe(true)
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 3900, cpuSpeedLimit: 5 })).toBe(false)
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 4100, cpuSpeedLimit: 0 })).toBe(true)
+  })
 })

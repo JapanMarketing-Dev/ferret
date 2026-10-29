@@ -1,4 +1,6 @@
 # CodeQL で JavaScript / TypeScript と workflow（actions）のコードを調べる。公開リポジトリなので無料。
+# 非公開の開発用リポジトリでは Code scanning が使えず、毎回「Resource not accessible by integration」で失敗するので動かさない
+# （公開の前は scripts/codeql-local.sh が同じ中身を手元の CodeQL で調べる。publish-squash.sh がその記録を求める）。
 # 結果はリポジトリの Security > Code scanning に出る。ビルドは要らない（build-mode: none）ので、依存も入れない。
 # actions はコミットの SHA に固定し、コメントに版を書く（test/unit/release-policy.test.ts が確かめる）。
 name: CodeQL
@@ -22,6 +24,7 @@ concurrency:
 jobs:
   analyze:
     name: analyze (${{ matrix.language }})
+    if: github.repository == 'JapanMarketing-Dev/ferret'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -36,11 +39,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: ${{ matrix.language }}
           build-mode: none
 
-      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: /language:${{ matrix.language }}
