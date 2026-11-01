@@ -47,7 +47,7 @@
   "dependencies": {
     "@sentry/electron": "8.1.0",
     "ajv": "^8.20.0",
-    "node-pty": "1.2.0-beta.15",
+    "node-pty": "1.2.0-beta.18",
     "ws": "8.21.0"
   },
   "devDependencies": {
