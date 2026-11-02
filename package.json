@@ -73,7 +73,7 @@
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-webgl": "0.18.0",
     "@xterm/xterm": "^5.5.0",
-    "budoux": "0.10.0",
+    "budoux": "0.10.1",
     "electron": "^44.9.3",
     "electron-builder": "^26.18.0",
     "electron-vite": "^5.0.0",
