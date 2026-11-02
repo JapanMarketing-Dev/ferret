@@ -396,6 +396,8 @@ export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, Rese
   'terminal:restoreSave': (snapshot: TerminalRestoreSnapshot) => void
   /** 起動して最初の1回だけ、前に終了したときのタブ。無い・切なら null */
   'terminal:restoreTake': () => TerminalRestoreSnapshot | null
+  /** いま覚えているタブと画面の文字（取り出さない）。読み込み直したあと、PTY を作らずに置いていたペインを戻すため。切なら null */
+  'terminal:restorePeek': () => TerminalRestoreSnapshot | null
   /** 利用者が閉じたタブ（開き直すため） */
   'terminal:closedPush': (entry: ClosedTerminal) => void
   /** そのプロジェクトで最後に閉じたタブを取り出す。無ければ null */
@@ -832,7 +834,7 @@ export const IPC_REQUEST_CHANNELS = [
   'terminal:write',
   'terminal:resize',
   'terminal:close',
-  'terminal:screen', 'terminal:agentState', 'terminal:agentStates', 'terminal:visible', 'terminal:continueWork', 'terminal:cwd', 'terminal:list', 'terminal:attach', 'terminal:paste', 'terminal:pasteFiles', 'terminal:writeClipboard', 'terminal:programCopy', 'terminal:ack', 'terminal:focused', 'terminal:restoreSave', 'terminal:restoreTake', 'terminal:closedPush', 'terminal:closedPop', 'terminal:restoreClear', 'review:send',
+  'terminal:screen', 'terminal:agentState', 'terminal:agentStates', 'terminal:visible', 'terminal:continueWork', 'terminal:cwd', 'terminal:list', 'terminal:attach', 'terminal:paste', 'terminal:pasteFiles', 'terminal:writeClipboard', 'terminal:programCopy', 'terminal:ack', 'terminal:focused', 'terminal:restoreSave', 'terminal:restoreTake', 'terminal:restorePeek', 'terminal:closedPush', 'terminal:closedPop', 'terminal:restoreClear', 'review:send',
   'settings:splitRatio',
   'settings:layout',
   'settings:theme',

@@ -1694,6 +1694,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
             startupAgents={agents.startupAgents}
             notify={agents.notify}
             restore={agents.restoreTerminals}
+            sleepIdle={agents.sleepIdleAgents}
             onOpenFile={files.open}
             onOpenAgentSettings={() => openSettings('agents')}
           />

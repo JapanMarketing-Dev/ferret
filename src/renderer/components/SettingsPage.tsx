@@ -190,6 +190,12 @@ function AgentSection({ value, onChange, prompt, onPromptChange }: {
       }}>{t('settings.agents.clearTerminalHistory')}</Button>
     </div>
 
+    {/* 裏のプロジェクトで入力待ちの Agent を休ませてメモリを空ける（既定は入。renderer の terminal/sleepPolicy.ts） */}
+    <div data-testid="agent-sleep-idle">
+      <Switch label={t('settings.agents.sleepIdleAgents')} checked={value.sleepIdleAgents} onChange={(sleepIdleAgents) => onChange({ ...value, sleepIdleAgents })} />
+      <p className="st-note">{t('settings.agents.sleepIdleAgentsNote')}</p>
+    </div>
+
     <h3 className="st-page__subheading">{t('settings.agents.startupTitle')}</h3>
     <div className="st-agent-startup" role="group" aria-label={t('settings.agents.startupTitle')}>
       {startable.map((id) => {

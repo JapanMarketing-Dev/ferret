@@ -14,6 +14,7 @@ import { hasBusyAgent, publishAgentActivity } from '../terminal/agentActivity'
 import { AttentionThrottle, INITIAL_TRACK, advancePaneState, attentionEvents, type AttentionPane, type PaneTrack } from '../terminal/agentAttention'
 import { onAccountLoginRequest } from '../lib/accountLogin'
 import { SpawnQueue, partitionSpawns, type SpawnCandidate } from '../terminal/spawnQueue'
+import { SLEEP_CHECK_MS, panesToSleep, trackHidden } from '../terminal/sleepPolicy'
 import { panesDueForPoll } from '../terminal/pollSchedule'
 import { onTerminalCommandRequest } from '../lib/terminalCommand'
 import { onAgentLaunchRequest } from '../lib/agentLaunchRequest'
@@ -305,7 +306,8 @@ export function TerminalPane({
   onOpenAgentSettings,
   onOpenFile,
   notify = false,
-  restore = true
+  restore = true,
+  sleepIdle = true
 }: {
   /** 分割幅など、レイアウトが変わったことを知らせる値 */
   layoutKey: string
@@ -328,6 +330,8 @@ export function TerminalPane({
   notify?: boolean
   /** タブと画面の文字を覚えて、終了・閉じたあとに戻す（設定の agents.restoreTerminals） */
   restore?: boolean
+  /** 裏のプロジェクトで入力を待ったままの Agent を休ませてメモリを空ける（設定の agents.sleepIdleAgents） */
+  sleepIdle?: boolean
 }) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const t = useT()
@@ -718,12 +722,12 @@ export function TerminalPane({
     // アプリを起動し直したとき（生きているターミナルが無いとき）は、前に終了したときのタブを戻す（@shared/terminalRestore）。
     // タブ・分割の形・作業フォルダ・Agent とアカウントはそのまま、前の画面の文字を書いてから新しい PTY を作る。
     // Agent は会話を続けて起動する（同じ Agent・フォルダ・アカウントのタブが複数あれば最初の1つだけ）
-    const restoreSavedSession = async () => {
+    const restoreSavedSession = async (): Promise<boolean> => {
       const saved = await window.ade.invoke('terminal:restoreTake').catch((err: unknown) => {
         reportHandled(err, { area: 'terminal', op: 'take terminal restore' })
         return null
       })
-      if (stopped || !saved || saved.tabs.length === 0) return
+      if (stopped || !saved || saved.tabs.length === 0) return false
       const mapped = remapRestoreKeys(saved, (kind) => (kind === 'tab' ? `tab${++tabSeq}` : `pane${++paneSeq}`))
       const paneByKey = new Map(mapped.panes.map((pane) => [pane.key, pane]))
       const resume = panesToResume(mapped.tabs.flatMap((tab) => leafIds(tab.layout)).flatMap((key) => paneByKey.get(key) ?? []))
@@ -736,6 +740,7 @@ export function TerminalPane({
       setActiveByProject((prev) => ({ ...mapped.activeByProject, ...prev }))
       // 戻したタブのあるプロジェクトは、もう自動でタブを作らない
       for (const tab of mapped.tabs) seededRef.current.add(tab.projectId ?? '')
+      return true
     }
     void (async () => {
       try {
@@ -744,10 +749,8 @@ export function TerminalPane({
           window.ade.invoke('project:list')
         ])
         if (stopped) return
-        if (live.length === 0) {
-          await restoreSavedSession()
-          return
-        }
+        // 起動し直したときは前回のタブを戻す。読み込み直しで生きている PTY が無くても、休ませたタブだけが残っていれば下でつなぎ直す
+        if (live.length === 0 && await restoreSavedSession()) return
         const snapshot = parseTerminalSnapshot(readSnapshot())
         tabSeq = Math.max(tabSeq, maxKeySeq(snapshot?.tabs.map((tab) => tab.key) ?? [], 'tab'))
         paneSeq = Math.max(paneSeq, maxKeySeq(snapshot?.panes.map((pane) => pane.key) ?? [], 'pane'))
@@ -761,9 +764,20 @@ export function TerminalPane({
         const attached = await Promise.all(
           plan.panes.map(async (pane) => [pane, await window.ade.invoke('terminal:attach', pane.ptyId).catch(() => null /* 終了済みの PTY（想定内） */)] as const)
         )
+        // PTY を作らずに置いていたペイン（裏のプロジェクトの戻したタブ・休ませたタブ）は、main の覚えから画面の文字を戻す。覚えに無ければ外す
+        const peeked = plan.dormant.length > 0
+          ? await window.ade.invoke('terminal:restorePeek').catch(() => null /* 覚えが読めない（想定内。そのペインは外す） */)
+          : null
         if (stopped) return
-        const dead = new Set(attached.filter(([, info]) => !info).map(([pane]) => pane.key))
+        const savedByKey = new Map((peeked?.panes ?? []).map((pane) => [pane.key, pane]))
+        const dormantSaved = plan.dormant.flatMap((pane) => savedByKey.get(pane.key) ?? [])
+        const dead = new Set([
+          ...attached.filter(([, info]) => !info).map(([pane]) => pane.key),
+          ...plan.dormant.filter((pane) => !savedByKey.has(pane.key)).map((pane) => pane.key)
+        ])
         plan = dropRestoredPanes(plan, dead)
+        const dormantResume = panesToResume(dormantSaved, plan.panes.map((pane) => ({ launch: pane.launch, cwd: pane.cwd, accountId: null })))
+        const dormantBanner = tNow('terminal.wokeSeparator', { time: formatRestoreTime(peeked?.savedAt ?? Date.now()) })
         for (const [pane, info] of attached) {
           if (!info) continue
           const handle = acquireTerminal(pane.key)
@@ -777,7 +791,8 @@ export function TerminalPane({
               pane.key,
               { key: pane.key, title: pane.title, state: 'unknown', launch: pane.launch, cwd: pane.cwd }
             ])
-          )
+          ),
+          ...Object.fromEntries(dormantSaved.map((saved): [string, Pane] => [saved.key, paneFromRestore(saved, dormantBanner, dormantResume.has(saved.key))]))
         }))
         setTabs((prev) => [...prev, ...plan.tabs])
         setActiveByProject((prev) => ({ ...plan.activeByProject, ...prev }))
@@ -803,6 +818,7 @@ export function TerminalPane({
         tabs,
         panes: Object.values(panes),
         ptyIdOf: (key) => getTerminal(key)?.ptyId ?? null,
+        dormantOf: (key) => Boolean(panes[key]?.restoreText),
         activeByProject
       })
     )
@@ -961,7 +977,8 @@ export function TerminalPane({
 
   // ペインごとに xterm を開き、PTYを結びつける。
   // 非表示のペイン（裏のタブ）もPTYを作る。寸法が測れなければ 80x24 で作り、表示時に合わせる。
-  // 表示中のプロジェクトのペインはすぐ作り、裏のプロジェクトのペイン（戻したタブなど）は順に作る（terminal/spawnQueue.ts）
+  // 表示中のプロジェクトのペインはすぐ作り、裏のプロジェクトのペインは順に作る（terminal/spawnQueue.ts）。
+  // 裏のプロジェクトの戻したタブ・休ませたタブは、作業の途中だったものを除いて、開くまで作らない
   const spawnQueueRef = useRef<SpawnQueue | null>(null)
   spawnQueueRef.current ??= new SpawnQueue()
   useEffect(() => () => spawnQueueRef.current?.dispose(), [])
@@ -971,10 +988,14 @@ export function TerminalPane({
     for (const pane of Object.values(panes)) {
       const node = nodesRef.current.get(pane.key)
       if (!node) continue
+      const paneProject = tabsRef.current.find((tab) => hasLeaf(tab.layout, pane.key))?.projectId ?? null
+      const dormant = Boolean(pane.restoreText) && !pane.continueWork
+      // 裏のプロジェクトの戻したタブ・休ませたタブは xterm も作らずに置き、そのプロジェクトを開いたときに作る（terminal/sleepPolicy.ts）
+      if (dormant && !getTerminal(pane.key) && (paneProject ?? '') !== (projectId ?? '')) continue
       const handle = acquireTerminal(pane.key)
       handle.open(node)
       if (handle.ptyId !== null || spawnedRef.current.has(pane.key)) continue
-      candidates.push({ key: pane.key, projectId: tabsRef.current.find((tab) => hasLeaf(tab.layout, pane.key))?.projectId ?? null })
+      candidates.push({ key: pane.key, projectId: paneProject, dormant })
     }
     const { now, queued } = partitionSpawns(candidates, projectId)
     for (const key of now) {
@@ -1088,6 +1109,69 @@ export function TerminalPane({
     const timer = setInterval(() => void update(), 1000)
     return () => { stopped = true; clearInterval(timer) }
   }, [paneKeys])
+
+  // 裏のプロジェクトで入力を待ったまま SLEEP_AFTER_MS 経った Agent を休ませる（terminal/sleepPolicy.ts）。
+  // 画面の文字を覚えて PTY と xterm を閉じ、戻したタブと同じ形にしておく。そのプロジェクトを開けば会話を続けて起動し直す
+  const sleepIdleRef = useRef(sleepIdle)
+  sleepIdleRef.current = sleepIdle
+  const hiddenSinceRef = useRef(new Map<string, number>())
+  useEffect(() => {
+    let stopped = false
+    const check = async () => {
+      const now = Date.now()
+      const ownerOf = (key: string) => tabsRef.current.find((tab) => hasLeaf(tab.layout, key))?.projectId ?? null
+      const current = Object.values(panesRef.current)
+      trackHidden(hiddenSinceRef.current, current.map((pane) => ({ key: pane.key, projectId: ownerOf(pane.key) })), projectKeyRef.current, now)
+      // 休ませたペインの画面の文字は main の覚えから戻す（読み込み直したとき）。覚えない設定では休ませない
+      if (!sleepIdleRef.current || !restoreRef.current) return
+      const keys = panesToSleep(current.map((pane) => ({
+        key: pane.key,
+        projectId: ownerOf(pane.key),
+        launch: pane.launch,
+        cwd: pane.cwd,
+        accountId: pane.accountId ?? null,
+        state: pane.state,
+        awake: Boolean(getTerminal(pane.key)?.ptyId),
+        restorable: isRestorable(pane)
+      })), projectKeyRef.current, hiddenSinceRef.current, now)
+      if (keys.length === 0) return
+      // 画面の印は裏では間を空けて読むので古いことがある。閉じる直前に今の状態を聞き直し、入力待ちのものだけ休ませる
+      const ids = keys.map((key) => getTerminal(key)?.ptyId ?? '')
+      const fresh = await window.ade.invoke('terminal:agentStates', ids).catch(() => null /* 画面の閉じかけなど（想定内） */)
+      if (stopped || !fresh) return
+      const banner = tNow('terminal.wokeSeparator', { time: formatRestoreTime(now) })
+      const slept: Pane[] = []
+      keys.forEach((key, index) => {
+        const pane = panesRef.current[key]
+        const handle = getTerminal(key)
+        if (!pane || !handle || handle.ptyId !== ids[index] || fresh[index]?.state !== 'idle') return
+        if ((ownerOf(key) ?? '') === projectKeyRef.current) return // 聞いている間にそのプロジェクトを開いた
+        const text = handle.scrollbackText()
+        releaseTerminal(key)
+        spawnedRef.current.delete(key)
+        slept.push({
+          key,
+          title: pane.title,
+          state: 'unknown',
+          launch: pane.launch,
+          cwd: pane.cwd,
+          customTitle: pane.customTitle ?? null,
+          accountId: pane.accountId ?? null,
+          resume: true,
+          restoreText: restoreReplayText(text, banner),
+          savedScrollback: text
+        })
+      })
+      if (slept.length === 0) return
+      setPanes((prev) => {
+        const next = { ...prev }
+        for (const pane of slept) if (next[pane.key]) next[pane.key] = pane
+        return next
+      })
+    }
+    const timer = setInterval(() => void check(), SLEEP_CHECK_MS)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [])
 
   // 通知が押されたら、そのプロジェクトへ切り替えてそのタブを開く（main の agentNotify.ts）
   const projectIdRef = useRef(projectId)

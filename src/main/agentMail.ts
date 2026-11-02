@@ -160,6 +160,9 @@ export function revokeAgentMailSession(sessionId: string): void {
     void rm(entry.dir, { recursive: true, force: true }).catch(() => undefined)
   }
   bySession.delete(sessionId)
+  // 閉じたタブへの宛先と配送の順番も消す（タブを開け閉めするほど溜まらないように）
+  deliveryQueue.delete(sessionId)
+  for (const [key, peer] of [...lastPeer]) if (peer === sessionId || key.startsWith(`${sessionId}|`)) lastPeer.delete(key)
 }
 
 /** そのタブの CLI の絶対パス（依頼文・返事に書く） */

@@ -26,6 +26,8 @@ interface SnapshotPane {
   cwd: string | null
   /** main のターミナルID。まだ作っている途中なら null */
   ptyId: string | null
+  /** PTY を作らずに置いているペイン（裏のプロジェクトの戻したタブ・休ませたタブ）。画面の文字は main の覚えから戻す */
+  dormant?: boolean
 }
 
 interface SnapshotTab {
@@ -49,6 +51,8 @@ interface RestorePlan {
   activeByProject: Record<string, string | null>
   /** 片付ける（閉じる）ターミナルID */
   close: string[]
+  /** PTY を作らずに置いていたペイン。タブの分割の形には残してあり、画面の文字は main の覚え（terminal:restorePeek）から戻す */
+  dormant: SnapshotPane[]
 }
 
 /** 記録を読む。壊れていれば null（そのときは main の一覧だけで戻す） */
@@ -82,6 +86,7 @@ export function planTerminalRestore(args: {
   const close = new Set<string>()
   const tabs: SnapshotTab[] = []
   const panes: RestorePlan['panes'] = []
+  const dormant: SnapshotPane[] = []
   const paneByKey = new Map((args.snapshot?.panes ?? []).map((pane) => [pane.key, pane]))
 
   for (const tab of args.snapshot?.tabs ?? []) {
@@ -101,6 +106,8 @@ export function planTerminalRestore(args: {
       if (alive) {
         claimed.add(pane.ptyId!)
         panes.push({ ...pane!, ptyId: pane!.ptyId! })
+      } else if (pane?.dormant && !pane.ptyId) {
+        dormant.push(pane)
       } else if (layout) {
         // 終わったペイン（作っている途中で読み込み直したものを含む）は外す
         layout = removeLeaf(layout, key)
@@ -130,7 +137,7 @@ export function planTerminalRestore(args: {
   for (const [project, key] of Object.entries(args.snapshot?.activeByProject ?? {})) {
     if (key && tabKeys.has(key)) activeByProject[project] = key
   }
-  return { tabs, panes, activeByProject, close: [...close] }
+  return { tabs, panes, activeByProject, close: [...close], dormant }
 }
 
 function safeLeafIds(layout: PaneNode): string[] {
@@ -152,12 +159,17 @@ export function buildTerminalSnapshot(args: {
   tabs: ReadonlyArray<SnapshotTab>
   panes: ReadonlyArray<Omit<SnapshotPane, 'ptyId'>>
   ptyIdOf: (paneKey: string) => string | null
+  /** PTY を作らずに置いているペインか（無ければどれも違う） */
+  dormantOf?: (paneKey: string) => boolean
   activeByProject: Record<string, string | null>
 }): TerminalSnapshot {
   return {
     version: 1,
     tabs: args.tabs.map(({ key, projectId, layout, activePane }) => ({ key, projectId, layout, activePane })),
-    panes: args.panes.map(({ key, title, launch, cwd }) => ({ key, title, launch, cwd, ptyId: args.ptyIdOf(key) })),
+    panes: args.panes.map(({ key, title, launch, cwd }) => {
+      const ptyId = args.ptyIdOf(key)
+      return { key, title, launch, cwd, ptyId, ...(!ptyId && args.dormantOf?.(key) ? { dormant: true } : {}) }
+    }),
     activeByProject: args.activeByProject
   }
 }
@@ -178,6 +190,7 @@ export function dropRestoredPanes(plan: RestorePlan, deadKeys: ReadonlySet<strin
     ...plan,
     tabs,
     panes: plan.panes.filter((pane) => !deadKeys.has(pane.key)),
+    dormant: plan.dormant.filter((pane) => !deadKeys.has(pane.key)),
     activeByProject: Object.fromEntries(Object.entries(plan.activeByProject).filter(([, key]) => key && tabKeys.has(key)))
   }
 }

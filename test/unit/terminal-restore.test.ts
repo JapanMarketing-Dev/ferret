@@ -91,8 +91,52 @@ describe('planTerminalRestore', () => {
       tabs: [],
       panes: [],
       activeByProject: {},
-      close: []
+      close: [],
+      dormant: []
     })
+  })
+
+  it('PTY を作らずに置いていたペイン（dormant）は、分割の形に残して dormant に返す', () => {
+    const withDormant: TerminalSnapshot = {
+      ...snapshot,
+      panes: snapshot.panes.map((pane) => (pane.key === 'pane1' ? { ...pane, ptyId: null, dormant: true } : pane))
+    }
+    const plan = planTerminalRestore({ snapshot: withDormant, live: allLive.filter((t) => t.id !== 't1'), projects, newKey: keyMaker() })
+    expect(plan.tabs[0]).toEqual(snapshot.tabs[0])
+    expect(plan.dormant.map((pane) => pane.key)).toEqual(['pane1'])
+    expect(plan.panes.map((pane) => pane.key)).toEqual(['pane2', 'pane3', 'pane4'])
+  })
+
+  it('dormant だけのタブも残る。生きているターミナルが1つも無くても', () => {
+    const only: TerminalSnapshot = {
+      version: 1,
+      tabs: [{ key: 'tab2', projectId: 'p2', layout: leaf('pane3'), activePane: 'pane3' }],
+      panes: [{ key: 'pane3', title: 'Codex', launch: 'codex', cwd: '/w/site', ptyId: null, dormant: true }],
+      activeByProject: { p2: 'tab2' }
+    }
+    const plan = planTerminalRestore({ snapshot: only, live: [], projects, newKey: keyMaker() })
+    expect(plan.tabs).toEqual(only.tabs)
+    expect(plan.dormant.map((pane) => pane.key)).toEqual(['pane3'])
+    expect(plan.activeByProject).toEqual({ p2: 'tab2' })
+  })
+
+  it('dormant でも登録を外したプロジェクトのものは戻さない', () => {
+    const gone: TerminalSnapshot = {
+      ...snapshot,
+      panes: snapshot.panes.map((pane) => (pane.key === 'pane3' ? { ...pane, ptyId: null, dormant: true } : pane))
+    }
+    const plan = planTerminalRestore({ snapshot: gone, live: allLive, projects: [projects[0]!], newKey: keyMaker() })
+    expect(plan.dormant).toEqual([])
+  })
+
+  it('dormant の印の無い、PTY の無いペインは今までどおり外す', () => {
+    const noPty: TerminalSnapshot = {
+      ...snapshot,
+      panes: snapshot.panes.map((pane) => (pane.key === 'pane3' ? { ...pane, ptyId: null } : pane))
+    }
+    const plan = planTerminalRestore({ snapshot: noPty, live: allLive.filter((t) => t.id !== 't3'), projects, newKey: keyMaker() })
+    expect(plan.dormant).toEqual([])
+    expect(plan.tabs.map((tab) => tab.key)).toEqual(['tab1', 'tab3'])
   })
 
   it('つなぎ直す前に終了したペインは、計画から外す', () => {
@@ -115,6 +159,18 @@ describe('記録の読み書き', () => {
     expect(parseTerminalSnapshot('{oops')).toBeNull()
     expect(parseTerminalSnapshot(JSON.stringify({ version: 2 }))).toBeNull()
     expect(parseTerminalSnapshot(null)).toBeNull()
+  })
+
+  it('PTY の無い、作らずに置いているペインにだけ dormant の印を付け、読み直しても残る', () => {
+    const built = buildTerminalSnapshot({
+      tabs: snapshot.tabs,
+      panes: snapshot.panes.map(({ ptyId: _ptyId, ...rest }) => rest),
+      ptyIdOf: (key) => (key === 'pane1' || key === 'pane2' ? null : 'tX'),
+      dormantOf: (key) => key === 'pane1' || key === 'pane3',
+      activeByProject: snapshot.activeByProject
+    })
+    expect(built.panes.filter((pane) => pane.dormant).map((pane) => pane.key)).toEqual(['pane1'])
+    expect(parseTerminalSnapshot(JSON.stringify(built))?.panes[0]).toMatchObject({ key: 'pane1', ptyId: null, dormant: true })
   })
 
   it('新しいキーが記録と重ならないよう、通し番号の最大を出す', () => {

@@ -311,6 +311,11 @@ export interface AgentPreferences {
    */
   restoreTerminals: boolean
   /**
+   * 裏のプロジェクトで入力を待ったまま30分経った Claude Code・Codex を休ませてメモリを空ける（既定は入）。
+   * 画面の文字を覚えてプロセスを閉じ、そのプロジェクトを開いたら会話を続けて起動し直す（renderer の terminal/sleepPolicy.ts）
+   */
+  sleepIdleAgents: boolean
+  /**
    * Windows のターミナルのシェル（既定は PowerShell）。cmd.exe は履歴を残さないので ↑ で前のコマンドが出ない（main の resolveWindowsShell）
    */
   windowsShell: WindowsShell

@@ -49,11 +49,31 @@ describe('partitionSpawns（すぐ作るペインと順に作るペイン）', (
       { key: 'h1', projectId: null },
       { key: 'b2', projectId: 'B' }
     ], 'A')
-    expect(result).toEqual({ now: ['a1', 'a2'], queued: ['b1', 'h1', 'b2'] })
+    expect(result).toEqual({ now: ['a1', 'a2'], queued: ['b1', 'h1', 'b2'], deferred: [] })
   })
 
   it('プロジェクトを開いていない（ホーム）ときは、プロジェクトの無いペインがすぐ', () => {
-    expect(partitionSpawns([{ key: 'h1', projectId: null }, { key: 'a1', projectId: 'A' }], null)).toEqual({ now: ['h1'], queued: ['a1'] })
+    expect(partitionSpawns([{ key: 'h1', projectId: null }, { key: 'a1', projectId: 'A' }], null)).toEqual({ now: ['h1'], queued: ['a1'], deferred: [] })
+  })
+})
+
+describe('partitionSpawns（戻したタブ・休ませたタブ）', () => {
+  it('裏のプロジェクトの dormant は作らずに置く。表示中のプロジェクトなら dormant でもすぐ作る', () => {
+    expect(partitionSpawns([
+      { key: 'a1', projectId: 'A', dormant: true },
+      { key: 'b1', projectId: 'B', dormant: true },
+      { key: 'b2', projectId: 'B', dormant: false },
+      { key: 'h1', projectId: null, dormant: true }
+    ], 'A')).toEqual({ now: ['a1'], queued: ['b2'], deferred: ['b1', 'h1'] })
+  })
+
+  it('全部が裏の dormant なら何も作らない', () => {
+    expect(partitionSpawns([{ key: 'b1', projectId: 'B', dormant: true }, { key: 'c1', projectId: 'C', dormant: true }], 'A'))
+      .toEqual({ now: [], queued: [], deferred: ['b1', 'c1'] })
+  })
+
+  it('空の一覧', () => {
+    expect(partitionSpawns([], null)).toEqual({ now: [], queued: [], deferred: [] })
   })
 })
 

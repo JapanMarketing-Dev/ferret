@@ -4,7 +4,9 @@
  * 表示中のプロジェクトのペインはすぐ作り、裏のプロジェクトのペインは同時に SPAWN_CONCURRENCY 個まで、
  * 作り始めの間を SPAWN_GAP_MS 空けて順に作る。全部を一度に起動すると、シェルの rc と Agent の起動が重なって
  * CPU とメモリが跳ね、見ているプロジェクトのターミナルまで遅くなる。
- * 待っている間にそのプロジェクトへ切り替えたら、待たずにすぐ作る（promote）
+ * 待っている間にそのプロジェクトへ切り替えたら、待たずにすぐ作る（promote）。
+ * 裏のプロジェクトの、戻したタブ・休ませたタブ（dormant）は作らずに置いておき、そのプロジェクトを開いたときに作る
+ * （起動のたびに全プロジェクトの Agent が立ち上がってメモリを埋めないように。terminal/sleepPolicy.ts）
  */
 
 export const SPAWN_CONCURRENCY = 2
@@ -13,15 +15,21 @@ export const SPAWN_GAP_MS = 400
 export interface SpawnCandidate {
   key: string
   projectId: string | null
+  /** 戻したタブ・休ませたタブで、作業の途中ではなかったもの。裏のプロジェクトにあれば作らずに置く */
+  dormant?: boolean
 }
 
-/** すぐ作るペインと、順に作るペインに分ける（並びは元の順のまま） */
-export function partitionSpawns(candidates: readonly SpawnCandidate[], activeProject: string | null): { now: string[]; queued: string[] } {
+/** すぐ作るペイン、順に作るペイン、作らずに置くペインに分ける（並びは元の順のまま） */
+export function partitionSpawns(candidates: readonly SpawnCandidate[], activeProject: string | null): { now: string[]; queued: string[]; deferred: string[] } {
   const active = activeProject ?? ''
   const now: string[] = []
   const queued: string[] = []
-  for (const candidate of candidates) (((candidate.projectId ?? '') === active) ? now : queued).push(candidate.key)
-  return { now, queued }
+  const deferred: string[] = []
+  for (const candidate of candidates) {
+    if ((candidate.projectId ?? '') === active) now.push(candidate.key)
+    else (candidate.dormant ? deferred : queued).push(candidate.key)
+  }
+  return { now, queued, deferred }
 }
 
 export interface SpawnQueueClock {

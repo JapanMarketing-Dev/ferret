@@ -85,6 +85,16 @@ export class TerminalRestoreStore {
     return planSessionRestore(this.data.session, projectIds)
   }
 
+  /**
+   * いま覚えているタブと画面の文字（取り出さずに見るだけ）。画面を読み込み直したとき、PTY を作らずに置いていたペイン
+   * （裏のプロジェクトの戻したタブ・休ませたタブ）の画面の文字を戻すのに使う。切なら null
+   */
+  peekSession(): TerminalRestoreSnapshot | null {
+    if (!this.enabled()) return null
+    this.ensureLoaded()
+    return this.data.session
+  }
+
   /** renderer から届いた、今開いているタブと画面の文字 */
   save(snapshot: unknown): void {
     if (this.finished || !this.enabled()) return

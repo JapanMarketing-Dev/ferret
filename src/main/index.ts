@@ -2729,6 +2729,7 @@ function registerIpc(): void {
       terminalRestoreCollected?.()
     },
     'terminal:restoreTake': () => terminalRestore().takeSession(new Set(currentSettings().projects.map((project) => project.id))),
+    'terminal:restorePeek': () => terminalRestore().peekSession(),
     'terminal:closedPush': (entry) => terminalRestore().pushClosed(entry),
     'terminal:closedPop': (projectId) => terminalRestore().popClosed(typeof projectId === 'string' ? projectId : null),
     'terminal:restoreClear': () => terminalRestore().clear(),
