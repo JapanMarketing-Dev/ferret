@@ -221,8 +221,11 @@ describe('録画中の逐次の文字起こし（IncrementalTranscriber の進�
     expect(finished.map((p) => p.pending)).toEqual([2, 1, 0])
     expect(finished[0].segments?.[0].text).toBe('text 0')
     expect(finished[1].error?.message).toBe('provider down')
-    expect(result.segments.map((s) => s.text)).toEqual(['text 0', 'text 2000'])
-    expect(written).toEqual(['text 0', 'text 2000'])
+    // 失敗した区切りも黙って捨てず、「文字起こしできなかった発話」の区間として残す（stt/engine.ts の failedChunkSegment）
+    expect(result.segments.map((s) => [s.t0, s.sttFailed === true])).toEqual([[0, false], [1000, true], [2000, false]])
+    expect(result.segments.filter((s) => !s.sttFailed).map((s) => s.text)).toEqual(['text 0', 'text 2000'])
+    expect(written.filter((text) => text.startsWith('text '))).toEqual(['text 0', 'text 2000'])
+    expect(written).toHaveLength(3)
     expect(result.errors).toHaveLength(1)
   })
 

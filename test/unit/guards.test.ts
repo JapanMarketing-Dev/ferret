@@ -15,7 +15,7 @@ describe('外から読んだ値の形', () => {
   })
 
   it('同じ関数をファイルごとに書き直さない', () => {
-    for (const file of ['src/main/accounts/identity.ts', 'src/main/agentWorkspaceTrust.ts', 'src/main/decision/requestBound.ts', 'src/main/decision/openaiDecisions.ts', 'src/main/github/gitlabParse.ts', 'src/main/agentResources/read.ts', 'src/shared/terminalRestore.ts']) {
+    for (const file of ['src/main/accounts/identity.ts', 'src/main/agentWorkspaceTrust.ts', 'src/main/decision/requestBound.ts', 'src/main/decision/openaiDecisions.ts', 'src/main/agentResources/read.ts', 'src/shared/terminalRestore.ts']) {
       expect(readFileSync(file, 'utf8'), file).not.toMatch(/(function|const) (isRecord|asRecord|isPlainObject)\b/)
     }
   })

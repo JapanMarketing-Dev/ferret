@@ -1,7 +1,3 @@
-// 動画づくりのチャネル（video: で始まる。正本は src/video/app/shared/ipc.ts）
-import { VIDEO_IPC_EVENT_CHANNELS, VIDEO_IPC_REQUEST_CHANNELS, type VideoIpcEvents, type VideoIpcRequests } from '@video/app/shared/ipc'
-// ビジネス（venture: で始まる。正本は src/shared/venture/ipc.ts）
-import { VENTURE_IPC_CHANNELS, VENTURE_IPC_EVENTS, type VentureIpcEvents, type VentureIpcRequests } from './venture/ipc'
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
@@ -85,8 +81,6 @@ import type { FeedbackEnvironment, FeedbackSubmitInput, FeedbackSubmitResult } f
 import type { GitActionResult, GitRepoStatus } from './github'
 import type { FetchTrigger, GitSyncAction } from './gitSync'
 import type { DroppedEntry } from './externalDrop'
-import { BUSINESS_IPC_CHANNELS, BUSINESS_IPC_EVENTS, type BusinessIpcEvents, type BusinessIpcRequests } from './business/ipc'
-import { RESEARCH_IPC_CHANNELS, RESEARCH_IPC_EVENTS, type ResearchIpcEvents, type ResearchIpcRequests } from './research/ipc'
 
 /**
  * IPC の全チャネルを1か所で宣言する。
@@ -96,8 +90,7 @@ import { RESEARCH_IPC_CHANNELS, RESEARCH_IPC_EVENTS, type ResearchIpcEvents, typ
  * ハンドラ登録側（main）と呼び出し側（preload）の両方がこの型から生成されるため、
  * チャネル名・引数・戻り値のずれはコンパイルエラーになる。
  */
-/** ビジネス（business:*）とビジネスリサーチ（research:*）は src/shared/business/ipc.ts・src/shared/research/ipc.ts に置く */
-export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, ResearchIpcRequests, VentureIpcRequests {
+export interface IpcRequests {
   /** paintedAt: 画面が最初のデータを描いた時刻（epoch ms。起動の内訳の renderer:painted） */
   'app:ready': (paintedAt?: number) => StartupTiming
   'app:settings': () => Settings
@@ -163,8 +156,6 @@ export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, Rese
   /** 「プロジェクトを追加」の GitHub / SSH（src/main/projectSources.ts） */
   'project:sshHosts': () => SshConfigHost[]
   'project:githubRepos': () => GitHubRepoList
-  /** 「GitLab から取得」の一覧（glab にログイン済みのホストごと。gitlab.com とセルフホスト） */
-  'project:gitlabRepos': () => GitHubRepoList
   /** clone の保存先の親フォルダの既定 */
   'project:cloneDefaults': () => { parent: string; home: string }
   /** clone の保存先の親フォルダを選ぶ。キャンセルなら null */
@@ -434,9 +425,6 @@ export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, Rese
   'settings:onboarding': (patch: OnboardingPatch) => OnboardingState | null
   /** Ferret の設定を変える skill（Claude Code・Codex）を入れてあるか */
   'agentSkill:status': () => AgentSkillStatus[]
-  /** 使っている人の状況（ビジネスリサーチ・ビジネスの前提。@shared/founderProfile） */
-  'profile:get': () => { text: string }
-  'profile:set': (text: string) => { text: string }
   /** skill を入れる・書き直す（押した直後だけ）。agents を省くと使っている Agent すべて */
   'agentSkill:install': (agents?: AgentSkillAgent[]) => AgentSkillStatus[]
   /** マイク・画面収録の OS の許可の状態（読むだけで確認のダイアログは出さない） */
@@ -632,7 +620,7 @@ export interface IpcRequests extends VideoIpcRequests, BusinessIpcRequests, Rese
   'feedback:captureWindow': () => { type: 'image/png' | 'image/jpeg'; base64: string; width: number; height: number }
 }
 
-export interface IpcEvents extends VideoIpcEvents, BusinessIpcEvents, ResearchIpcEvents, VentureIpcEvents {
+export interface IpcEvents {
   'browser:stateChanged': (state: BrowserState) => void
   /** 内蔵ブラウザから利用者へ短く知らせる（タブの上限など） */
   'browser:notice': (message: string) => void
@@ -754,8 +742,6 @@ export interface AdeApi {
 export const ADE_API_KEY = 'ade' as const
 
 export const IPC_REQUEST_CHANNELS = [
-  ...BUSINESS_IPC_CHANNELS,
-  ...RESEARCH_IPC_CHANNELS,
   'app:ready',
   'app:settings',
   'settingsFile:info', 'settingsFile:read', 'settingsFile:write', 'settingsFile:reveal', 'settings:feedbackTargets',
@@ -777,7 +763,6 @@ export const IPC_REQUEST_CHANNELS = [
   'project:saveSession',
   'project:sshHosts',
   'project:githubRepos',
-  'project:gitlabRepos',
   'project:cloneDefaults',
   'project:pickParent',
   'project:clone',
@@ -841,7 +826,7 @@ export const IPC_REQUEST_CHANNELS = [
   'settings:locale',
   'settings:crashReports', 'telemetry:state', 'telemetry:noticeShown',
   'remote:state', 'remote:set', 'remote:resetToken',
-  'settings:onboarding', 'agentSkill:status', 'agentSkill:install', 'profile:get', 'profile:set', 'permissions:status', 'permissions:request',
+  'settings:onboarding', 'agentSkill:status', 'agentSkill:install', 'permissions:status', 'permissions:request',
   'recording:start',
   'recording:pause',
   'recording:resume',
@@ -860,14 +845,10 @@ export const IPC_REQUEST_CHANNELS = [
   'github:open', 'github:repoStatus', 'github:autoFetch', 'github:gitAction', 'github:autoFetchConsent',
   'github:repoCreateInfo', 'github:createPrivateRepo', 'settings:github',
   'star:star', 'star:openWeb', 'star:later', 'star:never', 'star:fromMenu',
-  'feedback:environment', 'feedback:account', 'feedback:submit', 'feedback:captureWindow',
-  ...VIDEO_IPC_REQUEST_CHANNELS,
-  ...VENTURE_IPC_CHANNELS
+  'feedback:environment', 'feedback:account', 'feedback:submit', 'feedback:captureWindow'
 ] as const satisfies readonly IpcRequestChannel[]
 
 export const IPC_EVENT_CHANNELS = [
-  ...BUSINESS_IPC_EVENTS,
-  ...RESEARCH_IPC_EVENTS,
   'browser:stateChanged',
   'browser:notice',
   'browser:agentAttached',
@@ -899,7 +880,5 @@ export const IPC_EVENT_CHANNELS = [
   'settings:changed', 'settingsFile:error',
   'update:status',
   'remote:changed',
-  'editor:saveForQuit', 'editor:revealUnsaved',
-  ...VIDEO_IPC_EVENT_CHANNELS,
-  ...VENTURE_IPC_EVENTS
+  'editor:saveForQuit', 'editor:revealUnsaved'
 ] as const satisfies readonly IpcEventChannel[]

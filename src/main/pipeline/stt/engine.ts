@@ -5,7 +5,9 @@
  */
 import type { AudioSource, Speaker, TranscriptSegment } from '../types'
 import { dropHallucinations, segmentDbfs } from './hallucination'
-import { readWavPcm } from './wav'
+import { readWavPcm, wavDurationMs } from './wav'
+import { formatTimecode } from '../text'
+import { t as translate } from '@shared/i18n'
 
 export interface TranscribeChunkInput {
   /** 16kHz モノラル WAV のパス */
@@ -104,6 +106,14 @@ export class IncrementalTranscriber {
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e))
         this.errors.push(error)
+        // 話した区間を黙って捨てない。「文字起こしできなかった発話」として残し、指摘の一覧に出す（下書きは要確認にする）
+        const failed = await failedChunkSegment(input)
+        // 文字起こしは済んだのに書き残し（onSegments）で失敗したときは、その区間はもう入っている。重ねない
+        if (!done?.segments) {
+          this.segments.push(failed)
+          // 異常終了後の復元（transcript.jsonl）にも残す。書けなくても続ける（想定内）
+          await this.onSegments?.([failed])?.catch(() => undefined)
+        }
         done = { pending: 0, ...done, error }
       } finally {
         this.waiting--
@@ -125,5 +135,24 @@ export class IncrementalTranscriber {
   /** 途中結果（UIの進捗表示用） */
   snapshot(): TranscriptSegment[] {
     return [...this.segments].sort((a, b) => a.t0 - b.t0)
+  }
+}
+
+/**
+ * 文字起こしに失敗した区切りの代わりの区間。区切りは発話がある（無音・物音だけの区切りは segmenter が捨てる）ので、
+ * 何かを話した区間として残す。本文は、どこを動画で確かめればよいかの案内にする（sttFailed で見分ける）
+ */
+export async function failedChunkSegment(input: TranscribeChunkInput): Promise<TranscriptSegment> {
+  // 長さが分からなければ、始まりの時刻だけの区間にする（想定内）
+  const durationMs = input.durationMs ?? await wavDurationMs(input.wavPath).catch(() => 0)
+  const t0 = input.offsetMs
+  const t1 = input.offsetMs + Math.max(0, Number.isFinite(durationMs) ? durationMs : 0)
+  return {
+    t0,
+    t1,
+    speaker: input.speaker,
+    source: input.source,
+    text: translate('stt.failedChunkText', { from: formatTimecode(t0), to: formatTimecode(t1) }),
+    sttFailed: true
   }
 }

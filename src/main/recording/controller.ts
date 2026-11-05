@@ -45,6 +45,7 @@ import { ReviewEventBudget, type Admission, type ReviewInputKind } from './event
 import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import { reportHandled } from '@shared/report'
+import { boundedStep, safeStep } from './stopStep'
 
 /**
  * 録画の司令塔（要件 5.3・5.4 / 設計 4章）。
@@ -95,6 +96,10 @@ const LEAVE_TIMEOUT_MS = 600
 const MAX_PENDING_EVENT_WRITES = 1000
 /** 停止のとき、events.jsonl の書き込みを待つ上限(ms) */
 const EVENT_WRITES_STOP_TIMEOUT_MS = 5_000
+/** 停止のとき、静止画の書き終わり・トラックの切り替えを待つ上限(ms) */
+const STOP_STEP_TIMEOUT_MS = 7_000
+/** 停止のとき、録画ウインドウが最後の塊を書き終えるのを待つ上限(ms)。RecorderWindow.stop の上限（返事5秒＋書き終わり5秒）より少し長い */
+const RECORDER_STOP_TIMEOUT_MS = 12_000
 
 export interface RecordingAssets {
   recorderHtml: string
@@ -1053,8 +1058,38 @@ export class RecordingController {
     this.emitStatus()
   }
 
-  async stop(): Promise<RecordingResult> {
-    if (this.state === 'idle') throw new UserFacingError(t('recording.errors.notRecording'))
+  /** 進んでいる停止（2回押されても、後片付けを二重に走らせず同じ結果を返す） */
+  private stopping: Promise<RecordingResult> | null = null
+
+  /**
+   * 録画を止める。**必ず終わり、必ず idle へ戻る**。
+   * どこかの段が返ってこない・投げても、上限（STOP_STEP_TIMEOUT_MS など）であきらめて次へ進み、
+   * それまでの動画・静止画・操作ログ・音声で結果を返す（停止中のまま残ると、話した内容がレビューにならない）
+   */
+  stop(): Promise<RecordingResult> {
+    if (this.stopping) return this.stopping
+    if (this.state === 'idle') return Promise.reject(new UserFacingError(t('recording.errors.notRecording')))
+    const run = this.stopNow().finally(() => { this.stopping = null })
+    this.stopping = run
+    return run
+  }
+
+  /** 停止の1段。上限を過ぎた・投げた段は知らせて次へ進む */
+  private async stopStep<T>(step: string, run: () => Promise<T> | T, timeoutMs: number): Promise<T | undefined> {
+    const result = await boundedStep(run, timeoutMs)
+    if (result.ok) return result.value
+    const error = result.reason === 'error' ? result.error : new Error(`recording stop step timed out: ${step} (${timeoutMs}ms)`)
+    reportHandled(error, { area: 'recording', op: `stop: ${step}` })
+    this.warn(t('recording.errors.stopStepFailed', { step, reason: result.reason === 'timeout' ? `timeout ${timeoutMs}ms` : String(result.error) }))
+    return undefined
+  }
+
+  /** 同期の後片付け。投げても次へ進む（idle へ戻すのを止めない） */
+  private stopSync(step: string, run: () => void): void {
+    safeStep(run, (error) => reportHandled(error, { area: 'recording', op: `stop: ${step}` }))
+  }
+
+  private async stopNow(): Promise<RecordingResult> {
     this.state = 'stopping'
     if (this.limitWarningTimer) clearTimeout(this.limitWarningTimer)
     this.limitWarningTimer = null
@@ -1065,53 +1100,62 @@ export class RecordingController {
     if (this.leaveTimer) clearTimeout(this.leaveTimer)
     this.leaveTimer = null
     this.pendingLeave = null
-    this.stopWatch()
-    this.emitStatus()
+    this.stopSync('stop watch', () => this.stopWatch())
+    this.stopSync('status', () => this.emitStatus())
 
     // 長さは「止める直前」の時計を使う。停止処理にかかる時間を含めると、
     // 動画の長さと数百msずれる
     const clock = this.clock
     const durationMs = clock?.now() ?? 0
-
-    console.log('[STEP] stills.stop')
-    await this.stills?.stop()
-    // 追加・切り替えの途中なら終わるのを待つ（録画ウインドウを残さない）
-    await Promise.race([this.trackQueue, delay(5_000)])
-    console.log('[STEP] recorder.stop 開始')
-    const extras = this.tracks.filter((track) => track.live && track.id !== 'main')
-    await Promise.all([
-      this.recorder?.stop(),
-      ...extras.map((track) => track.recorder.stop().catch((err: unknown) => reportHandled(err, { area: 'recording', op: 'stop track' })))
-    ])
-    for (const track of extras) {
-      track.live = false
-      track.endMs = durationMs
-      track.recorder.dispose()
-      this.appendTrackLine({ op: 'close', id: track.id, t: durationMs })
-    }
-    console.log('[STEP] recorder.stop 完了')
-
     const options = this.options
-    const videoBytes = this.recorder?.videoBytes ?? 0
-    const frames = this.stills?.captured ?? []
-    // 書き込みの待ち行列は MAX_PENDING_EVENT_WRITES 件までだが、ディスクが詰まっても停止を待たせ続けない
-    await Promise.race([this.eventWrites, new Promise((done) => setTimeout(done, EVENT_WRITES_STOP_TIMEOUT_MS).unref?.())])
-    this.lastStatus = { state: 'idle', elapsedMs: durationMs, videoBytes,
-      frameCount: frames.length, eventCount: this.events.length }
+    const recorder = this.recorder
+    const stills = this.stills
+    const extras = this.tracks.filter((track) => track.live && track.id !== 'main')
 
-    this.sendAll({ type: 'disable' })
-    this.recorder?.dispose()
-    this.recorder = null
-    this.stills = null
-    this.clock = null
-    this.state = 'idle'
-    // 録画のあいだに映すものを切り替えていても、内蔵ブラウザでいま前に出ているタブへ戻す
-    this.pendingTab = null
-    if (this.browserTab && !this.browserTab.isDestroyed()) {
-      this.source = this.browserTab
-      this.pageUrl = this.browserTab.getURL()
+    try {
+      console.log('[STEP] stills.stop')
+      await this.stopStep('stills', () => stills?.stop(), STOP_STEP_TIMEOUT_MS)
+      // 追加・切り替えの途中なら終わるのを待つ（録画ウインドウを残さない）
+      await this.stopStep('track queue', () => this.trackQueue, STOP_STEP_TIMEOUT_MS)
+      console.log('[STEP] recorder.stop 開始')
+      // 録画ウインドウは最後の塊を書き終えるまで待つ（RecorderWindow.stop 自身にも上限がある）。返ってこなくても先へ進む
+      await Promise.all([
+        this.stopStep('recorder', () => recorder?.stop(), RECORDER_STOP_TIMEOUT_MS),
+        ...extras.map((track) => this.stopStep(`track ${track.id}`, () => track.recorder.stop(), RECORDER_STOP_TIMEOUT_MS))
+      ])
+      console.log('[STEP] recorder.stop 完了')
+      // 書き込みの待ち行列は MAX_PENDING_EVENT_WRITES 件までだが、ディスクが詰まっても停止を待たせ続けない
+      await boundedStep(() => this.eventWrites, EVENT_WRITES_STOP_TIMEOUT_MS)
+    } finally {
+      // ここから先は投げても止まらない。必ず idle へ戻す
+      for (const track of extras) {
+        track.live = false
+        track.endMs = durationMs
+        this.stopSync('dispose track', () => track.recorder.dispose())
+        this.stopSync('track line', () => this.appendTrackLine({ op: 'close', id: track.id, t: durationMs }))
+      }
+      const frames = stills?.captured ?? []
+      this.lastStatus = { state: 'idle', elapsedMs: durationMs, videoBytes: recorder?.videoBytes ?? 0,
+        frameCount: frames.length, eventCount: this.events.length }
+      this.stopSync('disable surfaces', () => this.sendAll({ type: 'disable' }))
+      this.stopSync('dispose recorder', () => recorder?.dispose())
+      this.recorder = null
+      this.stills = null
+      this.clock = null
+      this.state = 'idle'
+      // 録画のあいだに映すものを切り替えていても、内蔵ブラウザでいま前に出ているタブへ戻す
+      this.pendingTab = null
+      this.stopSync('restore tab', () => {
+        if (this.browserTab && !this.browserTab.isDestroyed()) {
+          this.source = this.browserTab
+          this.pageUrl = this.browserTab.getURL()
+        }
+      })
+      this.stopSync('close mirror', () => this.closeMirror())
     }
-    this.closeMirror()
+
+    const videoBytes = this.lastStatus.videoBytes
+    const frames = stills?.captured ?? []
     const tracks: TrackRecordInfo[] = this.tracks.map((track) => ({ id: track.id, kind: track.target.kind, label: track.label, video: track.videoRel,
       startMs: track.startMs, endMs: track.endMs ?? durationMs, ...(track.watchId ? { watchId: track.watchId } : {}) }))
     this.tracks = []
@@ -1120,8 +1164,8 @@ export class RecordingController {
     this.lastSurface = null
     this.watched = []
     this.watchProblem = undefined
-    this.emitStatus()
-    this.emitTracks()
+    this.stopSync('status', () => this.emitStatus())
+    this.stopSync('tracks', () => this.emitTracks())
 
     return {
       startedAt: this.startedAt,

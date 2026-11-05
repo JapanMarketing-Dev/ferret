@@ -132,6 +132,8 @@ describe('集計', () => {
   })
 })
 
+// 整理の出力が引いている発話だけの素材（出力に無い発話は、話したそのままの指摘として足される。assemble.ts の uncoveredSpeech）
+const spokenOnly = { ...material, transcript: [] }
 const organized = {
   items: [
     { title: '見出しが小さい', request: '大きくする', status: 'decided' as const,
@@ -143,7 +145,7 @@ const organized = {
 }
 const record = (): SessionRecord => ({
   version: 1, meta: material.meta, transcript: material.transcript, removedDuplicates: [], frames: material.frames,
-  draft: [], document: assembleFromOrganized(material, organized), edits: []
+  draft: [], document: assembleFromOrganized(spokenOnly, organized), edits: []
 })
 
 describe('progress.json の読み書きと一覧の完了数', () => {
@@ -234,7 +236,7 @@ describe('progress.json の読み書きと一覧の完了数', () => {
 
 describe('Agent への指示', () => {
   it('feedback.md に各指摘の ID と、progress.json の書き方の節が入る', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const md = renderFeedbackMarkdown(doc, { locale: 'en', progressFile: '/p/.ferret/reviews/x/progress.json' })
     for (const it of doc.items) expect(md).toContain(`- ID: \`${it.id}\``)
     expect(md).toContain('## Progress')
@@ -246,7 +248,7 @@ describe('Agent への指示', () => {
   })
 
   it('判定モデルが有効なら、それで直しを詰めてから human_review にする（人への質問にはしない。受け入れ確認の節と食い違わない）', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const md = renderFeedbackMarkdown(doc, { locale: 'en', decision: { threshold: 0.7, dir: '/p' } })
     expect(md).toContain('It is your own check for getting the fix right, not a question for the reviewer')
     expect(md).toContain('then set `human_review` with `after` and `score`')
@@ -257,7 +259,7 @@ describe('Agent への指示', () => {
   })
 
   it('日本語の feedback.md にも ID と節が入る', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const md = renderFeedbackMarkdown(doc, { locale: 'ja' })
     expect(md).toContain('## 進み具合')
     expect(md).toContain(`- ID: \`${doc.items[0]!.id}\``)
@@ -292,7 +294,7 @@ describe('Agent への指示', () => {
   })
 
   it('feedback.md に並列の進め方と、前提違いでも質問せずに直して仮定を note に書く手順が入る。書く状態は in_progress と human_review だけ', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const md = renderFeedbackMarkdown(doc, { locale: 'en' })
     expect(md).toContain('sub-agents or parallel tasks')
     expect(md).toContain('the recording no longer matches the current code or screen')
@@ -321,7 +323,7 @@ describe('Agent は人に質問しない（判定モデルは Agent 自身の確
   for (const locale of ['en', 'ja'] as const) {
     for (const decision of [undefined, { threshold: 0.7, dir: '/p' }]) {
       it(`${locale}・判定モデル${decision ? 'あり' : 'なし'}の feedback.md は needs_human を含まず、人へ質問させない`, () => {
-        const doc = assembleFromOrganized(material, organized)
+        const doc = assembleFromOrganized(spokenOnly, organized)
         // デザイン・文書の指摘（直せないものの扱い）と、「やり直さない」節も出す形で確かめる
         const [a, b] = doc.items
         const md = renderFeedbackMarkdown(doc, { locale, ...(decision ? { decision } : {}), focusIds: [b!.id], progress: { [a!.id]: { status: 'human_review' } } })
@@ -375,7 +377,7 @@ describe('Send to Agent で送る対象（未対応の指摘だけ）', () => {
   })
 
   it('feedback.md は今回送る指摘だけを詳しく書き、残りは「やり直さない」節に状態つきで載せる。番号は全件を通して振る', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const [a, b] = doc.items
     const md = renderFeedbackMarkdown(doc, { locale: 'en', focusIds: [b!.id], progress: { [a!.id]: { status: 'done' } } })
     expect(md).toContain('# ')
@@ -390,7 +392,7 @@ describe('Send to Agent で送る対象（未対応の指摘だけ）', () => {
   })
 
   it('判定モデルが有効なら、受け入れ確認（全件合格のループ）は今回送る指摘だけが対象と書く', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const [a, b] = doc.items
     const md = renderFeedbackMarkdown(doc, { locale: 'en', focusIds: [b!.id], progress: { [a!.id]: { status: 'in_progress' } }, decision: { threshold: 0.7, dir: '/p' } })
     expect(md).toContain('The acceptance check covers only the findings in this request')
@@ -403,7 +405,7 @@ describe('Send to Agent で送る対象（未対応の指摘だけ）', () => {
   })
 
   it('focusIds を渡さなければ今までどおり全件を詳しく書き、「やり直さない」節は出さない', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const md = renderFeedbackMarkdown(doc, { locale: 'en' })
     for (const it of doc.items) expect(md).toContain(`- ID: \`${it.id}\``)
     expect(md).not.toContain('Other findings (not in this request)')
@@ -497,7 +499,7 @@ describe('人の確認（human_review → OK / NG / Comment）', () => {
   })
 
   it('feedback.md の各指摘に人のコメントが載る', () => {
-    const doc = assembleFromOrganized(material, organized)
+    const doc = assembleFromOrganized(spokenOnly, organized)
     const [a] = doc.items
     const md = renderFeedbackMarkdown(doc, { locale: 'en', progress: { [a!.id]: { status: 'in_progress', history: [{ at, verdict: 'ng', text: 'Still grey on hover' }] } } })
     expect(md).toContain('Reviewer\'s notes (newest first): "Still grey on hover"')

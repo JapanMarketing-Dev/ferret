@@ -91,7 +91,7 @@ describe('プロジェクトの並べ替え（settings の projects の並び）
 const organized = {
   items: [
     { title: '見出しが小さい', request: '大きくする', status: 'decided' as const,
-      quotes: [{ speaker: 'self' as const, t: 2_000, text: 'この見出しが小さいですね' }], frame_times: [3_000], annotation_ids: [] },
+      quotes: [{ speaker: 'self' as const, t: 2_000, text: 'この見出しが小さいですね' }, { speaker: 'self' as const, t: 5_500, text: 'もう少し大きくしてください' }], frame_times: [3_000], annotation_ids: [] },
     { title: 'ボタンの色が薄い', request: '濃くする', status: 'decided' as const,
       quotes: [{ speaker: 'self' as const, t: 18_000, text: 'このボタンの色が薄いです' }], frame_times: [19_750], annotation_ids: ['p3'] },
     { title: '表記をどうするか', request: '決める', status: 'decided' as const,

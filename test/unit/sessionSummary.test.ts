@@ -12,6 +12,8 @@ import { events, material } from './fixtures'
  * 一覧用の要約（summary.json）。一覧を開くたびに session.json と events.jsonl を読まずに済ませる。
  */
 
+// 整理の出力が引いている発話だけの素材（出力に無い発話は、話したそのままの指摘として足される。assemble.ts の uncoveredSpeech）
+const spokenOnly = { ...material, transcript: [] }
 const organized = {
   items: [
     {
@@ -27,7 +29,7 @@ const organized = {
 }
 const record = (): SessionRecord => ({
   version: 1, meta: material.meta, transcript: material.transcript, removedDuplicates: [], frames: material.frames,
-  draft: [], document: assembleFromOrganized(material, organized), edits: []
+  draft: [], document: assembleFromOrganized(spokenOnly, organized), edits: []
 })
 
 let project: string

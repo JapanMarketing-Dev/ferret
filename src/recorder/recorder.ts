@@ -594,7 +594,9 @@ async function start(payload: StartPayload): Promise<void> {
     })
     recorder.ondataavailable = (event) => {
       if (event.data.size === 0) return
+      // 1つの塊が読めなくても、後の塊と停止の返事を止めない（つないだ Promise が失敗のまま残ると、以降の塊がすべて捨てられる）
       videoWrites = videoWrites.then(async () => bridge.video(await event.data.arrayBuffer()))
+        .catch((err: unknown) => bridge.error(text('videoFailed', { message: message(err) })))
     }
     recorder.onerror = (event) => bridge.error(`MediaRecorder: ${String((event as ErrorEvent).error)}`)
     recorder.start(payload.videoTimesliceMs)
@@ -737,24 +739,42 @@ bridge.onResume(() => {
 
 bridge.onStop(() => {
   stopping = true
+  // 後片付けのどれかが投げても、main へ「止まった」を必ず返す（返さないと main は上限まで待つ）
+  const attempt = (run: () => void): void => {
+    try { run() } catch (err) { console.error('[recorder] stop', message(err)) }
+  }
+  let reported = false
   const done = async (): Promise<void> => {
-    videoTrack?.stop()
-    desktopCompositor?.stop()
-    desktopCompositor = null
-    compositor?.stop()
-    compositor = null
-    pendingOverlay = null
-    for (const capture of captures) capture.stop()
-    captures.length = 0
-    await videoWrites
-    bridge.stopped()
+    if (reported) return
+    reported = true
+    try {
+      attempt(() => videoTrack?.stop())
+      attempt(() => desktopCompositor?.stop())
+      desktopCompositor = null
+      attempt(() => compositor?.stop())
+      compositor = null
+      pendingOverlay = null
+      for (const capture of captures) attempt(() => capture.stop())
+      captures.length = 0
+      await videoWrites
+    } catch (err) {
+      console.error('[recorder] stop', message(err))
+    } finally {
+      bridge.stopped()
+    }
   }
   if (recorder && recorder.state !== 'inactive') {
-    recorder.onstop = done
-    // 残っている分を吐き出させてから止める
-    recorder.requestData()
-    recorder.stop()
+    recorder.onstop = () => void done()
+    try {
+      // 残っている分を吐き出させてから止める
+      recorder.requestData()
+      recorder.stop()
+    } catch (err) {
+      // 映像のトラックが先に終わっていた等で止められない（onstop は来ない）。ここで片付けて返す
+      console.error('[recorder] stop', message(err))
+      void done()
+    }
   } else {
-    done()
+    void done()
   }
 })

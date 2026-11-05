@@ -357,19 +357,52 @@ export class RecorderWindow {
   /** 停止して、最後のチャンクが書き終わるまで待つ */
   async stop(timeoutMs = 5000): Promise<void> {
     const window = this.window
-    if (!window || window.isDestroyed()) return
-    const stopped = new Promise<void>((resolve) => {
-      this.stoppedResolve = resolve
-      setTimeout(resolve, timeoutMs).unref?.()
-    })
-    window.webContents.send(RECORDER_CHANNELS.stop)
-    await stopped
+    if (window && !window.isDestroyed()) {
+      let timer: NodeJS.Timeout | null = null
+      const stopped = new Promise<void>((resolve) => {
+        this.stoppedResolve = resolve
+        timer = setTimeout(resolve, timeoutMs)
+        timer.unref?.()
+      })
+      try {
+        window.webContents.send(RECORDER_CHANNELS.stop)
+        await stopped
+      } catch (err) {
+        // 録画ウインドウの中身が落ちた・閉じた直後（返事は来ない）。それまでに届いた塊で閉じる
+        reportHandled(err, { area: 'recording', op: 'send recorder stop' })
+      } finally {
+        if (timer) clearTimeout(timer)
+        this.stoppedResolve = null
+      }
+    }
     this.systemAudioPlan = null
-    await new Promise<void>((resolve) => {
-      if (!this.videoStream) return resolve()
-      this.videoStream.end(() => resolve())
-    })
+    await this.closeVideoStream(timeoutMs)
+  }
+
+  /**
+   * 動画のファイルを閉じる。書き終わりを待つのは timeoutMs まで
+   * （Windows でウイルス対策・同期ソフトがファイルを掴んで書き終わらないことがある。待ち続けると停止が終わらない）
+   */
+  private async closeVideoStream(timeoutMs: number): Promise<void> {
+    const stream = this.videoStream
     this.videoStream = null
+    if (!stream) return
+    let timer: NodeJS.Timeout | null = null
+    const ended = await new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs)
+      timer.unref?.()
+      try {
+        stream.end(() => resolve(true))
+      } catch (err) {
+        reportHandled(err, { area: 'recording', op: 'end video stream' })
+        resolve(false)
+      }
+    })
+    if (timer) clearTimeout(timer)
+    if (!ended) {
+      reportHandled(new Error(`video stream did not finish within ${timeoutMs}ms`), { area: 'recording', op: 'end video stream' })
+      stream.destroy()
+    }
   }
 
   dispose(): void {

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
-  Briefcase,
   Check,
   ChevronDown,
   CircleSlash,
@@ -40,7 +39,6 @@ import { dropPositionAt, stepAmongVisible, type DropPosition } from '@shared/reo
 import { PROJECT_SORTS, filterProjects, sanitizeProjectView, sortProjects, type ProjectListView } from '@shared/projectOrder'
 import { isOrchestra, orchestraIdOf, treeDrop, treeRows } from '@shared/orchestras'
 import { PROJECT_DRAG_TYPE } from '../lib/projectDrag'
-import { useVentureIds } from '../venture/useVentureIds'
 
 export { toReviewSession, type ReviewSession }
 
@@ -124,7 +122,6 @@ export function Sidebar({
 }) {
   const toast = useToast()
   /** ビジネスのオーケストラ（行の印をブリーフケースにする） */
-  const ventureIds = useVentureIds()
   const t = useT()
   const rootRef = useRef<HTMLElement | null>(null)
   /** ターミナルで Agent が動いているプロジェクト（行に「実行中」の印を出す） */
@@ -460,7 +457,7 @@ export function Sidebar({
                       )}
                       {project.orchestrator && (
                         <span className="sb-project__starred" role="img" aria-label={t(project.editorWorkspace ? 'editorWorkspace.hint' : 'orchestrator.badge')} title={t(project.editorWorkspace ? 'editorWorkspace.hint' : 'orchestrator.badge')} data-testid={project.editorWorkspace ? 'sidebar-editor-workspace' : 'sidebar-project-orchestrator'}>
-                          {ventureIds.has(project.id) ? <Briefcase size={11} strokeWidth={2} aria-label={t('venture.sidebarBadge')} data-testid="sidebar-venture" /> : <Network size={11} strokeWidth={2} />}
+                          <Network size={11} strokeWidth={2} />
                         </span>
                       )}
                       {project.starred && (

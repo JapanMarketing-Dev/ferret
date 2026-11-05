@@ -519,7 +519,8 @@ async function recoverReview(paths: SessionPaths): Promise<ReviewData> {
   const info = await inspect(paths)
   const { existsSync } = await import('node:fs')
   const broken = existsSync(paths.sessionJson)
-  if (!info.worthRecovering) throw new Error(broken ? t('review.errors.broken') : t('review.errors.nothingRecoverable'))
+  // 素材の残っていない記録（すぐ止めた録画・壊れた session.json だけ）を開いたのは想定内。利用者に理由を出すだけで Sentry には送らない（FERRET-25）
+  if (!info.worthRecovering) throw new UserFacingError(broken ? t('review.errors.broken') : t('review.errors.nothingRecoverable'))
   // 壊れた session.json は上書きで失わないよう、別名へ移してから作り直す（読み込まずに移す。巨大なものもある）
   if (broken) {
     await renameContained(paths.sessionJson, `${paths.sessionJson}.broken`, { replace: true })

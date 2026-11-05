@@ -129,11 +129,52 @@ function prepare(): Promise<{ base: string; mailbox: string; core: string } | nu
   return root
 }
 
+/**
+ * 用意した一時フォルダが消された（Windows のストレージ センサー・掃除のアプリが、長く動かした Ferret の %TEMP% を片付ける。FERRET-26/27）。
+ * 古い受け口の見張りを止めて忘れ、次の prepare で mkdtemp から作り直す（同じ名前では作り直さない。共有の /tmp で先に置かれた名前を使わない）。
+ * 別のタブが先に作り直していたら（stale が今の root でない）何もしない
+ */
+function discardRoot(stale: Promise<unknown>): void {
+  if (root !== stale) return
+  if (timer) clearInterval(timer)
+  timer = null
+  if (settle) clearTimeout(settle)
+  settle = null
+  watcher?.close()
+  watcher = null
+  const dir = baseDir
+  baseDir = null
+  root = null
+  // 一部だけ残っていれば片付ける（古い受け口はもう読まない）
+  if (dir) void rm(dir, { recursive: true, force: true }).catch(() => undefined)
+}
+
+function isMissingPath(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'ENOENT'
+}
+
 /** タブを開くときに足す環境変数（TerminalManager.launchEnv）。切なら空 */
 export async function agentMailEnv(sessionId: string): Promise<Record<string, string>> {
   if (!agentMailEnabled()) return {}
-  const ready = await prepare()
+  const pending = prepare()
+  const ready = await pending
   if (!ready) return {}
+  try {
+    return await openSession(ready, sessionId)
+  } catch (err) {
+    if (!isMissingPath(err)) throw err
+    // 一時フォルダが消されていた。1回だけ作り直して開き直す（作り直しても無理なら呼び出し側が送る）
+    discardRoot(pending)
+    const again = await prepare()
+    if (!again) return {}
+    return await openSession(again, sessionId)
+  }
+}
+
+async function openSession(ready: { base: string; mailbox: string; core: string }, sessionId: string): Promise<Record<string, string>> {
+  // 掃除はファイルだけ消してフォルダを残すこともある。受け口と CLI の本体が無ければ、消された一時フォルダとして作り直す（ENOENT）
+  await lstat(ready.mailbox)
+  await lstat(ready.core)
   const secret = randomBytes(18).toString('base64url')
   // タブごとのフォルダに、受け口と合言葉を書き込んだ CLI を置く（環境変数を消す Agent の中でも PATH から呼べる）
   const dir = join(ready.base, 'terminals', randomBytes(9).toString('base64url'))

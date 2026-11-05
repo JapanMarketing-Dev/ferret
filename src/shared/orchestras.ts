@@ -103,7 +103,7 @@ export interface TreeRow {
 /**
  * サイドバーに並べる行。オーケストラ → その子（shown の順）を字下げして続ける。畳んだオーケストラの子は出さない。
  * オーケストラに属さないもの（オーケストラが1つも無いとき）は最後に depth 0 で並べる。
- * ビジネスリサーチのフォルダは、どのオーケストラにも入れず、いちばん最後に depth 0 で並べる（選ぶとビジネスリサーチの画面で開く）
+ * ビジネスリサーチのフォルダは、どのオーケストラにも入れず、いちばん最後に depth 0 で並べる（以前の版で登録したもの。普通のフォルダとして開く）
  */
 export function treeRows(all: readonly Project[], shownAll: readonly Project[], collapsed: ReadonlySet<string>): TreeRow[] {
   const shown = shownAll.filter((p) => !p.research)

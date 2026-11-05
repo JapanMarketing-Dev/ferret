@@ -63,6 +63,9 @@ describe('プロジェクトごとの作業の状態', () => {
     expect(decodeCenterTab('browser', '/work/app')).toBe('browser')
     expect(decodeCenterTab('file:../x', '/work/app')).toBeUndefined()
     expect(decodeCenterTab(undefined, '/work/app')).toBeUndefined()
+    // 削除した画面（ビジネス・リサーチなど）のタブを覚えていても戻さない（呼び出し側がブラウザにする）
+    for (const gone of ['business', 'research', 'video', '', 'settings', 'Browser']) expect(decodeCenterTab(gone, '/work/app'), gone).toBeUndefined()
+    for (const tab of ['dashboard', 'browser', 'findings']) expect(decodeCenterTab(tab, null)).toBe(tab)
   })
 })
 

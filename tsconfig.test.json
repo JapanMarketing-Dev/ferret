@@ -5,9 +5,6 @@
     "paths": {
       "@shared/*": [
         "src/shared/*"
-      ],
-      "@video/*": [
-        "src/video/*"
       ]
     },
     "module": "ESNext",

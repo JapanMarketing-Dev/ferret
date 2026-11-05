@@ -314,3 +314,80 @@ describe('断る', () => {
     }
   })
 })
+
+// FERRET-26/27: 長く動かした Ferret の一時フォルダを OS の掃除（Windows のストレージ センサーなど）が消すと、
+// 以後タブを開くたびに mkdir が ENOENT で失敗し、Agent どうしの依頼が使えなくなっていた
+describe('一時フォルダが消されたとき', () => {
+  const baseOf = (env: Record<string, string>) => join(env.FERRET_AGENT_MAIL!, '..')
+  const coreOf = (env: Record<string, string>) => {
+    const bin = join(baseOf(env), 'bin')
+    return join(bin, readdirSync(bin)[0]!)
+  }
+
+  it('フォルダごと消されたら作り直してタブを開け、新しい受け口で依頼が届く', async () => {
+    tabs = [{ id: 'gone-from', cwd: project, title: 'claude', agent: 'claude', state: 'idle' }, { id: 'gone-to', cwd: project, title: 'codex', agent: 'codex', state: 'idle' }]
+    const before = await envFor('gone-a')
+    rmSync(baseOf(before), { recursive: true, force: true })
+    const env = await envFor('gone-from')
+    expect(env.FERRET_AGENT_MAIL).not.toBe(before.FERRET_AGENT_MAIL)
+    expect(existsSync(env.FERRET_AGENT_CLI!)).toBe(true)
+    expect(existsSync(coreOf(env))).toBe(true)
+    if (process.platform !== 'win32') expect(statSync(baseOf(env)).mode & 0o077).toBe(0)
+    // 見張りも新しい受け口へ移っている
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await post(env, { kind: 'send', to: 'codex' }, 'after cleanup')).toMatch(/^ok/)
+    await until(() => pasted.some((p) => p.id === 'gone-to'))
+  })
+
+  it('terminals だけ消された（実際の FERRET-26 の形）・CLI の本体だけ消された、どちらも作り直す', async () => {
+    const a = await envFor('part-a')
+    rmSync(join(baseOf(a), 'terminals'), { recursive: true, force: true })
+    const b = await envFor('part-b')
+    expect(b.FERRET_AGENT_MAIL).not.toBe(a.FERRET_AGENT_MAIL)
+    expect(existsSync(b.FERRET_AGENT_CLI!)).toBe(true)
+    // 残っていた古いフォルダは片付ける
+    await until(() => !existsSync(baseOf(a)))
+
+    rmSync(coreOf(b))
+    const c = await envFor('part-c')
+    expect(c.FERRET_AGENT_MAIL).not.toBe(b.FERRET_AGENT_MAIL)
+    expect(existsSync(coreOf(c))).toBe(true)
+
+    rmSync(c.FERRET_AGENT_MAIL!, { recursive: true, force: true })
+    const d = await envFor('part-d')
+    expect(d.FERRET_AGENT_MAIL).not.toBe(c.FERRET_AGENT_MAIL)
+    expect(existsSync(d.FERRET_AGENT_MAIL!)).toBe(true)
+  })
+
+  it('消えていなければ作り直さない（同じ受け口のまま）', async () => {
+    const a = await envFor('keep-a')
+    const b = await envFor('keep-b')
+    expect(b.FERRET_AGENT_MAIL).toBe(a.FERRET_AGENT_MAIL)
+  })
+
+  it('同時に開いた複数のタブが消えたことに気づいても、作り直しは1回で同じ受け口を使う', async () => {
+    const before = await envFor('para-0')
+    rmSync(baseOf(before), { recursive: true, force: true })
+    const envs = await Promise.all(['para-1', 'para-2', 'para-3'].map((id) => envFor(id)))
+    const mailboxes = new Set(envs.map((e) => e.FERRET_AGENT_MAIL))
+    expect(mailboxes.size).toBe(1)
+    const [mailbox] = [...mailboxes]
+    expect(mailbox).not.toBe(before.FERRET_AGENT_MAIL)
+    expect(existsSync(mailbox!)).toBe(true)
+    for (const e of envs) expect(existsSync(e.FERRET_AGENT_CLI!)).toBe(true)
+  })
+
+  it('ENOENT 以外の失敗は作り直さずに投げる（呼び出し側が送る）。直れば同じ受け口で続く', async () => {
+    if (process.platform === 'win32') return
+    const a = await envFor('other-a')
+    const terminalsDir = join(baseOf(a), 'terminals')
+    rmSync(terminalsDir, { recursive: true, force: true })
+    writeFileSync(terminalsDir, 'not a folder') // mkdir は ENOTDIR
+    await expect(envFor('other-b')).rejects.toMatchObject({ code: 'ENOTDIR' })
+    rmSync(terminalsDir)
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(terminalsDir, { mode: 0o700 })
+    const c = await envFor('other-c')
+    expect(c.FERRET_AGENT_MAIL).toBe(a.FERRET_AGENT_MAIL)
+  })
+})

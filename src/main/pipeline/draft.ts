@@ -115,7 +115,8 @@ export function buildDraft(material: Material, options: Partial<DraftOptions> = 
     if (c.segments.length === 0 && c.annotations.length === 0) continue
     if (c.annotations.length === 0) {
       const len = normalizeJa(c.segments.map((s) => s.text).join('')).length
-      if (len < opt.minTextLength) continue
+      // 黙って捨てない。「除外した発話」に入れ、確認画面の「発話を指摘に戻す」で戻せるようにする
+      if (len < opt.minTextLength) { meaningless.push(...c.segments); continue }
     }
     items.push({
       id: `d${items.length + 1}`,

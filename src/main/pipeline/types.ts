@@ -29,6 +29,11 @@ export interface TranscriptSegment {
   speakerLabel?: string
   /** 取り込んだ mtg の文字起こしに書かれていた話者の名前（meeting/import.ts）。引用の名前（Quote.name）になる */
   speakerName?: string
+  /**
+   * 文字起こしに失敗した区切りの代わり（stt/engine.ts の failedChunkSegment）。text は「この区間を動画で確かめて」の案内で、話した言葉ではない。
+   * 話した区間を黙って落とさないために残し、指摘は要確認にする
+   */
+  sttFailed?: true
 }
 
 // ───────────────────────── 操作ログ ─────────────────────────

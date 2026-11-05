@@ -34,7 +34,7 @@ export const GESTURE_GRANT_MS = {
   paste: 5_000,
   /** フッターの「最新を取得」・push（押した直後に1回だけ。push は外へ出るので確認の Push を押したとき） */
   gitSync: 10_000,
-  /** ビジネス・ビジネスリサーチの「Agent へ送る」の札を作る（押した直後に1回だけ。renderer はクリックの処理ですぐ呼ぶ） */
+  /** 「Agent へ送る」の札を作る（押した直後に1回だけ。renderer はクリックの処理ですぐ呼ぶ） */
   send: 1_500
 } as const
 

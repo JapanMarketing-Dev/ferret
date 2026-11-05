@@ -207,7 +207,7 @@ pnpm test:unit
 
 ## このビルドについて
 
-- **できること**: 内蔵ブラウザで開いた画面の録画と書き込み、声とペンの書き込みからの指摘づくり、指摘の編集・結合・削除、内蔵ターミナルで動く Agent（Codex / Claude Code）への送信。プロジェクトは、この PC のフォルダ、GitHub・GitLab からの clone、SSH の先から開けます。サービスの CLI（gh・glab・wrangler・Vercel・AWS など）はターミナルから入れてログインでき、プロジェクトの画像・動画・音声・PDF は内蔵のビューアで開けます
+- **できること**: 内蔵ブラウザで開いた画面の録画と書き込み、声とペンの書き込みからの指摘づくり、指摘の編集・結合・削除、内蔵ターミナルで動く Agent（Codex / Claude Code）への送信。プロジェクトは、この PC のフォルダ、GitHub などからの clone、SSH の先から開けます。サービスの CLI（gh・glab・wrangler・Vercel・AWS など）はターミナルから入れてログインでき、プロジェクトの画像・動画・音声・PDF は内蔵のビューアで開けます
 - **費用は各自持ち**: 作業に使う開発者側のサーバーやAPIキーはありません。例外はアプリ内の匿名のフィードバックで、送ったときだけ、その内容が小さな中継（`workers/feedback-relay`）を通って公開の GitHub Issue になります。中継は IP を保存しません。文字起こしは端末内（whisper.cpp、無料）、自分の OpenAI の API キー、自前の GPU などで動かす OpenAI 互換サーバーから選びます。Agent は各自が契約している CLI を使います
 - **対応OS**: macOS（Apple Silicon / Intel）、Windows（x64 / arm64）、Linux（x64）。普段使っているのは macOS（Apple Silicon）です。リリースのたびに Mac の上で確かめます。`tools/qa/linux-smoke.sh` が Linux のコンテナで Linux 版を作り、xvfb の上で `e2e/platform-smoke.spec.ts`（起動・内蔵ブラウザ・ターミナルでシェルが開くこと・設定）を流します。`scripts/check-win-unpacked.mjs` と `scripts/check-nsis-archive.mjs` が、Windows 版のアプリとインストーラに CPU ごとの正しい部品が入っていることを確かめます。Intel Mac 版のターミナルは Rosetta で確かめました。macOS 版は Developer ID で署名・公証済みです
 
@@ -258,7 +258,7 @@ pnpm dev
 - 自分のAPIキーでの文字起こし・「指摘を整理」（選んだ提供元・接続先）
 - Whisperモデルのダウンロード（Hugging Face）
 - フッターの利用量の表示（各提供元のAPI。自分のClaude / Codexのログインを使う）
-- GitHub / GitLab からの clone と、そこにある自分のリポジトリの一覧（自分の`gh`・`glab` CLI経由）
+- URL からの clone と、GitHub の自分のリポジトリの一覧（自分の`gh` CLI経由）
 - 「更新を確認」を押したときだけ（Cloudflare R2の配布サーバー）
 - **アプリからのフィードバック**（近く入ります。送ったときだけ）: 本文・種類（不具合か要望）・アプリの版・含めたときだけ OS の版・添付した静止画（3枚まで）が、開発者の中継を通って `JapanMarketing-Dev/ferret` の公開の Issue になります。鍵やトークン・メール・ホームのパスは伏せ字にし、中継は IP を保存しません。詳しくは [Data and privacy](https://ferretade.dev/docs/privacy.html#feedback)
 - **クラッシュレポート（Sentry）**: クラッシュと未処理のエラーを送ります。既定はONで、設定の「プライバシー」か初回起動時の案内からOFFにできます。送るのはスタックトレースとOS・CPU・アプリの版です。パス、URL、ターミナルの出力、文字起こし、指摘、メールアドレス、APIキー、IPアドレスは除くか集めません。開発起動（`pnpm dev`）も`development`として送ります。E2Eと単体テストでは送りません。フォークした人は`FERRET_SENTRY_DSN`（以前の`MOVIE_ADE_SENTRY_DSN`も可）で自分のDSNに向けるか、空にして止められます。詳しくは[Data and privacy](https://ferretade.dev/docs/privacy.html#crash-reports)。

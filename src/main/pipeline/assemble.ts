@@ -19,7 +19,8 @@ import type {
   TranscriptSegment
 } from './types'
 import { buildItemContext } from './context'
-import { nearestFrameTime } from './draft'
+import { buildDraft, nearestFrameTime } from './draft'
+import { isAnnotation } from './types'
 import { isMeaninglessUtterance } from './meaningless'
 import { t } from '@shared/i18n'
 
@@ -115,13 +116,30 @@ export function assembleFromOrganized(
     }
   })
   const penOnly = new Set(cleaned.items.flatMap(({ penOnly }, i) => (penOnly ? [`i${i + 1}`] : [])))
+  // 整理（LLM）がどの指摘にも除外にも入れなかった発話は、話したそのままの指摘として足す（黙って落とさない）
+  const missed = uncoveredSpeech(material, cleaned)
 
   return {
     meta: material.meta,
-    items: finalizeItems(pending, material.events, opt).map((item) => (penOnly.has(item.id) ? withPenTitle(item, true) : item)),
-    dropped: cleaned.dropped,
+    items: finalizeItems([...pending, ...missed.items.map((d) => draftPending(d, `i-missed-${d.id}`))], material.events, opt)
+      .map((item) => (penOnly.has(item.id) ? withPenTitle(item, true) : item)),
+    dropped: [...cleaned.dropped, ...missed.meaningless.map((s) => ({ t: s.t0, text: s.text, reason: meaninglessReason() }))].sort((a, b) => a.t - b.t),
     organizedByLlm: true
   }
+}
+
+/**
+ * 整理の出力のどの指摘の引用にも、「除外した発話」にも入っていない発話。
+ * LLM は発話を書き漏らすことがある（長い録画・検証で外した指摘・区間ごとの整理の失敗）。消えた発話は確認画面のどこにも出ず、
+ * 取り戻せないので、下書きと同じ決まりで指摘にする（書き込みは整理が使ったので付け直さない。ページの区切りは操作ログから引く）
+ */
+export function uncoveredSpeech(material: Material, organized: { items: Array<{ item: { quotes: Quote[] } }>; dropped: Array<{ t: number }> }):
+  { items: DraftItem[]; meaningless: TranscriptSegment[] } {
+  const covered = new Set<number>([...organized.items.flatMap(({ item }) => item.quotes.map((q) => q.t)), ...organized.dropped.map((d) => d.t)])
+  const missed = material.transcript.filter((s) => !covered.has(s.t0))
+  if (missed.length === 0) return { items: [], meaningless: [] }
+  const draft = buildDraft({ ...material, transcript: missed, events: material.events.filter((e) => !isAnnotation(e)) })
+  return { items: draft.items.filter((d) => d.segments.length > 0), meaningless: draft.meaningless ?? [] }
 }
 
 /** 「除外した発話」に付ける理由（意味の通じない発話） */
@@ -194,19 +212,7 @@ export function assembleFromDraft(
 ): FeedbackDocument {
   const opt = { ...defaultAssembleOptions, ...options }
 
-  const pending: PendingItem[] = draft.map((d) => ({
-    id: `i-${d.id}`,
-    t: d.t,
-    // 見出し・要望は作れないので、発話原文をそのまま使う（要望が空だと何を直すのか分からないので、話した全文を入れる）
-    title: draftTitle(d),
-    request: spokenText(d),
-    status: 'decided' as const,
-    quotes: d.segments.map((s) => ({ speaker: s.speaker, t: s.t0, text: s.text, ...(s.speakerName ? { name: s.speakerName } : {}) })),
-    frameTimes: d.frameTimes,
-    annotationIds: d.annotationIds,
-    draftIds: [d.id],
-    include: true
-  }))
+  const pending: PendingItem[] = draft.map((d) => draftPending(d, `i-${d.id}`))
 
   return {
     meta: material.meta,
@@ -242,6 +248,29 @@ function withPenTitle(item: FeedbackItem, fallback: boolean): FeedbackItem {
   if (!element) return fallback ? { ...item, title: t('review.penFallbackTitle') } : item
   const text = !element.sensitive ? element.text?.replace(/\s+/g, ' ').trim() : ''
   return { ...item, title: t('review.penTitleAt', { target: text ? `“${truncate(text, 40)}”` : element.selector }) }
+}
+
+/** 下書きのまとまり1つを、話したそのままの指摘にする */
+function draftPending(d: DraftItem, id: string): PendingItem {
+  return {
+    id,
+    t: d.t,
+    // 見出し・要望は作れないので、発話原文をそのまま使う（要望が空だと何を直すのか分からないので、話した全文を入れる）
+    title: draftTitle(d),
+    request: spokenText(d),
+    // 文字起こしに失敗した区間だけの指摘は、話した言葉が分からない。一覧には出し（黙って捨てない）、要確認にして送る対象からは外す
+    status: onlyFailedSpeech(d) ? 'needs_check' : 'decided',
+    quotes: d.segments.map((s) => ({ speaker: s.speaker, t: s.t0, text: s.text, ...(s.speakerName ? { name: s.speakerName } : {}) })),
+    frameTimes: d.frameTimes,
+    annotationIds: d.annotationIds,
+    draftIds: [d.id],
+    include: !onlyFailedSpeech(d)
+  }
+}
+
+/** 発話が、文字起こしに失敗した区間（TranscriptSegment.sttFailed）だけか。書き込みがあれば、その印の指摘として送れるので含めない */
+function onlyFailedSpeech(d: DraftItem): boolean {
+  return d.annotationIds.length === 0 && d.segments.length > 0 && d.segments.every((s) => s.sttFailed === true)
 }
 
 function spokenText(d: DraftItem): string {

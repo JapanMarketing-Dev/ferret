@@ -19,9 +19,9 @@
 import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import { quoteWindowsCmdArgument } from '@shared/shellQuote'
-import { findWindowsExecutable, nodeWindowsFs, pathExtensions, readEnv, resolveWindowsCmdShim, type WindowsFs } from '@video/toolchain/windowsCmdShim'
+import { findWindowsExecutable, nodeWindowsFs, pathExtensions, readEnv, resolveWindowsCmdShim, type WindowsFs } from './windowsCmdShim'
 
-export { findWindowsExecutable, parseWindowsCmdShim, type WindowsFs } from '@video/toolchain/windowsCmdShim'
+export { findWindowsExecutable, parseWindowsCmdShim, type WindowsFs } from './windowsCmdShim'
 
 /**
  * `where` の出力から、起動できるものを選ぶ。

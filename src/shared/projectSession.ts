@@ -118,6 +118,8 @@ export function isRecordableUrl(url: string | undefined | null): url is string {
  * 根を外した `file:<相対パス>` で覚え、戻すときに今の根を付け直す（フォルダを動かしても戻せる）。
  */
 const FILE_PREFIX = 'file:'
+/** ファイル以外の中央のタブ（src/renderer/components/CenterTabs.tsx の CenterTab。settings は覚えない） */
+const KNOWN_TABS = ['dashboard', 'browser', 'findings'] as const
 
 export function encodeCenterTab(tab: string, root: string | null): string | undefined {
   if (!tab.startsWith(FILE_PREFIX)) return tab
@@ -128,7 +130,8 @@ export function encodeCenterTab(tab: string, root: string | null): string | unde
 
 export function decodeCenterTab(saved: string | undefined, root: string | null): string | undefined {
   if (!saved) return undefined
-  if (!saved.startsWith(FILE_PREFIX)) return saved
+  // ファイル以外は今あるタブだけ（前の版で覚えた business などの消えたタブは戻さない）
+  if (!saved.startsWith(FILE_PREFIX)) return (KNOWN_TABS as readonly string[]).includes(saved) ? saved : undefined
   const rel = saved.slice(FILE_PREFIX.length)
   if (!root || !rel || !isRelativePath(rel)) return undefined
   return `${FILE_PREFIX}${root.replace(/[\\/]+$/, '')}/${rel}`

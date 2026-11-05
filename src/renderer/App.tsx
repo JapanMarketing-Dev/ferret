@@ -5,7 +5,7 @@ import { preloadable } from './lib/preloadable'
 import { embedMedia, markdownDropTargetAt, planMediaDrop, planTreeMediaDrop } from './editor/markdownDrop'
 import { isMarkdownLanguage } from './editor/language'
 import { delay } from '@shared/delay'
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   DEFAULT_AGENT_PREFERENCES,
@@ -21,16 +21,13 @@ import { BrowserSlot, type SlotEmptyReason } from './components/BrowserSlot'
 import { BrowserToolbar } from './components/BrowserToolbar'
 import { BrowserTabs } from './components/BrowserTabs'
 import { UrlField } from './components/NavControls'
-import { useVideoChannel } from '@video/app/renderer/useVideoChannel'
 import { CenterTabs, isFileTab, type CenterTab } from './components/CenterTabs'
-import { useVentureTab, VentureCenter } from './business/ventureShell'
-import { ResearchModeView, useResearchMode } from './research/researchMode'
 import { browserFocusLayout, layoutSignature, mainSplitGrid, withPanel, workspaceGrid, type Dock } from '@shared/layout'
 import { exitBrowserFocus, initLayout, setLayout, togglePanelShown, useBrowserFocus, useLayout } from './lib/layout'
 import { FileExplorer } from './components/FileExplorer'
 import { QuickOpen } from './components/QuickOpen'
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog'
-import { fileTabId, useOpenFiles } from './editor/useOpenFiles'
+import { useOpenFiles } from './editor/useOpenFiles'
 import { isHtmlPath, projectPathFromPageUrl } from '@shared/htmlPreview'
 import { FeedbackToolbar, type AnnotationTool } from './components/FeedbackToolbar'
 import { ReviewTargetsPanel } from './components/ReviewTargetsPanel'
@@ -109,11 +106,7 @@ const { Component: FileEditor, preload: preloadFileEditor } = preloadable(() => 
 /** 遅れて読む部品の props（型だけを読む） */
 type PropsOf<C> = C extends (props: infer P) => unknown ? P : never
 const { Component: SettingsPage, preload: preloadSettingsPage } = preloadable<PropsOf<typeof import('./components/SettingsPage').SettingsPage>>(() => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-// 動画づくり（src/video/app/renderer/）。動画のチャンネルのプロジェクトで「動画」のタブを開いたときだけ読む
-const VideoWorkspace = lazy(() => import('@video/app/renderer/VideoWorkspace'))
 const { Component: OrchestraDashboard, preload: preloadOrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
-// ビジネス（src/renderer/venture/）。オーケストラのダッシュボードを包み、ビジネスならビジネスの画面にする
-const { Component: VentureOrOrchestra } = preloadable<PropsOf<typeof import('./venture/VentureOrOrchestra').VentureOrOrchestra>>(() => import('./venture/VentureOrOrchestra').then((m) => ({ default: m.VentureOrOrchestra })))
 const { Component: OnboardingFlow } = preloadable<PropsOf<typeof import('./onboarding/OnboardingFlow').OnboardingFlow>>(() => import('./onboarding/OnboardingFlow').then((m) => ({ default: m.OnboardingFlow })))
 const { Component: MeetingImportDialog } = preloadable<PropsOf<typeof import('./components/MeetingImportDialog').MeetingImportDialog>>(() => import('./components/MeetingImportDialog').then((m) => ({ default: m.MeetingImportDialog })))
 const { Component: Gallery } = preloadable<PropsOf<typeof import('./gallery/Gallery').Gallery>>(() => import('./gallery/Gallery').then((m) => ({ default: m.Gallery })))
@@ -215,12 +208,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const browserFocus = useBrowserFocus()
   /** 全体（すべてのプロダクト）を開いているか。オーケストラの画面（ダッシュボード・指示の欄・確認リストの帯）にする */
   const isOrchestra = !!projects.projects.find((p) => p.id === workspace.projectId)?.editorWorkspace
-  /** 動画のチャンネルのプロジェクトか（src/video/app/renderer/useVideoChannel.ts） */
-  const videoChannel = useVideoChannel(projects.projects.find((p) => p.id === workspace.projectId))
-  /** 上のモード切替で「動画」を選んでいる間だけ、中央に動画の画面（一覧・撮る・確認・投稿）を出す。エディタのモードの上に重ねる */
-  const [videoOpen, setVideoOpen] = useState(false)
-  const videoOpenRef = useRef(videoOpen)
-  videoOpenRef.current = videoOpen
   /** 全体では、フィードバックの対象を大きく見せるためターミナルの欄を閉じる（右下のボタンで開く。設定の配置は変えない） */
   const [terminalPeek, setTerminalPeek] = useState(false)
   const baseLayout = browserFocus ? browserFocusLayout(savedLayout) : savedLayout
@@ -492,30 +479,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   // モーダル（フィードバック・画面の確認・送る前の確認など）を開いている間も隠す。ビューがダイアログの上に重なるため
   const anyModalOpen = useAnyModalOpen()
   /** ビューに場所を譲ってよい条件。ひとつでも欠けたら 0 サイズにして隠す */
-  // 上のモード切替の「ビジネスリサーチ」（選んだときだけ中央をリサーチの画面にする。src/renderer/research/researchMode.tsx）
-  const researchMode = useResearchMode(projects, workspace, mode)
-  // リサーチの画面で開いたファイル。エディタへ移らずに、リサーチの画面の帯のタブで中身を出す
-  const [researchFile, setResearchFile] = useState(false)
-  const researchActiveRef = useRef(researchMode.active)
-  researchActiveRef.current = researchMode.active
-  useEffect(() => {
-    if (!researchMode.active) setResearchFile(false)
-  }, [researchMode.active])
-  // クイックオープンなど、ファイルツリー以外から開いたときも、リサーチの画面のままその中身を出す（入ったときに前からあったタブは出さない）
-  const lastCenterTab = useRef(centerTab)
-  useEffect(() => {
-    if (lastCenterTab.current === centerTab) return
-    lastCenterTab.current = centerTab
-    if (researchActiveRef.current && isFileTab(centerTab)) setResearchFile(true)
-  }, [centerTab])
-  /** 右のファイルツリーから開く。リサーチの画面では HTML もソースで開く（内蔵ブラウザはリサーチの画面では出ないため） */
-  const openFromTree = useCallback((path: string) => {
-    if (!researchActiveRef.current) return files.open(path)
-    files.openSource(path)
-    setResearchFile(true)
-  }, [files])
   const viewVisible =
-    !researchMode.active && !anyModalOpen && !gallery && !onboardingOpen && !targetPickerOpen && !addTrackOpen && !footerPopoverOpen && !splitDragging && !projectMenuOpen && !urlDialogOpen && !tabMenuOpen && !projectDialogOpen && !quickOpenOpen && !files.pendingClose && emptyReason === null && (mode === 'feedback' || (centerTab === 'browser' && !videoOpen))
+    !anyModalOpen && !gallery && !onboardingOpen && !targetPickerOpen && !addTrackOpen && !footerPopoverOpen && !splitDragging && !projectMenuOpen && !urlDialogOpen && !tabMenuOpen && !projectDialogOpen && !quickOpenOpen && !files.pendingClose && emptyReason === null && (mode === 'feedback' || centerTab === 'browser')
 
   const layoutKey = [
     mode,
@@ -572,12 +537,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     setMode(next)
     void window.ade.invoke('mode:set', next)
   }, [])
-  /** 上のモード切替の「動画」。エディタのモードで中央に動画の画面を出す（フィードバックへ移ったら閉じる） */
-  const openVideo = useCallback(() => {
-    if (modeRef.current !== 'editor') changeMode('editor')
-    setVideoOpen(true)
-  }, [changeMode])
-  useEffect(() => { if (mode === 'feedback') setVideoOpen(false) }, [mode])
 
 
   /** 録音の設定を変える。設定ダイアログとフッターで同じ state を使う（二重管理しない） */
@@ -873,8 +832,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const allActivity = useProjectActivity()
   const orchestraBusy = !!workspace.projectId && allActivity[workspace.projectId] === 'working'
 
-  // ビジネスリサーチ・ビジネスのプロジェクトでは、その画面のタブを先頭に出して前に出す（src/renderer/business/ventureShell.tsx）
-  const ventureTab = useVentureTab(projects, workspace, setCenterTab)
   // 全体へ切り替えたらダッシュボードを開く。全体から離れたらダッシュボードのタブは無いのでブラウザへ
   useEffect(() => {
     if (isOrchestra) setCenterTab((tab) => (tab === 'browser' || tab === 'findings' ? 'dashboard' : tab))
@@ -1142,9 +1099,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     // 内蔵ブラウザからの短い知らせ（タブの上限など）。フィードバックモードでは帯の案内の枠にも出る（Toast の置き先）
     const offBrowserNotice = window.ade.on('browser:notice', (message) => toast({ tone: 'warning', message }))
     // エージェントが browser-use で内蔵ブラウザを動かし始めた。エディタの画面なら中央を内蔵ブラウザにして、操作が見えるようにする
-    // （ビジネスリサーチ・動画の画面のときは切り替えない。そのタブは隠れたまま、大きさだけ保つ）
     const offAgentBrowser = window.ade.on('browser:agentAttached', () => {
-      if (modeRef.current === 'editor' && !researchActiveRef.current && !videoOpenRef.current) setCenterTab('browser')
+      if (modeRef.current === 'editor') setCenterTab('browser')
     })
     const offWorkspace = window.ade.on('workspace:changed', setWorkspace)
     const offProjects = window.ade.on('projects:changed', (state) => {
@@ -1334,10 +1290,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           projects={projects}
           mode={mode}
           recording={recording}
-          onChangeMode={(next) => { setVideoOpen(false); if (researchMode.active) researchMode.leave(next, changeMode); else changeMode(next) }}
-          video={videoOpen && !researchMode.active}
-          onOpenVideo={() => { if (researchMode.active) researchMode.leave(mode, changeMode); openVideo() }}
-          research={{ active: researchMode.active, onEnter: () => { setVideoOpen(false); researchMode.enter(mode, changeMode) } }}
+          onChangeMode={changeMode}
           onProjectMenuChange={setProjectMenuOpen}
           onToggleRecording={toggleRecording}
           onOpenSettings={() => openSettings()}
@@ -1382,24 +1335,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
             <section className="pane pane--browser external-drop-host" aria-label={t('app.reviewTarget')} data-testid="center-pane" {...editorDrop.props}>
               {editorDrop.over && <ExternalDropOverlay label={t(markdownActive ? 'drop.editor.markdownHint' : 'drop.editor.hint')} testId="editor-file-drop" align="top" />}
               <ErrorBoundary name="center">
-              {researchMode.active ? <ResearchModeView projects={projects} workspace={workspace} onOpenProject={researchMode.openProject} files={{
-                tabs: files.files.map((f) => ({ id: f.id, name: f.name, path: f.path, dirty: f.dirty })),
-                activeId: researchFile && isFileTab(centerTab) ? (files.activeFile?.id ?? null) : null,
-                onSelect: (id) => { setCenterTab(fileTabId(id)); setResearchFile(true) },
-                onClose: files.requestClose,
-                onShowResearch: () => setResearchFile(false),
-                view: files.activeFile && (
-                  <ErrorBoundary name="editor"><Suspense fallback={<div className="editor-area" />}>
-                    <FileEditor file={files.activeFile} editor={files} />
-                  </Suspense></ErrorBoundary>
-                )
-              }} /> : videoOpen && workspace.folderPath ? (
-                /* 上のモード切替の「動画」。選んでいる間は中央のタブの代わりに動画の画面を出す（src/video/app/renderer/） */
-                <ErrorBoundary name="video"><Suspense fallback={<div className="editor-area" />}>
-                  <VideoWorkspace folderPath={workspace.folderPath} projectName={workspace.folderName ?? ''} reviewRecording={recording || recordBusy}
-                    isChannel={videoChannel} projectId={workspace.projectId ?? null} />
-                </Suspense></ErrorBoundary>
-              ) : (<>
               <CenterTabs
                 active={centerTab}
                 pageTitle={browserState.title}
@@ -1414,11 +1349,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 settingsOpen={settingsOpen}
                 onCloseSettings={closeSettings}
                 dashboard={isOrchestra}
-                venture={ventureTab}
               />
               {centerTab === 'dashboard' && isOrchestra ? (
                 <ErrorBoundary name="orchestra"><Suspense fallback={<div className="editor-area" />}>
-                  <VentureOrOrchestra projectId={workspace.projectId} projects={projects.projects} onOpenFile={files.open} onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)} orchestra={
                   <OrchestraDashboard
                     projects={projects.projects}
                     onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)}
@@ -1428,10 +1361,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                     onStartRound={() => void run(() => productRound.start())}
                     onOpenFile={files.open}
                   />
-                  } />
                 </Suspense></ErrorBoundary>
-              ) : centerTab === 'business' && ventureTab === 'business' ? (
-                <VentureCenter projectId={workspace.projectId ?? null} />
               ) : centerTab === 'settings' && settingsOpen ? (
                 <ErrorBoundary name="settings"><Suspense fallback={<div className="editor-area" />}>
                 <SettingsPage
@@ -1505,7 +1435,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 </ReviewHub>
                 </ErrorBoundary>
               )}
-              </>)}
               </ErrorBoundary>
             </section>
 
@@ -1531,7 +1460,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
               projectId={workspace.projectId ?? null}
               activePath={files.activeFile?.path ?? null}
               dirtyPaths={files.dirtyPaths}
-              onOpen={openFromTree}
+              onOpen={files.open}
               onOpenSource={files.openSource}
               onQuickOpen={() => setQuickOpenOpen(true)}
               onRenamed={files.followRename}

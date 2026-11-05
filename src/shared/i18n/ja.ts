@@ -1,12 +1,7 @@
 import type { Messages } from './en'
-import { videoJa } from './video'
-import { researchJa } from '../research/messages.ja'
-import { ventureJa } from './venture'
 
 /** 日本語の辞書。キーは en.ts が正本 */
 export const ja: Messages = {
-  ...videoJa,
-  ...ventureJa,
   'common.cancel': 'キャンセル',
   'onboarding.permissions.subtitleOther': 'Windows と Linux では、これらの許可を前もって求められません。そのまま進めます。',
   'ai.key.envHint': '環境変数 {{env}}（.env でも可）も使えます。',
@@ -719,6 +714,7 @@ export const ja: Messages = {
   'errors.stopRecordingBeforeSetup': '録画を停止してから設定してください',
   'errors.projectNotFound': 'プロジェクトが見つかりません',
   'errors.appFilesReplaced': 'アプリのファイルが入れ替わりました。Ferret を再起動してください。',
+  'errors.reviewFinishFailed': '録画は保存しましたが、指摘の一覧を作れませんでした。レビューの一覧から開き直すと、録画から作り直します。',
   'errors.recordingBusy': '録画処理中です',
   'errors.saveAudioFailed': '音声の保存に失敗: {{message}}',
   'errors.transcriptionFailed': '文字起こしに失敗: {{message}}',
@@ -801,18 +797,9 @@ export const ja: Messages = {
   'github.errors.notGitRepo': 'このプロジェクトは git のリポジトリではありません。',
   'github.errors.noOrigin': 'origin のリモートがありません。',
   'github.errors.originNotForge': 'origin が GitHub / GitLab のリポジトリではありません。',
-  'gitlab.errors.glabMissing': 'GitLab CLI（glab）が見つかりません。',
-  'gitlab.errors.timeout': 'GitLab から応答がありません。しばらくしてから再読み込みしてください。',
-  'gitlab.errors.notLoggedIn': 'GitLab にログインしていません。設定の「CLI」からログインしてください。',
-  'gitlab.errors.repoNotFound': 'プロジェクトが見つからないか、アクセス権がありません。',
-  'gitlab.errors.network': 'GitLab に接続できません。ネットワークを確認してください。',
-  'gitlab.errors.failedWith': 'GitLab の操作に失敗しました: {{detail}}',
-  'gitlab.errors.failed': 'GitLab の操作に失敗しました。',
   'gitlab.footer.openRepo': 'GitLab でプロジェクトを開く',
   'gitlab.footer.openBranch': 'GitLab でブランチを開く',
   'gitlab.footer.branchNotPushed': 'このブランチはまだ GitLab に push されていません',
-  'projectSource.gitlab.noGlab': 'glab が入っていないため、GitLab のプロジェクトを一覧にできません。URL を入力してください。',
-  'projectSource.gitlab.notLoggedIn': 'GitLab のプロジェクトから選ぶには、glab にログインしてください（glab auth login）。',
   'usage.errors.rateLimited': '{{name}} の使用量の取得が制限されています。しばらくしてから再読み込みしてください。',
   'usage.errors.staleToken': '{{name}} のログインの有効期限が切れている可能性があります。{{name}} を一度起動すると更新されます。',
   'usage.errors.http': '{{name}} の使用量を取得できませんでした（HTTP {{status}}）。',
@@ -836,6 +823,7 @@ export const ja: Messages = {
   'recording.limitSoon': 'まもなく録画の上限です。自動で止めて保存します。',
   'recording.limitReached': '上限の{{limit}}に達したので停止しました',
   'recording.errors.stopFailed': '停止に失敗: {{error}}',
+  'recording.errors.stopStepFailed': '録画の停止で「{{step}}」が終わらなかったため、待たずに進めました（{{reason}}）。それまでの記録で指摘を作ります',
   'recording.errors.noBrowser': '内蔵ブラウザが結びついていません',
   'recording.mirrorUnavailable': '{{target}}を映せません。アプリが閉じているか、画面収録の許可がありません。録画の対象を選び直してください。',
   'recording.errors.targetGone': '{{target}}が見つかりません。閉じられた可能性があります。録画の対象を選び直してください。',
@@ -1539,7 +1527,7 @@ export const ja: Messages = {
   'projectSource.addTitle': 'プロジェクトを追加',
   'projectSource.choose.local': '自分の PC で開く',
   'projectSource.choose.localHint': 'この PC のフォルダを選びます。',
-  'projectSource.choose.github': 'GitHub / GitLab から取得',
+  'projectSource.choose.github': 'GitHub から取得',
   'projectSource.choose.githubHint': 'リポジトリをフォルダへ clone して開きます。',
   'projectSource.choose.ssh': 'SSH で開く',
   'projectSource.choose.sshHint': 'ターミナルと Agent をリモートで動かします。レビューはこの PC に保存します。',
@@ -2449,6 +2437,7 @@ export const ja: Messages = {
   'stt.download.empty': 'モデルの取得に失敗しました（応答が空）',
   'stt.download.save': 'モデルの保存に失敗しました: {{message}}',
   'stt.download.size': 'モデルのサイズが合いません（{{got}} / {{total}} バイト）。次回は続きから再開します。',
+  'stt.failedChunkText': '（{{from}}〜{{to}} の発話は文字起こしできませんでした。動画のこの区間で確かめてください）',
   'stt.whisper.timeout': 'whisper がタイムアウトしました ({{ms}}ms)',
   'stt.whisper.exited': 'whisper が異常終了しました (code={{code}})',
   'platform.errors.cmdNewline': 'cmd.exe には改行を含む引数を渡せません',
@@ -2816,6 +2805,4 @@ export const ja: Messages = {
   'remote.resetDone': "新しいリンクを作りました。古いリンクはもう使えません。",
   'remote.warning': "このリンクを知っている人は誰でも、ターミナルに文字を打ち込めます。人に渡さず、信頼できるネットワークだけで使ってください。通信は暗号化しない HTTP なので、公衆 Wi‑Fi では近くの人に読まれるおそれがあります（Tailscale 越しなら暗号化されます）。",
   'remote.firewall': "初めて使うとき、macOS や Windows が「受信の接続を許可するか」を聞くことがあります。プライベートなネットワークでは許可してください。",
-  // ビジネス・ビジネスリサーチ（src/shared/research/messages.ja.ts）
-  ...researchJa
 }

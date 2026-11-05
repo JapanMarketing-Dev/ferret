@@ -136,7 +136,7 @@ describe('要約の自動の名前', () => {
   }
   const record = (reviewTitle?: string, edits: SessionRecord['edits'] = []): SessionRecord => ({
     version: 1, meta: material.meta, transcript: material.transcript, removedDuplicates: [], frames: material.frames, draft: [],
-    document: { ...assembleFromOrganized(material, organized), ...(reviewTitle ? { reviewTitle } : {}) }, edits
+    document: { ...assembleFromOrganized({ ...material, transcript: [] }, organized), ...(reviewTitle ? { reviewTitle } : {}) }, edits
   })
 
   it('整理していなければルールの名前。検索の本文にも入る', () => {

@@ -6,15 +6,8 @@
  * 数で形の変わる文は `_one` / `_other` を対で持ち、t(key, { count }) で引く。
  * 置き換えは {{name}}。英語は短く自然な UI の英語にし、Orca の表記（New Terminal、Agent settings… など）に合わせる。
  */
-import { videoEn } from './video'
-import { researchEn } from '../research/messages.en'
-import { ventureEn } from './venture'
 
 export const en = {
-  // 動画づくり（src/shared/i18n/video/。キーは video. で始まる）
-  ...videoEn,
-  // ビジネス（src/shared/i18n/venture/。キーは venture. で始まる）
-  ...ventureEn,
   'common.cancel': 'Cancel',
   'onboarding.permissions.subtitleOther': 'Windows and Linux don\'t ask for these permissions in advance. You can continue.',
   'ai.key.envHint': 'You can also use the {{env}} environment variable (or .env).',
@@ -727,6 +720,7 @@ export const en = {
   'errors.stopRecordingBeforeSetup': 'Stop recording before changing this setting.',
   'errors.projectNotFound': 'Project not found.',
   'errors.appFilesReplaced': 'Ferret\'s app files were replaced while it was running. Restart Ferret.',
+  'errors.reviewFinishFailed': 'The recording is saved, but the findings couldn\'t be built. Open it again from the review list to rebuild them from the recording.',
   'errors.recordingBusy': 'Recording is being processed.',
   'errors.saveAudioFailed': 'Couldn\'t save audio: {{message}}',
   'errors.transcriptionFailed': 'Transcription failed: {{message}}',
@@ -810,18 +804,9 @@ export const en = {
   'github.errors.noOrigin': 'No origin remote.',
   'usage.errors.rateLimited': '{{name}} usage requests are rate-limited. Reload in a while.',
   'github.errors.originNotForge': 'origin isn\'t a GitHub or GitLab repository.',
-  'gitlab.errors.glabMissing': 'GitLab CLI (glab) not found.',
-  'gitlab.errors.timeout': 'GitLab didn\'t respond. Try reloading later.',
-  'gitlab.errors.notLoggedIn': 'Not signed in to GitLab. Sign in from CLI tools in Settings.',
-  'gitlab.errors.repoNotFound': 'Project not found, or you don\'t have access.',
-  'gitlab.errors.network': 'Couldn\'t connect to GitLab. Check your network.',
-  'gitlab.errors.failedWith': 'GitLab action failed: {{detail}}',
-  'gitlab.errors.failed': 'GitLab action failed.',
   'gitlab.footer.openRepo': 'Open Project on GitLab',
   'gitlab.footer.openBranch': 'Open Branch on GitLab',
   'gitlab.footer.branchNotPushed': 'This branch isn\'t pushed to GitLab yet',
-  'projectSource.gitlab.noGlab': 'glab isn\'t installed, so your GitLab projects can\'t be listed. Enter a URL instead.',
-  'projectSource.gitlab.notLoggedIn': 'Sign in to glab (glab auth login) to pick from your GitLab projects.',
   'usage.errors.staleToken': 'Your {{name}} login may have expired. Launch {{name}} once to refresh it.',
   'usage.errors.http': 'Couldn\'t fetch {{name}} usage (HTTP {{status}}).',
   'usage.errors.network': 'Couldn\'t fetch {{name}} usage (network error).',
@@ -844,6 +829,7 @@ export const en = {
   'recording.limitSoon': 'Recording limit is near. It will stop and save automatically.',
   'recording.limitReached': 'Stopped at the {{limit}} limit.',
   'recording.errors.stopFailed': 'Couldn\'t stop: {{error}}',
+  'recording.errors.stopStepFailed': 'While stopping the recording, "{{step}}" did not finish, so Ferret moved on without it ({{reason}}). Findings are made from what was recorded up to then.',
   'recording.errors.noBrowser': 'The built-in browser isn\'t attached.',
   'recording.mirrorUnavailable': 'Can\'t show {{target}}. The app may be closed, or Screen Recording isn\'t allowed. Choose the recording target again.',
   'recording.errors.targetGone': '{{target}} not found. It may have been closed. Choose the recording target again.',
@@ -1547,7 +1533,7 @@ export const en = {
   'projectSource.addTitle': 'Add Project',
   'projectSource.choose.local': 'On this computer',
   'projectSource.choose.localHint': 'Pick a folder on this computer.',
-  'projectSource.choose.github': 'Clone from GitHub / GitLab',
+  'projectSource.choose.github': 'Clone from GitHub',
   'projectSource.choose.githubHint': 'Clone a repository into a folder, then open it.',
   'projectSource.choose.ssh': 'Open over SSH',
   'projectSource.choose.sshHint': 'Run the terminal and agents on a remote machine. Reviews stay on this computer.',
@@ -2457,6 +2443,7 @@ export const en = {
   'stt.download.empty': 'Failed to fetch the model (empty response)',
   'stt.download.save': 'Failed to save the model: {{message}}',
   'stt.download.size': 'Model size mismatch ({{got}} / {{total}} bytes). It will resume next time.',
+  'stt.failedChunkText': '(The speech from {{from}} to {{to}} could not be transcribed. Check this part of the video.)',
   'stt.whisper.timeout': 'whisper timed out ({{ms}}ms)',
   'stt.whisper.exited': 'whisper exited abnormally (code={{code}})',
   'platform.errors.cmdNewline': 'Can\'t pass arguments containing newlines to cmd.exe.',
@@ -2824,8 +2811,6 @@ export const en = {
   'remote.resetDone': "Made a new link. Old links no longer work.",
   'remote.warning': "Anyone who has this link can type into your terminals. Share it with no one, and use it only on networks you trust: the connection is plain HTTP, so on public Wi-Fi others nearby could read it. Over Tailscale it is encrypted.",
   'remote.firewall': "On first use, macOS or Windows may ask whether Ferret can accept incoming connections. Allow it on private networks.",
-  // ビジネス・ビジネスリサーチ（src/shared/research/messages.en.ts）
-  ...researchEn
 } as const
 
 export type MessageKey = keyof typeof en

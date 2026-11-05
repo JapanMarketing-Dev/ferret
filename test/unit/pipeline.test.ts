@@ -35,8 +35,12 @@ describe('パイプライン全体', () => {
 
     expect(r.fellBack).toBe(false)
     expect(r.document.organizedByLlm).toBe(true)
-    expect(r.document.items).toHaveLength(1)
-    expect(r.document.items[0]!.request).toBe('申し込むボタンの色を濃くする')
+    const organizedItem = r.document.items.find((it) => it.request === '申し込むボタンの色を濃くする')
+    expect(organizedItem).toBeDefined()
+    // 整理が書き漏らした発話（00:02・00:05・00:24）は消さず、話したそのままの指摘として残る
+    const restored = r.document.items.filter((it) => it !== organizedItem)
+    expect(restored.map((it) => it.quotes.map((q) => q.t))).toEqual([[2_000, 5_500], [24_800]])
+    expect(restored.every((it) => it.include && it.status === 'decided')).toBe(true)
   })
 
   it('LLM が失敗したら下書きのまま使う（EXT-11）', async () => {

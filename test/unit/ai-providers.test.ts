@@ -279,7 +279,8 @@ describe('整理（API）: 応答の読み取りと実行', () => {
     const runner = new ApiLlmRunner({ provider: 'openrouter', apiKey: 'sk-or-1' })
     const r = await refineWithLlm(material, buildDraftDocument(material), { runner, cwd: '/tmp' })
     expect(r.fellBack).toBe(false)
-    expect(r.document.items[0]!.request).toBe('申し込むボタンの色を濃くする')
+    // 整理が引かなかった発話は話したそのままの指摘として足されるので、整理の指摘を要望で探す
+    expect(r.document.items.some((it) => it.request === '申し込むボタンの色を濃くする')).toBe(true)
     // スキーマに合わない JSON は下書きへ戻る
     mockFetch(() => json({ choices: [{ message: { content: '{"items":"x"}' } }] }))
     expect((await refineWithLlm(material, buildDraftDocument(material), { runner, cwd: '/tmp' })).fellBack).toBe(true)

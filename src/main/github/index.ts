@@ -1,7 +1,6 @@
 import type { GitHubRepoRef, GitHubRepoResult, GitHubStatus } from '@shared/github'
 import { gh, ghErrorMessage, run } from './gh'
 import { needsHostLookup, parseAuthStatus, parseForgeRemote, pickActiveAccount } from './parse'
-import { knownGitLabHosts } from './gitlab'
 import { t } from '@shared/i18n'
 import { cliInstallCommand } from '@shared/cliTools'
 
@@ -52,9 +51,9 @@ export async function githubRepo(folderPath: string | null): Promise<GitHubRepoR
 
 /**
  * origin の URL を GitHub / GitLab のリポジトリとして読む。github.com・gitlab.com などで決まらないホスト
- * （セルフホスト）のときだけ glab に登録したホストを聞く（glab の結果は少しの間覚えている）
+ * （セルフホスト）のときだけ、渡された lookup でセルフホストの GitLab のホストを聞く（既定は聞かない）
  */
-export async function resolveRemote(remoteUrl: string, lookup: () => Promise<string[]> = knownGitLabHosts): Promise<GitHubRepoRef | null> {
+export async function resolveRemote(remoteUrl: string, lookup: () => Promise<string[]> = async () => []): Promise<GitHubRepoRef | null> {
   const hosts = needsHostLookup(remoteUrl) ? await lookup().catch(() => []) : []
   return parseForgeRemote(remoteUrl, hosts)
 }

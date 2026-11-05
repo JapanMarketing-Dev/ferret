@@ -23,6 +23,8 @@ const REASON = '意味の通じない発話（聞き取りの誤り・つなぎ�
 
 /** fixtures の4区間に、離れた時刻の「Shh.」だけのまとまりを足す */
 const withShh: Material = { ...material, transcript: [...transcript, seg(32_000, 33_000, 'Shh.')] }
+/** 整理の出力が引いている発話だけの素材（出力に無い発話は、話したそのままの指摘として足される。assemble.ts の uncoveredSpeech） */
+const onlySpoken = (m: Material, ts: number[]): Material => ({ ...m, transcript: m.transcript.filter((s) => ts.includes(s.t0)) })
 
 describe('意味の通じない発話を指摘にしない（下書き）', () => {
   it('意味の無い発話だけで書き込みの無いまとまりは指摘にせず、除外した発話に入れる', () => {
@@ -81,7 +83,7 @@ describe('意味の通じない発話を指摘にしない（整理の後）', (
   const base: OrganizeOutput['items'][number] = { title: '', request: '', status: 'decided', quotes: [], frame_times: [3_000], annotation_ids: [] }
 
   it('意味の無い引用だけの指摘は消し、除外した発話に入れる', () => {
-    const doc = assembleFromOrganized(withShh, {
+    const doc = assembleFromOrganized(onlySpoken(withShh, [2_000, 32_000]), {
       items: [
         { ...base, title: '見出しが小さい', request: '見出しを大きくする', quotes: [{ speaker: 'self', t: 2_000, text: 'この見出しが小さいですね' }] },
         { ...base, title: 'Shh.', request: 'Shh.', quotes: [{ speaker: 'self', t: 32_000, text: 'Shh.' }] },
@@ -93,7 +95,7 @@ describe('意味の通じない発話を指摘にしない（整理の後）', (
   })
 
   it('書き込みのある指摘は残し、見出しを囲んだ要素・要望を空にする', () => {
-    const doc = assembleFromOrganized(withShh, {
+    const doc = assembleFromOrganized(onlySpoken(withShh, [32_000]), {
       items: [{ ...base, title: 'Shh.', request: 'Shh.', quotes: [{ speaker: 'self', t: 32_000, text: 'Shh.' }], frame_times: [19_750], annotation_ids: ['p3'] }],
       dropped: [],
     })

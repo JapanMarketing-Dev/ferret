@@ -44,7 +44,7 @@ const organized = {
       title: '見出しが小さい',
       request: '大きくする',
       status: 'decided' as const,
-      quotes: [{ speaker: 'self' as const, t: 2_000, text: 'この見出しが小さいですね' }],
+      quotes: [{ speaker: 'self' as const, t: 2_000, text: 'この見出しが小さいですね' }, { speaker: 'self' as const, t: 5_500, text: 'もう少し大きくしてください' }],
       frame_times: [3_000],
       annotation_ids: []
     },
@@ -216,7 +216,7 @@ describe('確認画面の編集（REV-2 / REV-3 / REV-5）', () => {
     const merged = document.items[0]!
     expect(merged.title).toBe('見出しが小さい')
     expect(merged.request).toBe('大きくする / 濃くする')
-    expect(merged.quotes.map((q) => q.t)).toEqual([2_000, 18_000])
+    expect(merged.quotes.map((q) => q.t)).toEqual([2_000, 5_500, 18_000])
     expect(merged.frameTimes).toEqual([3_000, 19_750])
   })
 

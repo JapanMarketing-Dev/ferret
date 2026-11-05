@@ -188,7 +188,9 @@ describe('feedback.md の生成', () => {
       ],
       dropped: []
     }
-    const doc = assembleFromOrganized(material, shared)
+    // 出力が引いている発話だけの素材にする（出力に無い発話は、話したそのままの指摘として足される）
+    const spoken = { ...material, transcript: material.transcript.filter((s) => s.t0 === 18_000 || s.t0 === 24_800) }
+    const doc = assembleFromOrganized(spoken, shared)
     expect(doc.items.map((i) => i.images)).toEqual([['./01.png'], ['./01.png']])
   })
 
