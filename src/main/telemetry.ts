@@ -34,6 +34,8 @@ import {
   eventLoopBlockContext,
   eventLoopBlockThreshold,
   shouldReportEventLoopBlock,
+  sleepNearBlock,
+  SLEEP_AFTER_BLOCK_MS,
   createGpuContextLostGate,
   isGpuContextLostExit,
   type ScrubContext,
@@ -236,6 +238,8 @@ export function watchEventLoop(threshold: number): void {
   let quitRequestedAt: number | null = null
   let resumedAt: number | null = null
   let suspendedAt: number | null = null
+  // 画面のロック（スリープに入る前に届く。sleepNearBlock）
+  let lockedAt: number | null = null
   // OS が掛けている CPU の速度の上限（止まりの手がかり。eventLoopBlockContext の cpuSpeedLimit）
   let cpuSpeedLimit: number | null = null
   const isActive = (): boolean => app.isReady() && BrowserWindow.getFocusedWindow() !== null
@@ -247,6 +251,7 @@ export function watchEventLoop(threshold: number): void {
     // powerMonitor は ready の後でしか使えない
     powerMonitor.on('resume', () => { resumedAt = performance.now() })
     powerMonitor.on('suspend', () => { resumedAt = null; suspendedAt = performance.now() })
+    powerMonitor.on('lock-screen', () => { lockedAt = performance.now() })
     powerMonitor.on('speed-limit-change', (details: { limit?: unknown }) => { cpuSpeedLimit = typeof details?.limit === 'number' ? details.limit : null })
   })
   // 補助技術の切り替え（FERRET-M では 25 秒ごとに来ていた）。パンくずには残さないので、最後の時刻だけ覚える
@@ -280,12 +285,13 @@ export function watchEventLoop(threshold: number): void {
       const inflight = inflightIpc.snapshot()
       const memory = process.memoryUsage()
       const ax = { axEnabled: app.accessibilitySupportEnabled, axChangedMsAgo: axChangedAt === null ? null : Date.now() - axChangedAt, cpuSpeedLimit }
-      // GC の記録は少し遅れて届くので、待ってから重い処理を集める
+      // GC の記録は少し遅れて届くので、待ってから重い処理を集める。スリープ・ロックの知らせも止まりの後に届くので、待ってから見分ける
       setTimeout(() => {
+        if (sleepNearBlock({ blockEndAt: now, lagMs: lag, sleepAt: [suspendedAt, lockedAt] })) return
         reportPerf('event-loop-block', lag, eventLoopBlockContext(inflight, recentSlowOps(Date.now()).slice(0, 3), {
           heapUsedMb: memory.heapUsed / 2 ** 20, rssMb: memory.rss / 2 ** 20, ...ax
         }))
-      }, 100).unref?.()
+      }, SLEEP_AFTER_BLOCK_MS).unref?.()
     }
   }, INTERVAL)
   timer.unref?.()

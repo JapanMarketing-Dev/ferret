@@ -1,6 +1,6 @@
 {
   "name": "ade-movie",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "private": true,
   "license": "MIT",
   "description": "画面を操作しながら喋って囲むだけでUIフィードバックをAgentへ渡すデスクトップADE",
@@ -73,7 +73,7 @@
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-webgl": "0.18.0",
     "@xterm/xterm": "^5.5.0",
-    "budoux": "0.10.0",
+    "budoux": "0.10.1",
     "electron": "^44.9.3",
     "electron-builder": "^26.18.0",
     "electron-vite": "^5.0.0",

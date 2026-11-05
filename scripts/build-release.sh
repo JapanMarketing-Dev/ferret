@@ -152,8 +152,11 @@ deb https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm main
 deb https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm-updates main
 deb https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} bookworm-security main
 APT
-apt-get -o Acquire::Check-Valid-Until=false update -qq
-apt-get install -y -qq build-essential python3 rsync libnss3 libnspr4 libgtk-3-0 libasound2 libgbm1 libxss1 libxtst6 >/dev/null
+# snapshot.debian.org への接続が応答なしのまま止まることがある（2026-11-05 の 0.7.11 で apt-get update が3時間止まった）。
+# 30 秒で切って 5 回までやり直す
+APT_NET=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=5)
+apt-get -o Acquire::Check-Valid-Until=false "${APT_NET[@]}" update -qq
+apt-get "${APT_NET[@]}" install -y -qq build-essential python3 rsync libnss3 libnspr4 libgtk-3-0 libasound2 libgbm1 libxss1 libxtst6 >/dev/null
 # out/ は Mac で作ったものをそのまま使う（JS は OS に関係なく同じ。ソースマップの debug ID も揃う）
 rsync -a --exclude node_modules --exclude dist /src/ /work/
 cd /work

@@ -25,7 +25,7 @@ function usePageLogins(state: BrowserState): PageLogins {
   useEffect(() => {
     if (state.loading) return
     let alive = true
-    void window.ade.invoke('passwords:forPage').then((next) => { if (alive) setLogins(next) }).catch(() => { if (alive) setLogins(NONE) }) // 失敗は main の IPC が Sentry へ送る
+    void window.ade.invoke('passwords:forPage').then((next) => { if (alive) setLogins(next?.accounts ? next : NONE) }).catch(() => { if (alive) setLogins(NONE) }) // 失敗は main の IPC が Sentry へ送る
     return () => { alive = false }
   }, [state.url, state.loading, state.activeTabId, changed])
   return logins

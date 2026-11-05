@@ -507,6 +507,23 @@ export function shouldReportEventLoopBlock(s: {
   if (s.msSinceSuspend != null && s.msSinceSuspend < RESUME_GRACE_MS + s.lagMs) return false
   return true
 }
+/**
+ * 止まりを送る前に待つ時間。スリープに入る直前（画面のロック・ディスプレイの切断）の止まりは、
+ * suspend・lock-screen が止まりの後に届くので、少し待ってから見分ける（0.7.10 の Windows：lock-screen・
+ * display-removed・suspend と同じ秒に 1.1s。FERRET-M）
+ */
+export const SLEEP_AFTER_BLOCK_MS = 2000
+
+/**
+ * 止まり（blockEndAt に終わった lagMs の遅れ）の前後で、スリープ・画面のロックが始まったか。
+ * 前は RESUME_GRACE_MS、後は SLEEP_AFTER_BLOCK_MS まで見る。時刻はどれも performance.now() の値
+ */
+export function sleepNearBlock(s: { blockEndAt: number; lagMs: number; sleepAt: readonly (number | null)[] }): boolean {
+  const from = s.blockEndAt - s.lagMs - RESUME_GRACE_MS
+  const to = s.blockEndAt + SLEEP_AFTER_BLOCK_MS
+  return s.sleepAt.some((at) => at != null && Number.isFinite(at) && at >= from && at <= to)
+}
+
 /** CPU の速度の上限で割り戻すときの下限（%） */
 export const CPU_LIMIT_FLOOR = 25
 

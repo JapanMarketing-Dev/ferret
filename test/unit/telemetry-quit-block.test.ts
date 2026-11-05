@@ -39,6 +39,7 @@ vi.mock('../../src/main/telemetrySourceMaps', () => ({ attachDebugIds: vi.fn(), 
 
 import { setReporter, type Reporter } from '../../src/shared/report'
 import { noteQuitRequested, watchEventLoop } from '../../src/main/telemetry'
+import { SLEEP_AFTER_BLOCK_MS } from '../../src/shared/telemetry'
 
 describe('ウィンドウを閉じた終了の片付けの止まり（FERRET-M 0.6.12）', () => {
   const messages: string[] = []
@@ -56,7 +57,7 @@ describe('ウィンドウを閉じた終了の片付けの止まり（FERRET-M 0
   const tick = (blockMs = 0): void => {
     clock.now += 250 + blockMs
     vi.advanceTimersByTime(250)
-    vi.advanceTimersByTime(200) // 手がかりを集める 100ms の待ち
+    vi.advanceTimersByTime(200)
   }
 
   it('quit begin（noteQuitRequested）の後の 3.8s は送らない。before-quit が来ていなくても同じ。終了が取り消されて猶予を過ぎれば送る', () => {
@@ -71,6 +72,8 @@ describe('ウィンドウを閉じた終了の片付けの止まり（FERRET-M 0
     for (let i = 0; i < 160; i++) tick()
     expect(messages).toEqual([])
     tick(3800)
+    // 送る前の待ち（手がかりを集め、スリープ・ロックの知らせが後から来ないかを見る。SLEEP_AFTER_BLOCK_MS）
+    vi.advanceTimersByTime(SLEEP_AFTER_BLOCK_MS)
     expect(messages).toEqual(['Main event loop blocked (3.8s)'])
   })
 })

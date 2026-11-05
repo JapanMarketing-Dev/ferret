@@ -108,6 +108,7 @@ import { isValidPort } from '@shared/mobileRemote'
 import { delay } from '@shared/delay'
 import { TerminalRestoreStore } from './terminalRestore'
 import { syntheticSystemAudio, systemAudioFeatures } from '@shared/systemAudio'
+import { acceptsDuringShutdown, replyAfterShutdown } from './ipcShutdown'
 
 /*
  * クラッシュの受け口（Crashpad / Sentry）は、OSの既定のクラッシュ処理より前に入れたいので、他の初期化より先に呼ぶ。
@@ -3358,7 +3359,8 @@ function registerIpc(): void {
     ipcMain.handle(channel, async (event, ...args: unknown[]) => {
       // 終了処理に入った後は、破棄途中のオブジェクトを触らない。
       // ただし終了の途中で main が頼んだ、ターミナルの最後の画面の文字（terminal:restoreSave。collectTerminalRestore）は受ける
-      if (shuttingDown && channel !== 'terminal:restoreSave') return null
+      // 返事は待たせる（null を返すと、画面がチャネルの値として読んで落ちる。FERRET-28。src/main/ipcShutdown.ts）
+      if (shuttingDown && !acceptsDuringShutdown(channel)) return replyAfterShutdown()
       // アプリの窓の本体のフレーム（アプリのページ）からだけ受ける。サブフレーム・別の窓・別のページからは断る（security-5 [1]）
       const main = mainWindow && !mainWindow.isDestroyed() ? { contents: mainWindow.webContents, mainFrame: mainWindow.webContents.mainFrame } : null
       if (!isTrustedIpcSender(event, main, (url) => isAppPageUrl(url, appPageRoots()))) throw new Error(`ipc ${channel}: sender is not the app window`)

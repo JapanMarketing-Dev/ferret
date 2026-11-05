@@ -414,7 +414,7 @@ describe('終了のときの最後の画面の文字（src/main/index.ts）', ()
     expect(shutdown.indexOf('shuttingDown = true')).toBeGreaterThan(0)
     expect(shutdown.indexOf('collectTerminalRestore()')).toBeGreaterThan(shutdown.indexOf('shuttingDown = true'))
     // 返事（terminal:restoreSave）も、終了の手順に入ってから届く。IPC の受け口はそれだけを通す
-    expect(main).toContain("if (shuttingDown && channel !== 'terminal:restoreSave') return null")
+    expect(main).toContain('if (shuttingDown && !acceptsDuringShutdown(channel)) return replyAfterShutdown()')
     expect(main).not.toMatch(/\n\s+if \(shuttingDown\) return null\n\s+\/\/ アプリの窓の本体のフレーム/)
   })
 })
