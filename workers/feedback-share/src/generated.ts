@@ -26,7 +26,7 @@ export const SHARE_INPUTS: Record<string, string> = {
   "src/renderer/ui/RecordButton.tsx": "93afc6936c2430ae",
   "src/renderer/ui/SttLanguageSelect.tsx": "5698e091fc1f5bc3",
   "src/renderer/ui/Toast.tsx": "b2d0b00546b62f3a",
-  "src/shared/agentCatalog.ts": "3a6f1ef019b12be1",
+  "src/shared/agentCatalog.ts": "12fa2994f849f259",
   "src/shared/aiProviders.ts": "92995746eb52230d",
   "src/shared/annotation.ts": "5fc1b19448e3f850",
   "src/shared/annotationPaint.ts": "41c567a71ab81946",

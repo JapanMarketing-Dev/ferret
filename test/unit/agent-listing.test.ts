@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentOption, TuiAgent } from '@shared/types'
 import { listAgents, matchesAgentQuery } from '../../src/renderer/lib/agentListing'
-import { detectGenericTitleState } from '../../src/main/agent/state'
+import { detectGenericScreenState, detectGenericTitleState, detectState } from '../../src/main/agent/state'
 
 function option(id: TuiAgent, label: string, extra: Partial<AgentOption> = {}): AgentOption {
   return {
@@ -80,5 +80,46 @@ describe('detectGenericTitleState（カタログ外のエージェントのタ�
     expect(detectGenericTitleState('zsh')).toBe('unknown')
     expect(detectGenericTitleState('')).toBe('unknown')
     expect(detectGenericTitleState(undefined)).toBe('unknown')
+  })
+})
+
+describe('タイトル・画面からの汎用エージェントの状態（実際の表示から。2026-11-07 採取）', () => {
+  it('Hermes / DeepSeek: ⏳ は作業中、✓ は待機。要約に running などの語があっても ✓ を優先する', () => {
+    expect(detectGenericTitleState('⏳ Write a 300-word story abou… · deepseek-v4-pro · …/scratchpad')).toBe('working')
+    expect(detectGenericTitleState('⏳ deepseek-v4-pro · …/scratchpad')).toBe('working')
+    expect(detectGenericTitleState('✓ Ferret escapes midnight mis… · deepseek-v4-pro · …/scratchpad')).toBe('idle')
+    expect(detectGenericTitleState('✓ Fix running tests · deepseek-v4-pro')).toBe('idle')
+    expect(detectGenericTitleState('Hermes')).toBe('unknown')
+    expect(detectState('generic', { title: '⏳ deepseek-v4-pro · …', tail: '' })).toBe('working')
+  })
+
+  const screen = (...bottom: string[]) => ['本文の行', '', ...bottom].join('\n')
+
+  it('Devin・Antigravity・DeepSeek Harness・OpenCode・OpenClaw の作業中の状態行', () => {
+    expect(detectGenericScreenState(screen('⡆⠀ Typing · 3s (esc twice to interrupt)', '❭ Guide Devin while it works'))).toBe('working')
+    expect(detectGenericScreenState(screen('⣽  Generating...', '>', 'esc to cancel'))).toBe('working')
+    expect(detectGenericScreenState(screen('⣟  Working...', '>'))).toBe('working')
+    expect(detectGenericScreenState(screen(' ╰─ interrupt: ctrl+c ──────╯', ' ⠼⠴⠦ deepseek-flash'))).toBe('working')
+    expect(detectGenericScreenState(screen('   ⬝⬝■■■■■■ esc interrupt          $0.00  ctrl+p commands'))).toBe('working')
+    expect(detectGenericScreenState(screen(' ⠇ running • 9s | local ready', ' agent main | session main'))).toBe('working')
+    expect(detectGenericScreenState(screen(' ⠦ hobnobbing… • 3s | local ready'))).toBe('working')
+  })
+
+  it('待機中の表示は作業中にしない', () => {
+    expect(detectGenericScreenState(screen('❭ Ask Devin to build features, fix bugs, or work on your code', 'SWE-2 Flash Medium'))).toBe('unknown')
+    expect(detectGenericScreenState(screen(' ╰─ deepseek-official · deepseek-flash ───╯', ' ·  deepseek-flash   ctx 10K/1M 1%'))).toBe('unknown')
+    expect(detectGenericScreenState(screen(' local ready | idle', ' agent main | session main'))).toBe('unknown')
+    expect(detectGenericScreenState(screen('/…/scratchpad/w  shift+tab agents  ctrl+p commands'))).toBe('unknown')
+    expect(detectGenericScreenState('')).toBe('unknown')
+  })
+
+  it('画面の上の方（本文）に同じ語があっても、下の 10 行に無ければ作業中にしない', () => {
+    const body = ['press esc interrupt to stop', ...Array.from({ length: 12 }, (_, i) => `line ${i}`), '❭ Ask Devin'].join('\n')
+    expect(detectGenericScreenState(body)).toBe('unknown')
+  })
+
+  it('タイトルが状態を示していればそちらを優先する（画面は見ない）', () => {
+    expect(detectState('generic', { title: '◇  Ready (w)', tail: screen('esc interrupt') })).toBe('idle')
+    expect(detectState('generic', { title: 'Qwen - w', tail: screen('⣽  Generating...') })).toBe('working')
   })
 })

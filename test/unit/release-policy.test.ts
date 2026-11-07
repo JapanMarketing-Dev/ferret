@@ -1,5 +1,5 @@
 import { escapeRegExp } from './textHelpers'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -187,14 +187,9 @@ describe('workflow 全体の決まり（Orca を参考に足した workflow に�
     expect(text).not.toMatch(/github\.event\.pull_request\.head|github\.head_ref/)
   })
 
-  it('Dependabot は main へ出し、actions と npm を見て、出たばかりの版は待つ', () => {
-    const text = read('.github/dependabot.yml')
-    const updates = text.split(/\n(?= {2}- package-ecosystem:)/).slice(1)
-    expect(updates.map((u) => /package-ecosystem:\s*(\S+)/.exec(u)![1]).sort()).toEqual(['github-actions', 'npm'])
-    for (const u of updates) {
-      expect(u).toMatch(/target-branch:\s*main/)
-      expect(u).toMatch(/cooldown:\n\s+default-days:\s*[1-9]\d*/)
-    }
+  it('Dependabot の自動更新は置かない（2026-11-07 に止めた。依存の更新は手で行う）', () => {
+    expect(existsSync(resolve(root, '.github/dependabot.yml'))).toBe(false)
+    expect(existsSync(resolve(root, '.github/dependabot.yaml'))).toBe(false)
   })
 
   it('Orca を参考に足した workflow が実際にある（パスの書き間違いで素通りしない）', () => {
@@ -269,8 +264,8 @@ describe('スクリプトの外の道具の起動', () => {
 })
 
 describe('ブランチは main だけ（develop は 2026-10-15 に廃止）', () => {
-  it('workflow・Dependabot・公開の手順が develop ブランチを前提にしない', () => {
-    for (const f of [...workflows, '.github/dependabot.yml', 'scripts/release-ci.mjs', 'CONTRIBUTING.md']) {
+  it('workflow・公開の手順が develop ブランチを前提にしない', () => {
+    for (const f of [...workflows, 'scripts/release-ci.mjs', 'CONTRIBUTING.md']) {
       expect(read(f), f).not.toMatch(/\bdevelop\b/)
     }
     expect(read('.github/workflows/cross-platform.yml')).toMatch(/branches:\s*\[main\]/)

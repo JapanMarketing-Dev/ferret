@@ -6,6 +6,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
+import { agentInProcessTree } from '../../src/main/agent/processTree'
 import {
   AGENT_CATALOG,
   BUILTIN_AGENTS,
@@ -311,5 +312,34 @@ describe('agentForProcess: 公式インストーラの Claude Code', () => {
     expect(isVersionProcessName('2.1.288')).toBe(true)
     expect(agentForProcess('2.1.288')).toBeNull()
     expect(agentForProcess('/Users/me/.local/share/claude/versions/2.1.288 --resume x')).toBe('claude')
+  })
+})
+
+describe('agentForProcess: Hermes Agent / DeepSeek（実行ファイル名に hermes が出ない。実際の ps、2026-11-07）', () => {
+  const py = '/Users/taro/.hermes/tools/python-3.14.7+20260901-darwin-arm64/bin/python3'
+  const launcher = `${py} -I -c import os, re, sys\\012sys.path.insert(0, '/Users/taro/.hermes/hermes-agent')\\012from hermes_cli.main import main\\012sys.exit(main())\\012`
+
+  it('起動用の python3 -c を Hermes と見る。--provider deepseek なら DeepSeek', () => {
+    expect(agentForProcess(`${launcher} --tui`)).toBe('hermes')
+    expect(agentForProcess(`${launcher} --tui --provider deepseek -m deepseek-v4-pro`)).toBe('deepseek')
+  })
+
+  it('TUI の node（…/hermes-agent/ui-tui/dist/entry.js）も Hermes と見る', () => {
+    expect(agentForProcess('/Users/taro/.hermes/tools/node-26.7.0-darwin-arm64/bin/node --expose-gc /Users/taro/.hermes/hermes-agent/ui-tui/dist/entry.js')).toBe('hermes')
+  })
+
+  it('常駐の gateway や、無関係の python は Hermes にしない', () => {
+    expect(agentForProcess(`${launcher} gateway run --external-supervisor`)).toBeNull()
+    expect(agentForProcess(`${py} -m tui_gateway.entry`)).toBeNull()
+    expect(agentForProcess('python3 -c print("hermes_cli")')).toBeNull()
+  })
+
+  it('シェルの子から辿ると、最初の段の起動用 python3 で決まる', () => {
+    const rows = [
+      { pid: 2, parent: 1, command: `${launcher} --tui --provider deepseek -m deepseek-v4-pro` },
+      { pid: 3, parent: 2, command: '/Users/taro/.hermes/tools/node-26.7.0-darwin-arm64/bin/node --expose-gc /Users/taro/.hermes/hermes-agent/ui-tui/dist/entry.js' },
+      { pid: 4, parent: 3, command: `${py} -m tui_gateway.entry` }
+    ]
+    expect(agentInProcessTree(rows, 1, (line) => agentForProcess(line))).toBe('deepseek')
   })
 })

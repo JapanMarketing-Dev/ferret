@@ -14,8 +14,13 @@ describe('build-release.sh の apt', () => {
   })
 
   it('apt-get の呼び出しはすべてその設定を使う', () => {
-    const calls = linux.split('\n').filter((l) => /^\s*apt-get\b/.test(l))
+    const calls = linux.split('\n').filter((l) => /^\s*(if )?apt-get\b/.test(l.trim()))
     expect(calls.length).toBeGreaterThanOrEqual(2)
     for (const c of calls) expect(c).toContain('"${APT_NET[@]}"')
+  })
+
+  it('install は失敗しても間を空けて入れ直し、回数で止める（0.7.12 の 503）', () => {
+    expect(linux).toMatch(/for attempt in 1 2 3 4 5; do\n\s+if apt-get "\$\{APT_NET\[@\]\}" install/)
+    expect(linux).toMatch(/\[ "\$attempt" = 5 \].*exit 1/)
   })
 })

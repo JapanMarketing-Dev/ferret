@@ -758,6 +758,19 @@ const PACKAGE_PATH_IDENTITIES: ReadonlyArray<{ pattern: RegExp; agent: BuiltinAg
 ]
 
 /**
+ * Hermes Agent（と、それを DeepSeek で動かす deepseek）。公式インストーラの hermes はシェルスクリプトで、
+ * 実体は同梱の python3 に `-c "…from hermes_cli.main import main…" --tui` を渡して動き、その下に
+ * node …/hermes-agent/ui-tui/dist/entry.js が出る。どの段のコマンド行にも hermes という実行ファイル名が出ないので、
+ * 起動コードとインストール先のパスで見る（実際の ps、2026-11-07）。--provider deepseek なら deepseek
+ */
+function hermesLauncher(commandLine: string, tokens: readonly string[]): BuiltinAgent | null {
+  const isLauncher = commandLine.includes('hermes_cli.main import main') && !tokens.includes('gateway')
+  const isTui = tokens.some((token) => /(?:^|[\\/])hermes-agent[\\/]ui-tui[\\/]dist[\\/]entry\.js$/.test(token))
+  if (!isLauncher && !isTui) return null
+  return /(?:^|\s)--provider[\s=]deepseek(?:\s|$)/.test(commandLine) ? 'deepseek' : 'hermes'
+}
+
+/**
  * 版番号だけの実行ファイル名（公式インストーラの Claude Code は前面プロセス名が「2.1.288」になる）。
  * 名前では決められないので、呼び出し側はコマンド行（ps の args）で判定し直す
  */
@@ -814,6 +827,8 @@ export function agentForProcess(commandLine: string, prefs: Pick<AgentPreference
   const first = tokens[0]!.replace(/^["']|["']$/g, '').replace(/\\/g, '/')
   for (const identity of PACKAGE_PATH_IDENTITIES) if (identity.pattern.test(first)) return identity.agent
   if (!WRAPPER_PROCESSES.has(head)) return null
+  const hermes = hermesLauncher(commandLine, tokens)
+  if (hermes) return hermes
   const rest = tokens.slice(1).filter((token) => !token.startsWith('-'))
   // python -m aider
   const moduleIndex = tokens.indexOf('-m')

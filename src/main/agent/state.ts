@@ -81,7 +81,11 @@ export function detectState(kind: AgentKind, input: DetectInput): AgentState {
   // ほかのエージェントは待機中の見え方がそれぞれ違う。タイトルが付いているだけで待機と決めると誤るので、
   // Orca がタイトルから状態を読む手がかり（下の detectGenericTitleState）に当たるときだけ決め、
   // それ以外は「不明」にする（送信側は出力が落ち着いたかで判断する。Orca の quiet-render と同じ）
-  if (kind === 'generic') return detectGenericTitleState(input.title)
+  if (kind === 'generic') {
+    const byTitle = detectGenericTitleState(input.title)
+    if (byTitle !== 'unknown') return byTitle
+    return detectGenericScreenState(tail)
+  }
 
   const title = input.title
   if (title !== undefined && title.trim().length > 0) {
@@ -105,17 +109,46 @@ export function detectState(kind: AgentKind, input: DetectInput): AgentState {
  * 単独の語（working / thinking / running、ready / idle / done）だけを見る。パスの中の語（~/codex/ready など）は数えない
  */
 const TITLE_PERMISSION = '\u270b'
-const TITLE_WORKING_GLYPHS = /[\u2726\u23f2\u2800-\u28ff\u25d0-\u25d3]/
-const TITLE_IDLE_GLYPH = '\u25c7'
+// ⌛ ⏳ は Hermes Agent（DeepSeek も同じ hermes --tui）が作業中に付ける（実際の出力「⏳ Write a 300-word… · deepseek-v4-pro · …」2026-11-07 採取）
+const TITLE_WORKING_GLYPHS = /[\u2726\u23f2\u231b\u23f3\u2800-\u28ff\u25d0-\u25d3]/
+// ✓ ✔ は Hermes Agent が終わったときに付ける（「✓ deepseek-v4-pro · …」）
+const TITLE_IDLE_GLYPHS = /[\u25c7\u2713\u2714]/
 const TITLE_WORKING_WORD = /(?<![\w./\\-])(working|thinking|running)(?![\w-])/i
 const TITLE_IDLE_WORD = /(?<![\w./\\-])(ready|idle|done)(?![\w-])/i
 
 export function detectGenericTitleState(title: string | undefined): AgentState {
   if (!title || !title.trim()) return 'unknown'
   if (title.includes(TITLE_PERMISSION)) return 'blocked'
-  if (TITLE_WORKING_GLYPHS.test(title) || hasSpinner(title) || TITLE_WORKING_WORD.test(title)) return 'working'
-  if (title.includes(TITLE_IDLE_GLYPH) || TITLE_IDLE_WORD.test(title)) return 'idle'
+  if (TITLE_WORKING_GLYPHS.test(title) || hasSpinner(title)) return 'working'
+  // 待機の記号はタイトルの語より先に見る（Hermes は「✓ <会話の要約>」で、要約に running などの語が入ることがある）
+  if (TITLE_IDLE_GLYPHS.test(title)) return 'idle'
+  if (TITLE_WORKING_WORD.test(title)) return 'working'
+  if (TITLE_IDLE_WORD.test(title)) return 'idle'
   return 'unknown'
+}
+
+/**
+ * タイトルで状態を出さないエージェントの、画面の下の方の状態行から見る「処理中」。
+ * 本文に同じ語が出ても取り違えないよう、画面の下の 10 行だけ、各 CLI の状態行の形に絞る。
+ * いずれも実際に pty で起動して採取した表示（2026-11-07）:
+ * - Devin: `⡆⠀ Typing · 3s (esc twice to interrupt)`
+ * - Antigravity (agy): `⣽  Generating...` / `⣟  Working...`
+ * - DeepSeek Harness (dsh tui): 入力欄の枠の下辺が `╰─ interrupt: ctrl+c ──`（待機中はモデル名）
+ * - OpenCode: `⬝⬝■■■■■■ esc interrupt`（待機中は出ない）
+ * - OpenClaw: `⠇ running • 9s | local ready`（待機中は `local ready | idle`）
+ * 待機中は決めない（unknown のまま。送信側は出力が落ち着いたかで判断する）
+ */
+const GENERIC_SCREEN_WORKING: RegExp[] = [
+  /\besc twice to interrupt\b/i,
+  /^\s*[⠀-⣿]+\s*(?:Generating|Working|Thinking)(?:\.\.\.|…)/im,
+  /\binterrupt: ctrl\+c\b/i,
+  /\besc interrupt\b/i,
+  /^\s*[⠁-⣿]\s+[^\n|•]{1,40}•\s*\d+[smh]\b[^\n]*\|/m
+]
+
+export function detectGenericScreenState(tail: string): AgentState {
+  const bottom = tail.split('\n').slice(-10).join('\n')
+  return GENERIC_SCREEN_WORKING.some((re) => re.test(bottom)) ? 'working' : 'unknown'
 }
 
 /** 画面に待機中のしるしが見えているか（確定遅延を飛ばしてよい条件） */
