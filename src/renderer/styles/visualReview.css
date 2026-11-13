@@ -7,6 +7,23 @@
 }
 
 .vr {
+  /*
+   * 白い背景に黒い文字で固定する（テーマに関係なく。灰色の文字が見えないという指摘のため、補足・前の値も黒にする）。
+   * この中の部品（ボタン・入力欄）もトークンを読むので、ここで上書きすればまとめて黒になる
+   */
+  --color-text: #000;
+  --color-text-muted: #000;
+  --color-text-faint: #000;
+  --color-bg-canvas: #fff;
+  --color-bg-panel: #fff;
+  --color-bg-elevated: #fff;
+  --color-border: #d0d0d0;
+  --color-border-strong: #000;
+  --color-surface-hover: #f0f0f0;
+  --color-surface-selected: #e4e4e4;
+  --color-accent-wash: #eef3ff;
+  --color-warning-quiet: #fff6e0;
+  color-scheme: light;
   --vr-change: var(--color-accent);
   --vr-add: var(--color-success);
   --vr-remove: var(--color-danger);
@@ -164,11 +181,13 @@
   padding: 0 4px;
   border-radius: 10px;
   background: var(--vr-color, var(--vr-change));
-  color: var(--color-on-accent);
+  color: #000;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bold);
 }
-.vr__num--feedback { background: var(--vr-feedback); color: var(--color-bg-canvas); }
+/* 番号の印は色の付いた丸に黒い文字だと読みにくいので、薄い色の地に色の縁・黒い文字にする */
+.vr__num { background: color-mix(in srgb, var(--vr-color, var(--vr-change)) 18%, #fff); border: 2px solid var(--vr-color, var(--vr-change)); }
+.vr__num--feedback { background: #fff; color: #000; }
 
 .vr__section h3 { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); }
 .vr__changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
@@ -180,7 +199,7 @@
   padding: 0 var(--space-1);
   border: var(--size-border) solid var(--vr-color);
   border-radius: var(--radius-sm);
-  color: var(--vr-color);
+  color: #000;
   font-size: var(--font-size-2xs);
   font-weight: var(--font-weight-medium);
 }

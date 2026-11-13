@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import type { ProjectSession, Settings, SettingsFileError } from '@shared/types'
 import { LEGACY_KEYS, SETTINGS_SCHEMA, STATE_KEYS, knownSettingsKeys, settingsSchemaText, validateAgainstSchema } from '@shared/settingsSchema'
+import { cleanLeakedSessions } from '@shared/projectSession'
 
 /**
  * settings.json（利用者の設定）と state.json（再起動で戻す作業の状態）の読み書き。
@@ -134,6 +135,8 @@ interface PersistedState {
   starPrompt?: Settings['starPrompt']
   /** 書いたのが開発版か配布版か（relocateMisplacedDevConfig が見る） */
   writtenBy?: BuildKind
+  /** 別のプロジェクトのページが入り込んだ記憶を1度だけ片付けた印（cleanLeakedSessions。0.8.1） */
+  sessionsCleaned?: 1
 }
 
 /** 上の階層の並び。人が読みやすい順に書く（無いものは飛ばす。残りは後ろへ） */
@@ -155,7 +158,7 @@ export function splitSettings(settings: Settings): { config: Record<string, unkn
   }
   return {
     config,
-    state: { version: 1, folderPath: settings.folderPath, url: settings.url, viewport: settings.viewport, activeProjectId: settings.activeProjectId, sessions,
+    state: { version: 1, folderPath: settings.folderPath, url: settings.url, viewport: settings.viewport, activeProjectId: settings.activeProjectId, sessions, sessionsCleaned: 1,
       ...(settings.starPrompt ? { starPrompt: settings.starPrompt } : {}) }
   }
 }
@@ -168,7 +171,11 @@ export function mergeSettings(config: Record<string, unknown>, state: unknown): 
   const s = (state && typeof state === 'object' ? state : {}) as Partial<PersistedState>
   const merged: Record<string, unknown> = { ...config }
   for (const key of STATE_KEYS) if (key in s) merged[key] = s[key]
-  const sessions = s.sessions && typeof s.sessions === 'object' ? s.sessions : {}
+  const stored = s.sessions && typeof s.sessions === 'object' ? s.sessions : {}
+  // まだ片付けていない state.json なら、別のプロジェクトのページが入り込んだ記憶を1度だけ外す（cleanLeakedSessions）
+  const sessions = s.sessionsCleaned === 1 || !Array.isArray(config.projects)
+    ? stored
+    : cleanLeakedSessions(config.projects.filter((p): p is { id: string; urls?: Array<{ url: string }> } => Boolean(p) && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string'), stored)
   if (Array.isArray(config.projects)) {
     merged.projects = config.projects.map((p) => {
       if (!p || typeof p !== 'object') return p

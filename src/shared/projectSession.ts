@@ -146,3 +146,65 @@ export function decodeCenterTab(saved: string | undefined, root: string | null):
   if (!root || !rel || !isRelativePath(rel)) return undefined
   return `${FILE_PREFIX}${root.replace(/[\\/]+$/, '')}/${rel}`
 }
+
+/** http(s) の URL の origin（それ以外・読めないものは null） */
+function httpOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.origin : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 0.7.13 までの起動時の不具合で、別のプロジェクトのページがプロジェクトの記憶（session の url・tabs）に入り込んでいた
+ * （起動時に、記憶の無いプロジェクトへ全体の最後の URL を開いていた。official_website の localhost:4321 が ferret などに入った）。
+ * そのため切り替えても前のプロジェクトのページが開いて見えた。1度だけ、ほかのプロジェクトが登録している URL の origin のページを、
+ * その origin を登録していないプロジェクトの記憶から外す。
+ * 毎回はしない（同じポートを複数のプロジェクトで使うことがあり、自分で開いたページまで消してしまうため）
+ */
+export function cleanLeakedSessions(
+  projects: ReadonlyArray<{ id: string; urls?: ReadonlyArray<{ url: string }> }>,
+  sessions: Record<string, ProjectSession>
+): Record<string, ProjectSession> {
+  const registered = new Map<string, Set<string>>()
+  for (const project of projects) {
+    const origins = new Set<string>()
+    for (const { url } of project.urls ?? []) {
+      const origin = typeof url === 'string' ? httpOrigin(url) : null
+      if (origin) origins.add(origin)
+    }
+    registered.set(project.id, origins)
+  }
+  const next: Record<string, ProjectSession> = {}
+  for (const [id, session] of Object.entries(sessions)) {
+    if (!session || typeof session !== 'object') continue
+    const own = registered.get(id) ?? new Set<string>()
+    const leaked = (url: string): boolean => {
+      const origin = httpOrigin(url)
+      if (!origin || own.has(origin)) return false
+      for (const [other, origins] of registered) if (other !== id && origins.has(origin)) return true
+      return false
+    }
+    const cleaned: ProjectSession = { ...session }
+    if (Array.isArray(session.tabs)) {
+      const activeUrl = session.tabs[session.activeTab ?? 0]
+      const tabs = session.tabs.filter((url) => !leaked(url))
+      delete cleaned.tabs
+      delete cleaned.activeTab
+      if (tabs.length) {
+        cleaned.tabs = tabs
+        const at = activeUrl === undefined ? -1 : tabs.indexOf(activeUrl)
+        if (at > 0) cleaned.activeTab = at
+      }
+    }
+    if (typeof session.url === 'string' && leaked(session.url)) {
+      delete cleaned.url
+      const fallback = cleaned.tabs?.[cleaned.activeTab ?? 0]
+      if (fallback) cleaned.url = fallback
+    }
+    if (Object.keys(cleaned).length) next[id] = cleaned
+  }
+  return next
+}
