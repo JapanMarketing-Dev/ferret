@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { ensureGlobalFolder, globalFolderPath, readGlobalRules, syncAgentGlobalRules, syncGlobalFiles, withGlobalOrchestra } from '../../src/main/globalOrchestra'
 import {
   CLAUDE_GLOBAL_RULES_FILE,
@@ -60,7 +60,7 @@ describe('一覧に足す（既定で1回）', () => {
   it('無ければ先頭にオーケストラとして足す', () => {
     const next = withGlobalOrchestra([o('O1'), p('a')], '/home/taro/Ferret/global', 'グローバル', 'g1', NOW)
     expect(next).toHaveLength(3)
-    expect(next[0]).toMatchObject({ id: 'g1', name: 'グローバル', folderPath: '/home/taro/Ferret/global', editorWorkspace: true, orchestrator: true, global: true, addedAt: NOW.toISOString() })
+    expect(next[0]).toMatchObject({ id: 'g1', name: 'グローバル', folderPath: resolve('/home/taro/Ferret/global'), editorWorkspace: true, orchestrator: true, global: true, addedAt: NOW.toISOString() })
     expect(isGlobalOrchestra(next[0]!)).toBe(true)
     expect(ids(next.slice(1))).toEqual(['O1', 'a'])
   })

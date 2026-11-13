@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { WORK_PROJECT_NAME, ensureWorkFolder, isWorkProject, withWorkProject, workFolderPath } from '../../src/main/workProject'
 import { setArchived } from '../../src/shared/projectArchive'
 import type { Project } from '../../src/shared/types'
@@ -23,7 +23,7 @@ describe('一覧に足す', () => {
   it('無ければ最後に「work」の名前と印で足す', () => {
     const next = withWorkProject([p('a')], '/home/taro/Ferret/work', 'w1', NOW)
     expect(next).toHaveLength(2)
-    expect(next[1]).toMatchObject({ id: 'w1', name: WORK_PROJECT_NAME, folderPath: '/home/taro/Ferret/work', work: true, urls: [], addedAt: NOW.toISOString() })
+    expect(next[1]).toMatchObject({ id: 'w1', name: WORK_PROJECT_NAME, folderPath: resolve('/home/taro/Ferret/work'), work: true, urls: [], addedAt: NOW.toISOString() })
     expect(isWorkProject(next[1]!)).toBe(true)
     expect(isWorkProject(next[0]!)).toBe(false)
   })

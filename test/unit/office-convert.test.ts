@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { deflateRawSync } from 'node:zlib'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ConvertFailedError, OOXML_TARGETS, OfficeConverter, SofficeMissingError, findSoffice, sofficeArgs, sofficeCandidates, targetExtension, type RunProcess } from '../../src/main/officeConvert'
@@ -101,7 +102,7 @@ describe('soffice の置き場所', () => {
 describe('soffice の引数', () => {
   it('uses a private profile, headless mode and puts the input last', () => {
     const args = sofficeArgs('/tmp/work/profile', 'xlsx:Calc MS Excel 2007 XML', '/tmp/work/job/out', '/tmp/work/job/document.xls')
-    expect(args[0]).toBe('-env:UserInstallation=file:///tmp/work/profile')
+    expect(args[0]).toBe(`-env:UserInstallation=${pathToFileURL('/tmp/work/profile').href}`)
     expect(args).toContain('--headless')
     expect(args).toContain('--norestore')
     expect(args.slice(args.indexOf('--convert-to'), args.indexOf('--convert-to') + 2)).toEqual(['--convert-to', 'xlsx:Calc MS Excel 2007 XML'])
@@ -109,7 +110,8 @@ describe('soffice の引数', () => {
   })
 
   it('escapes spaces in the profile URL', () => {
-    expect(sofficeArgs('/tmp/my work/p', 'docx', '/o', '/i')[0]).toBe('-env:UserInstallation=file:///tmp/my%20work/p')
+    expect(sofficeArgs('/tmp/my work/p', 'docx', '/o', '/i')[0]).toBe(`-env:UserInstallation=${pathToFileURL('/tmp/my work/p').href}`)
+    expect(sofficeArgs('/tmp/my work/p', 'docx', '/o', '/i')[0]).toContain('my%20work')
   })
 
   it('reads the extension of a target', () => {

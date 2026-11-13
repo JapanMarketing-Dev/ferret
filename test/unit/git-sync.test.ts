@@ -195,7 +195,11 @@ describe('本物の git：fetch・最新の取得（fast-forward）・push', { t
     cpSync(template, dir, { recursive: true, verbatimSymlinks: true })
     for (const clone of ['project', 'other']) {
       const config = join(dir, clone, '.git', 'config')
-      writeFileSync(config, readFileSync(config, 'utf8').split(join(template, 'remote.git')).join(join(dir, 'remote.git')))
+      // Windows の config はパスの \ を \\ と書くので、そのままの形と書き直した形の両方を置き換える
+      const from = join(template, 'remote.git')
+      const to = join(dir, 'remote.git')
+      const escape = (s: string) => s.split('\\').join('\\\\')
+      writeFileSync(config, readFileSync(config, 'utf8').split(escape(from)).join(escape(to)).split(from).join(to))
     }
     return { remote: join(dir, 'remote.git'), project: join(dir, 'project'), other: join(dir, 'other') }
   }

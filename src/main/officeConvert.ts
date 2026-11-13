@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import { access, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, posix } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { resolveTrustedExecutable } from './agentExecutable'
 
@@ -37,7 +37,7 @@ export function sofficeCandidates(platform: NodeJS.Platform, env: NodeJS.Process
   if (platform === 'darwin') {
     return [
       '/Applications/LibreOffice.app/Contents/MacOS/soffice',
-      join(home, 'Applications/LibreOffice.app/Contents/MacOS/soffice'),
+      posix.join(home, 'Applications/LibreOffice.app/Contents/MacOS/soffice'),
       '/opt/homebrew/bin/soffice',
       '/usr/local/bin/soffice'
     ]
