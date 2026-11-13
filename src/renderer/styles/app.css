@@ -249,14 +249,14 @@ button {
    * 幅で中身を畳めるよう、ペインをコンテナにする（shell.css の @container）。
    */
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--size-tabbar) auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   container: pane / inline-size;
   background: var(--color-bg-panel);
 }
 
 /* 指摘タブのときはURLツールバーが無いので2行になる */
 .pane:has(.findings) {
-  grid-template-rows: var(--size-tabbar) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 /* ── フィードバックモード: feedback.css ────────────────── */

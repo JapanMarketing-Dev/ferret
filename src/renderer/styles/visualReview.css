@@ -2,7 +2,7 @@
 
 /* URL のツールバーが無いので2行（タブ列と本体）。狭いときは一覧を上に並べる（下の @container） */
 .pane:has(> .vr) {
-  grid-template-rows: var(--size-tabbar) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   container-type: inline-size;
 }
 
@@ -219,6 +219,12 @@
   background: var(--color-bg-elevated);
 }
 .vr__feedback { display: flex; flex-direction: column; gap: var(--space-2); }
+/* 声と書き込みのフィードバック（録画中・まとめている途中） */
+.vr__recording { display: flex; flex-direction: column; gap: var(--space-2); }
+.vr__recording-state { color: var(--color-text); }
+.vr__live { height: 160px; display: flex; border: var(--size-border) solid var(--color-border); border-radius: var(--radius-sm); overflow: hidden; }
+.vr__live > .fb-targets { flex: 1; border-left: 0; }
+.vr__live-head { display: flex; align-items: center; padding: 0 var(--space-3); font-weight: 600; }
 .vr__textarea {
   width: 100%;
   min-height: 72px;
@@ -243,6 +249,64 @@
   color: var(--color-text);
   font: inherit;
 }
+
+/*
+ * 価値ユースケースのタブ（components/ValueUseCases.tsx）。.vr と同じ白い背景・黒い文字（.vr の上書きをそのまま使う）。
+ * 価値はカード、流れは縦の手順（番号・画面・押す場所の枠・操作・結果・次への矢印）
+ */
+.vuc { --vr-target: var(--color-accent); }
+.vr-kind--target { --vr-color: var(--vr-target, var(--color-accent)); }
+.vuc__summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.vuc__purpose p { margin: 0; white-space: pre-wrap; font-size: var(--font-size-md); }
+.vuc__value {
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+}
+.vuc__value-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vuc__value-head:hover { background: var(--color-surface-hover); }
+.vuc__value-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: 12px;
+  font-weight: var(--font-weight-bold);
+}
+.vuc__value-name { flex: 1; min-width: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); }
+.vuc__value-body { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-4) var(--space-4); }
+.vuc__facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
+.vuc__facts dt { font-weight: var(--font-weight-medium); }
+.vuc__facts dd { margin: 0; white-space: pre-wrap; }
+.vuc__flow-title { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); }
+.vuc__flow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.vuc__step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-left: 3px solid var(--vr-target);
+  background: var(--color-bg-canvas);
+}
+.vuc__step-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.vuc__step-screen { font-weight: var(--font-weight-bold); }
+.vuc__noimage { padding: var(--space-2) 0; }
+.vuc__next { align-self: center; margin-top: var(--space-1); }
 
 @container (max-width: 560px) {
   .vr { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }

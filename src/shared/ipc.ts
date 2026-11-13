@@ -4,6 +4,7 @@ import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './brows
 import type { ShareRecordingStatus, ShareSettingsInput, ShareSettingsView, ShareSnapshot, ShareSummaryInfo, ShareUrl } from './feedbackShare'
 import type { MeetingImportProgress, MeetingImportRequest, MeetingMediaPick, MeetingScoreResult, MeetingTranscriptPick } from './meetingImport'
 import type { AgentNotifyOpen, AgentNotifyRequest } from './agentNotify'
+import type { MemoryAlertNotice } from './memoryAlert'
 import type { FailoverLaunchRequest, FailoverNotice, LimitFailoverPrefs } from './failover'
 import type { CliToolStatus } from './cliTools'
 import type { AiEndpointConfig, AiVendor, LlmApiProvider, OrganizeRunnerId, SttRemoteProvider } from './aiProviders'
@@ -81,7 +82,9 @@ import type { FeedbackEnvironment, FeedbackSubmitInput, FeedbackSubmitResult } f
 import type { GitActionResult, GitRepoStatus } from './github'
 import type { FetchTrigger, GitSyncAction } from './gitSync'
 import type { DroppedEntry } from './externalDrop'
-import type { PlanListing, VisualPlanReply, VisualPlanReplyResult } from './visualReview'
+import type { PlanListing, RecordingNote, VisualPlanReply, VisualPlanReplyResult } from './visualReview'
+import type { AttachOutcome } from './visualReviewRecording'
+import type { ValueReply, ValueReplyResult, ValueUseCaseListing } from './valueUseCase'
 
 /**
  * IPC の全チャネルを1か所で宣言する。
@@ -136,12 +139,24 @@ export interface IpcRequests {
   'visualReview:image': (rel: string) => string | null
   /** 計画に返事する（承認・フィードバック）。計画の JSON を書き換え、計画を書いた Agent のターミナルへ送る */
   'visualReview:respond': (id: string, reply: VisualPlanReply) => VisualPlanReplyResult
+  /** 声と書き込みのフィードバック: 録画のレビュー（id）を計画の返事に添えて Agent へ送る。打った文・囲みも一緒に（@shared/visualReviewRecording） */
+  'visualReview:attachRecording': (id: string, reviewId: string, note: RecordingNote, revision?: number) => AttachOutcome
+  /** 開いているプロジェクトの価値ユースケース（.ferret/value-usecases/。新しい順。@shared/valueUseCase）。画像は visualReview:image で読む */
+  'valueUseCase:list': () => ValueUseCaseListing
+  /** 価値ユースケースに返事する（承認・フィードバック）。文書の JSON を書き換え、書いた Agent のターミナルへ送る。囲みの screen は手順の通しの番号 */
+  'valueUseCase:respond': (id: string, reply: ValueReply) => ValueReplyResult
+  /** 声と書き込みのフィードバック: 録画のレビュー（id）を価値ユースケースの返事に添えて Agent へ送る */
+  'valueUseCase:attachRecording': (id: string, reviewId: string, note: RecordingNote, revision?: number) => AttachOutcome
   /** Resource Manager。アプリ・内蔵ブラウザ・ターミナルの CPU と RSS */
   'resources:snapshot': () => ResourceSnapshot
   /** ターミナルを止める／内蔵ブラウザのページを閉じる（about:blank にする） */
   'resources:kill': (target: ResourceKillTarget) => void
   /** 画面の読み込み直しで置き去りになったターミナルを止める。止めた数を返す */
   'resources:cleanup': () => number
+  /** メモリが足りないという知らせ（いま出しているもの。画面を読み込み直したとき。@shared/memoryAlert） */
+  'memoryAlert:current': () => MemoryAlertNotice | null
+  /** メモリの知らせの「あとで」。30 分は、大きく悪くならない限り出し直さない */
+  'memoryAlert:dismiss': () => void
 
   'workspace:open': () => WorkspaceState
   'workspace:current': () => WorkspaceState
@@ -639,6 +654,8 @@ export interface IpcEvents {
   'review:progressChanged': (ids: string[]) => void
   /** 開いているプロジェクトの .ferret/visual-review/ が変わった（Agent が計画を書いた・直した） */
   'visualReview:changed': () => void
+  /** 開いているプロジェクトの .ferret/value-usecases/ が変わった（Agent が価値ユースケースを書いた・直した） */
+  'valueUseCase:changed': () => void
   /** 使用量が変わった（取得中・成功・失敗） */
   'usage:changed': (state: UsageState) => void
   /** 上限での自動切り替え: このタブを開いて（開いたら main が引き継ぐ） */
@@ -647,6 +664,8 @@ export interface IpcEvents {
   'failover:notice': (notice: FailoverNotice) => void
   /** Agent の通知が押された: そのプロジェクトへ切り替え、そのタブを開く */
   'agentNotify:open': (target: AgentNotifyOpen) => void
+  /** メモリが足りない（null は消す）。main の memoryWatch.ts が 60 秒ごとに見て送る */
+  'memoryAlert:update': (notice: MemoryAlertNotice | null) => void
   /** プロジェクトの中のファイルが外部（Agent など）で変わった */
   'fs:changed': (event: FsChangedEvent) => void
   /** 解決済みの配色が変わった（設定の変更、または system のときの OS の切り替え） */
@@ -712,11 +731,13 @@ export const IPC_REQUEST_CHANNELS = [
   'settingsFile:info', 'settingsFile:read', 'settingsFile:write', 'settingsFile:reveal', 'settings:feedbackTargets',
   'app:version',
   'app:checkUpdate',
-  'app:openUpdate', 'app:openExternal', 'agent:sendText', 'visualReview:list', 'visualReview:image', 'visualReview:respond',
+  'app:openUpdate', 'app:openExternal', 'agent:sendText', 'visualReview:list', 'visualReview:image', 'visualReview:respond', 'visualReview:attachRecording',
+  'valueUseCase:list', 'valueUseCase:respond', 'valueUseCase:attachRecording',
   'update:status', 'update:download', 'update:install', 'update:setAutoDownload', 'update:versions', 'update:chooseVersion',
   'resources:snapshot',
   'resources:kill',
   'resources:cleanup',
+  'memoryAlert:current', 'memoryAlert:dismiss',
   'workspace:open',
   'workspace:current',
   'project:list',
@@ -823,13 +844,13 @@ export const IPC_EVENT_CHANNELS = [
   'recording:tracksChanged',
   'recording:level',
   'recording:warning', 'transcript:status', 'transcript:segments', 'capture:targetChanged', 'annotation:history', 'annotation:shortcut', 'capture:modelProgress', 'usage:apiCallsChanged', 'review:ready', 'review:progressChanged', 'meeting:progress',
-  'visualReview:changed',
+  'visualReview:changed', 'valueUseCase:changed',
   'note:added', 'note:mode', 'note:error',
   'fs:changed',
   'theme:changed',
   'locale:changed',
   'usage:changed',
-  'failover:launch', 'failover:notice', 'agentNotify:open',
+  'failover:launch', 'failover:notice', 'agentNotify:open', 'memoryAlert:update',
   'github:headChanged',
   'star:show',
   'feedback:ask',

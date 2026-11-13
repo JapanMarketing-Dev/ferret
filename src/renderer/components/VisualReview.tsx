@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowRight, Check, Copy, MessageSquare, Trash2, X } from 'lucide-react'
+import { ArrowRight, Check, Copy, MessageSquare, Mic, Square, Trash2, X } from 'lucide-react'
 import {
   canRespond,
   clampBox,
   type PlanBox,
   type PlanListing,
   type PlanStatus,
+  type RecordingNote,
   type VisualPlan,
   type VisualPlanReply
 } from '@shared/visualReview'
-import { Badge, Button, EmptyState, IconButton, useToast, type BadgeTone } from '../ui'
+import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
+import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
+import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
+import { LiveTranscriptPanel } from './LiveTranscriptPanel'
 import { useT } from '../lib/i18n'
 import '../styles/visualReview.css'
 
@@ -20,28 +24,45 @@ import '../styles/visualReview.css'
  * 送れなかったら、ターミナルへ貼れる文を出す。
  */
 
-type FeedbackBox = PlanBox & { screen: number; note: string }
-type Manual = { id: string; message: string; copyText: string }
+export type FeedbackBox = PlanBox & { screen: number; note: string }
+export type Manual = { id: string; message: string; copyText: string }
 
-const STATUS_TONE: Record<PlanStatus, BadgeTone> = {
+/**
+ * 声と書き込みのフィードバック（App のいつもの録画。@shared/visualReviewRecording）。
+ * 押すと App が画面全体の録画を始め、このタブを見せたまま話して画像の上を囲む。止めると App が計画に添えて送る
+ */
+export interface PlanRecordingControls {
+  pending: PendingRecordingFeedback | null
+  /** 録画中・開始や停止の途中（ほかの録画を含む） */
+  busy: boolean
+  live: { status: LiveTranscriptStatus; segments: readonly LiveTranscriptSegment[] }
+  onStart: (plan: VisualPlan, note: RecordingNote) => void
+  /** 録画中に打った文・囲み（止めたときの最新を送る） */
+  onNote: (planId: string, note: RecordingNote) => void
+  onStop: () => void
+}
+
+export const STATUS_TONE: Record<PlanStatus, BadgeTone> = {
   proposed: 'warning',
   approved: 'success',
   'changes-requested': 'neutral',
   done: 'brand'
 }
 
-export function VisualReview({ listing, onChanged }: {
+export function VisualReview({ listing, onChanged, recording }: {
   listing: PlanListing
   /** 返事のあとに一覧を読み直す */
   onChanged: () => void
+  recording?: PlanRecordingControls
 }) {
   const t = useT()
   const { plans, invalid } = listing
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // 送れなかったときの貼る文。返事で計画の状態が変わって詳細を作り直しても消えないよう、ここで持つ
   const [manual, setManual] = useState<Manual | null>(null)
-  // 選んでいたものが消えたら（または未選択なら）、いちばん新しい計画を選ぶ
-  const selected = plans.find((plan) => plan.id === selectedId) ?? plans[0] ?? null
+  // 選んでいたものが消えたら（または未選択なら）、いちばん新しい計画を選ぶ。声と書き込みで返している間はその計画を見せる
+  const recordingId = recording?.pending?.planId
+  const selected = plans.find((plan) => plan.id === (recordingId ?? selectedId)) ?? plans.find((plan) => plan.id === selectedId) ?? plans[0] ?? null
 
   if (plans.length === 0) {
     return (
@@ -85,23 +106,24 @@ export function VisualReview({ listing, onChanged }: {
           onChanged={onChanged}
           manual={manual?.id === selected.id ? manual : null}
           onManual={setManual}
+          recording={recording}
         />
       )}
     </div>
   )
 }
 
-function formatTime(iso: string): string {
+export function formatTime(iso: string): string {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return ''
   return at.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function InvalidPlans({ invalid }: { invalid: PlanListing['invalid'] }) {
+export function InvalidPlans({ invalid, title }: { invalid: PlanListing['invalid']; title?: string }) {
   const t = useT()
   return (
     <div className="vr__invalid" data-testid="visual-review-invalid">
-      <div className="vr__invalid-title">{t('visualReview.invalid')}</div>
+      <div className="vr__invalid-title">{title ?? t('visualReview.invalid')}</div>
       {invalid.map((item) => <div key={item.file} className="vr__invalid-row"><code>{item.file}</code> {item.reason}</div>)}
     </div>
   )
@@ -109,10 +131,13 @@ function InvalidPlans({ invalid }: { invalid: PlanListing['invalid'] }) {
 
 /** 計画の画像（main から data URL で）。版が変われば読み直す */
 function usePlanImages(plan: VisualPlan): Record<string, string | null> {
+  return useDocImages(plan.id, plan.revision, plan.screens.map((screen) => screen.image))
+}
+
+/** 文書（計画・価値ユースケース）の画像を main から data URL で読む。画像の並びと版が同じなら読み直さない（ちらつかせない） */
+export function useDocImages(id: string, revision: number, rels: readonly string[]): Record<string, string | null> {
   const [images, setImages] = useState<Record<string, string | null>>({})
-  // 一覧を読み直すたびに計画のオブジェクトは新しくなる。画像のパスと版が同じなら読み直さない（ちらつかせない）
-  const rels = plan.screens.map((screen) => screen.image)
-  const key = `${plan.id}:${plan.revision}:${rels.join('|')}`
+  const key = `${id}:${revision}:${rels.join('|')}`
   useEffect(() => {
     let alive = true
     setImages({})
@@ -127,20 +152,41 @@ function usePlanImages(plan: VisualPlan): Record<string, string | null> {
   return images
 }
 
-function PlanDetail({ plan, onChanged, manual, onManual }: {
+function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
   plan: VisualPlan
   onChanged: () => void
   manual: Manual | null
   onManual: (manual: Manual | null) => void
+  recording?: PlanRecordingControls
 }) {
   const t = useT()
   const toast = useToast()
   const images = usePlanImages(plan)
-  const [mode, setMode] = useState<'view' | 'feedback'>('view')
-  const [text, setText] = useState('')
-  const [boxes, setBoxes] = useState<FeedbackBox[]>([])
+  // この計画を声と書き込みで返している（録画中・まとめている途中）
+  const mine = recording?.pending?.planId === plan.id ? recording.pending : null
+  const recordingHere = mine?.phase === 'recording'
+  const processingHere = mine?.phase === 'processing'
+  // 録画中にタブを離れて戻ってきたら、控えてある文・囲みから描き直す
+  const [modeState, setMode] = useState<'view' | 'feedback'>(recordingHere ? 'feedback' : 'view')
+  const mode = recordingHere ? 'feedback' : modeState
+  const [text, setText] = useState(() => (recordingHere ? mine.note.text ?? '' : ''))
+  const [boxes, setBoxes] = useState<FeedbackBox[]>(() => (recordingHere ? (mine.note.boxes ?? []).map((box) => ({ ...box, note: box.note ?? '' })) : []))
   const [busy, setBusy] = useState(false)
   const pending = canRespond(plan)
+
+  const currentNote = (): RecordingNote => {
+    const trimmed = text.trim()
+    return {
+      ...(trimmed ? { text: trimmed } : {}),
+      ...(boxes.length ? { boxes: boxes.map(({ note, ...box }) => ({ ...box, ...(note.trim() ? { note: note.trim() } : {}) })) } : {})
+    }
+  }
+  // 録画中に打った文・囲みは、その都度 App へ控える（止めたときの最新を送る）
+  const onNote = recording?.onNote
+  useEffect(() => {
+    if (recordingHere) onNote?.(plan.id, currentNote())
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 文・囲みが変わったときだけ
+  }, [recordingHere, text, boxes])
 
   // 番号は画面をまたいで通しにする（一覧と画像の上の数字を合わせる）
   const numbered = useMemo(() => {
@@ -164,13 +210,15 @@ function PlanDetail({ plan, onChanged, manual, onManual }: {
   }
 
   const sendFeedback = (): void => {
-    const trimmed = text.trim()
-    if (!trimmed && boxes.length === 0) return
-    void respond({
-      action: 'feedback',
-      ...(trimmed ? { text: trimmed } : {}),
-      ...(boxes.length ? { boxes: boxes.map(({ note, ...box }) => ({ ...box, ...(note.trim() ? { note: note.trim() } : {}) })) } : {})
-    })
+    const note = currentNote()
+    if (!note.text && !note.boxes) return
+    void respond({ action: 'feedback', ...note })
+  }
+
+  /** 声と書き込みで返す。録画を始め、計画は見せたまま（囲めるようにフィードバックの形にする） */
+  const startRecording = (): void => {
+    setMode('feedback')
+    recording?.onStart(plan, currentNote())
   }
 
   return (
@@ -184,16 +232,7 @@ function PlanDetail({ plan, onChanged, manual, onManual }: {
         {plan.request && <blockquote className="vr__request"><span className="vr__muted">{t('visualReview.request')}</span> {plan.request}</blockquote>}
       </header>
 
-      {manual && (
-        <div className="vr__manual" role="status" data-testid="visual-review-manual">
-          <div>{manual.message}</div>
-          <pre className="vr__manual-text">{manual.copyText}</pre>
-          <div className="vr__row">
-            <Button icon={<Copy size={14} />} onClick={() => { void navigator.clipboard.writeText(manual.copyText).then(() => toast({ tone: 'success', message: t('visualReview.copied') })).catch(() => undefined) }}>{t('visualReview.copy')}</Button>
-            <IconButton label={t('common.close')} icon={<X size={14} />} onClick={() => onManual(null)} />
-          </div>
-        </div>
-      )}
+      {manual && <ManualCopy manual={manual} onClose={() => onManual(null)} />}
 
       {plan.screens.map((screen, index) => (
         <section key={`${index}:${screen.image}`} className="vr__screen">
@@ -258,8 +297,9 @@ function PlanDetail({ plan, onChanged, manual, onManual }: {
           <ul className="vr__plain vr__muted">
             {plan.responses.map((response, i) => (
               <li key={i}>
-                {formatTime(response.at)} · {t('visualReview.revision', { n: response.revision })} · {t(response.action === 'approve' ? 'visualReview.approved' : 'visualReview.feedbackSent')}
+                {formatTime(response.at)} · {t('visualReview.revision', { n: response.revision })} · {t(response.action === 'approve' ? 'visualReview.approved' : response.kind === 'recording' ? 'visualReview.recordedFeedback' : 'visualReview.feedbackSent')}
                 {response.text ? `: ${response.text}` : ''}
+                {response.review && <> · {t('visualReview.recordedFindings', { count: response.review.findings.length })} · <code>{response.review.dir}</code></>}
               </li>
             ))}
           </ul>
@@ -268,13 +308,24 @@ function PlanDetail({ plan, onChanged, manual, onManual }: {
 
       {pending && (
         <footer className="vr__actions" data-testid="visual-review-actions">
-          {mode === 'view' ? (
+          {processingHere ? (
+            <div className="vr__row vr__recording-state" role="status" data-testid="visual-review-processing"><Spinner size={14} />{t('visualReview.recording.processing')}</div>
+          ) : mode === 'view' ? (
             <div className="vr__row">
-              <Button variant="primary" icon={<Check size={14} />} busy={busy} onClick={() => void respond({ action: 'approve' })} data-testid="visual-review-approve">{t('visualReview.approve')}</Button>
+              {canRespond(plan, 'approve') && <Button variant="primary" icon={<Check size={14} />} busy={busy} onClick={() => void respond({ action: 'approve' })} data-testid="visual-review-approve">{t('visualReview.approve')}</Button>}
               <Button icon={<MessageSquare size={14} />} disabled={busy} onClick={() => setMode('feedback')} data-testid="visual-review-feedback">{t('visualReview.feedback')}</Button>
+              {recording && <Button icon={<Mic size={14} />} disabled={busy || recording.busy || !!recording.pending} title={t('visualReview.recordFeedbackTip')} onClick={startRecording} data-testid="visual-review-record">{t('visualReview.recordFeedback')}</Button>}
             </div>
           ) : (
             <div className="vr__feedback">
+              {recordingHere && recording && (
+                <div className="vr__recording" data-testid="visual-review-recording">
+                  <div className="vr__row vr__recording-state" role="status"><RecordDot active />{t('visualReview.recording.active')}</div>
+                  <div className="vr__live">
+                    <LiveTranscriptPanel status={recording.live.status} segments={recording.live.segments} head={<span className="vr__live-head">{t('visualReview.recording.transcript')}</span>} />
+                  </div>
+                </div>
+              )}
               <textarea
                 className="vr__textarea"
                 value={text}
@@ -302,10 +353,17 @@ function PlanDetail({ plan, onChanged, manual, onManual }: {
                   ))}
                 </ol>
               )}
-              <div className="vr__row">
-                <Button variant="primary" busy={busy} disabled={!text.trim() && boxes.length === 0} onClick={sendFeedback} data-testid="visual-review-feedback-send">{t('visualReview.sendFeedback')}</Button>
-                <Button variant="ghost" disabled={busy} onClick={() => { setMode('view'); setBoxes([]) }}>{t('common.cancel')}</Button>
-              </div>
+              {recordingHere && recording ? (
+                <div className="vr__row">
+                  <Button variant="primary" icon={<Square size={14} />} onClick={recording.onStop} data-testid="visual-review-record-stop">{t('visualReview.recording.stop')}</Button>
+                </div>
+              ) : (
+                <div className="vr__row">
+                  <Button variant="primary" busy={busy} disabled={!text.trim() && boxes.length === 0} onClick={sendFeedback} data-testid="visual-review-feedback-send">{t('visualReview.sendFeedback')}</Button>
+                  {recording && <Button icon={<Mic size={14} />} disabled={busy || recording.busy || !!recording.pending} title={t('visualReview.recordFeedbackTip')} onClick={startRecording} data-testid="visual-review-record">{t('visualReview.recordFeedback')}</Button>}
+                  <Button variant="ghost" disabled={busy} onClick={() => { setMode('view'); setBoxes([]) }}>{t('common.cancel')}</Button>
+                </div>
+              )}
             </div>
           )}
         </footer>
@@ -314,7 +372,23 @@ function PlanDetail({ plan, onChanged, manual, onManual }: {
   )
 }
 
-const letter = (i: number): string => String.fromCharCode(65 + (i % 26))
+export const letter = (i: number): string => String.fromCharCode(65 + (i % 26))
+
+/** Agent のターミナルへ送れなかったときの、貼る文とコピーのボタン */
+export function ManualCopy({ manual, onClose }: { manual: Manual; onClose: () => void }) {
+  const t = useT()
+  const toast = useToast()
+  return (
+    <div className="vr__manual" role="status" data-testid="visual-review-manual">
+      <div>{manual.message}</div>
+      <pre className="vr__manual-text">{manual.copyText}</pre>
+      <div className="vr__row">
+        <Button icon={<Copy size={14} />} onClick={() => { void navigator.clipboard.writeText(manual.copyText).then(() => toast({ tone: 'success', message: t('visualReview.copied') })).catch(() => undefined) }}>{t('visualReview.copy')}</Button>
+        <IconButton label={t('common.close')} icon={<X size={14} />} onClick={onClose} />
+      </div>
+    </div>
+  )
+}
 
 function BeforeAfter({ before, after }: { before?: string; after: string }) {
   return (
@@ -325,8 +399,8 @@ function BeforeAfter({ before, after }: { before?: string; after: string }) {
   )
 }
 
-/** 画像と番号付きの枠。drawing の間は、ドラッグで場所を囲める（フィードバック） */
-function Shot({ src, annotations, drawing, boxes, onDraw }: {
+/** 画像と番号付きの枠。drawing の間は、ドラッグで場所を囲める（フィードバック）。価値ユースケースも使う */
+export function Shot({ src, annotations, drawing, boxes, onDraw }: {
   src: string | null | undefined
   annotations: Array<PlanBox & { n: number; kind: string; label: string }>
   drawing: boolean

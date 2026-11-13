@@ -28,7 +28,8 @@ import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import { SLOW_OP_MS, noteSlowOp, reportHandled } from '@shared/report'
 import { progressChangedIds } from '@shared/findingProgress'
-import { isVisualReviewPath } from '@shared/visualReview'
+import { isVisualReviewPath, type ReviewDocKind } from '@shared/visualReview'
+import { isValueUseCasePath } from '@shared/valueUseCase'
 
 /**
  * ファイルエディタの読み書き（fs:list / fs:read / fs:write / fs:files / fs:search / fs:changed）。
@@ -539,8 +540,8 @@ export class ProjectWatcher {
   private overflow = false
   /** 進み具合（progress.json）が変わったレビューのID。.ferret/ は変更通知の対象外なので別に拾う */
   private progress = new Set<string>()
-  /** ビジュアルレビューの計画のフォルダ（.ferret/visual-review/）が変わった（@shared/visualReview） */
-  private visualReview = false
+  /** Agent が書いて返事を待つ文書のフォルダが変わった（.ferret/visual-review/・.ferret/value-usecases/） */
+  private reviewDocs = new Set<ReviewDocKind>()
   private timer: NodeJS.Timeout | null = null
   /** このまとまりで届いた通知の数と、最初の通知の時刻（ビルドや npm install の通知の嵐を、main の停止の手がかりに残す） */
   private burst = { events: 0, since: 0 }
@@ -550,8 +551,11 @@ export class ProjectWatcher {
   constructor(private readonly onChange: (event: FsChangedEvent) => void,
     /** Agent が .ferret/reviews/<id>/progress.json を書いたとき（指摘の進み具合。@shared/findingProgress） */
     private readonly onReviewProgress?: (ids: string[]) => void,
-    /** Agent が .ferret/visual-review/ に計画・画像を書いたとき（ビジュアルレビューのタブを読み直す） */
-    private readonly onVisualReview?: () => void) {}
+    /**
+     * Agent が .ferret/visual-review/（ビジュアルレビューの計画）・.ferret/value-usecases/（価値ユースケース）に
+     * 文書・画像を書いたとき（その種類のタブを読み直す）
+     */
+    private readonly onReviewDocs?: (kind: ReviewDocKind) => void) {}
 
   /** 監視の通知1件（まとめて flush で知らせる） */
   private readonly onFsEvent = (_event: string, filename: string | Buffer | null): void => {
@@ -562,8 +566,9 @@ export class ProjectWatcher {
       this.progress.add(id)
       this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
     }
-    if (this.onVisualReview && isVisualReviewPath(rel)) {
-      this.visualReview = true
+    const docKind: ReviewDocKind | null = isVisualReviewPath(rel) ? 'visual-review' : isValueUseCasePath(rel) ? 'value-usecases' : null
+    if (this.onReviewDocs && docKind) {
+      this.reviewDocs.add(docKind)
       this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
     }
     if (!shouldIncludePath(rel)) return
@@ -615,7 +620,7 @@ export class ProjectWatcher {
     this.pending.clear()
     this.overflow = false
     this.progress.clear()
-    this.visualReview = false
+    this.reviewDocs.clear()
   }
 
   private flush(): void {
@@ -628,9 +633,10 @@ export class ProjectWatcher {
       this.progress.clear()
       this.onReviewProgress?.(ids)
     }
-    if (this.visualReview) {
-      this.visualReview = false
-      this.onVisualReview?.()
+    if (this.reviewDocs.size > 0) {
+      const kinds = [...this.reviewDocs]
+      this.reviewDocs.clear()
+      for (const kind of kinds) this.onReviewDocs?.(kind)
     }
     if (this.pending.size === 0 && !this.overflow) return
     const paths = [...this.pending]

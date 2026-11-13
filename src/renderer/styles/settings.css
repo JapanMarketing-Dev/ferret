@@ -162,7 +162,7 @@
 
 /* 中央のペインはタブ列＋ツールバー＋本体の3行。設定のページはツールバーが無いので2行にする */
 .pane:has(> .st-page) {
-  grid-template-rows: var(--size-tabbar) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 /*

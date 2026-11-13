@@ -1,3 +1,4 @@
+import { MemoryAlert } from './components/MemoryAlert'
 import { ExternalDropOverlay, useExternalDrop } from './hooks/useExternalDrop'
 import { orchestraMembers } from '@shared/orchestras'
 import { planEditorDrop, readDrop } from './lib/externalDrop'
@@ -52,7 +53,8 @@ import { TitleBar } from './components/TitleBar'
 import { useViewBounds } from './hooks/useViewBounds'
 import { useAnyModalOpen } from './lib/openModals'
 import { useProjectSession } from './hooks/useProjectSession'
-import { useVisualReviews } from './hooks/useVisualReviews'
+import { useValueUseCases, useVisualReviews } from './hooks/useVisualReviews'
+import { useVisualReviewRecording } from './hooks/useVisualReviewRecording'
 import { shouldAutoOpenVisualReview } from '@shared/visualReview'
 import { matchWindowSource } from '@shared/projectTargets'
 import { feedbackPressStartsRecording, planNewReview } from './lib/newReview'
@@ -106,6 +108,7 @@ const { Component: SettingsPage } = preloadable<PropsOf<typeof import('./compone
 const { Component: OrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
 const { Component: OnboardingFlow } = preloadable<PropsOf<typeof import('./onboarding/OnboardingFlow').OnboardingFlow>>(() => import('./onboarding/OnboardingFlow').then((m) => ({ default: m.OnboardingFlow })))
 const { Component: MeetingImportDialog } = preloadable<PropsOf<typeof import('./components/MeetingImportDialog').MeetingImportDialog>>(() => import('./components/MeetingImportDialog').then((m) => ({ default: m.MeetingImportDialog })))
+const { Component: ValueUseCases } = preloadable<PropsOf<typeof import('./components/ValueUseCases').ValueUseCases>>(() => import('./components/ValueUseCases').then((m) => ({ default: m.ValueUseCases })))
 const { Component: VisualReview } = preloadable<PropsOf<typeof import('./components/VisualReview').VisualReview>>(() => import('./components/VisualReview').then((m) => ({ default: m.VisualReview })))
 const { Component: Gallery } = preloadable<PropsOf<typeof import('./gallery/Gallery').Gallery>>(() => import('./gallery/Gallery').then((m) => ({ default: m.Gallery })))
 /** 内蔵ブラウザの状態をそのまま読む部品（読み込み中の印・タブの一覧は App を描き直さずにここだけ描き直す。lib/browserStore.ts） */
@@ -144,6 +147,8 @@ export function App() {
       {onboardingSettled && <StarPromptHost />}
       {/* フィードバック → GitHub の Issue（ヘルプのメニューとサイドバーの入口から開く） */}
       <FeedbackDialogHost />
+      {/* メモリが足りないときの知らせ（main の memoryWatch.ts。勝手には止めず、利用者がどれを止めるか選ぶ） */}
+      <MemoryAlert />
     </ToastProvider>
   )
 }
@@ -698,11 +703,18 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     return () => offs.forEach((off) => off())
   }, [toast, t, refreshHistory])
 
+  /** ビジュアルレビューの「声と書き込みでフィードバック」。録画が止まってできたレビューを計画に添える */
+  const planRecording = useVisualReviewRecording({ folderPath: workspace.folderPath, active: recording || recordBusy,
+    onReviewUpdated: (next) => { setReview((cur) => (cur?.id === next.id ? next : cur)); void refreshHistory().catch(() => undefined) } })
+  /** 録画を止めたあとに開くタブ。声と書き込みのフィードバックなら計画へ戻す */
+  const activePlanTab = planRecording.activeTab
+  const stoppedTab = useCallback((): CenterTab => activePlanTab() ?? 'findings', [activePlanTab])
   /**
    * 録画の開始・停止。始めるときは既定で「ワンクリック録画」（Ferret の窓がある画面の全体を、選択画面なしで録る。main が画面を決める）。
-   * 'target' は選んだ対象（内蔵ブラウザ・選択画面で選んだもの）を録る（対象の選択画面から始めたとき）
+   * 'target' は選んだ対象（内蔵ブラウザ・選択画面で選んだもの）を録る（対象の選択画面から始めたとき）。
+   * 'plan' は画面全体を録るが、画面は切り替えない（ビジュアルレビューの計画を見せたまま話して囲む）
    */
-  const recordWith = useCallback((how: 'screen' | 'target') => {
+  const recordWith = useCallback((how: 'screen' | 'target' | 'plan') => {
     // Findings の「追加で録る」から来たときだけ、開いているレビューへ足す（1回限り）
     const appendTo = appendNext.current
     appendNext.current = null
@@ -723,23 +735,22 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
         }
         setTool('none')
         if (!stayFeedbackOnStop) changeMode('editor')
-        setCenterTab('findings')
+        setCenterTab(stoppedTab())
         await refreshHistory()
       } else {
         // 画面全体・別のウインドウを録るなら、内蔵ブラウザにページが無くてもよい（保存先のフォルダは要る）
-        const kind = how === 'screen' ? 'screen' : captureTargetRef.current.kind
+        const kind = how === 'target' ? captureTargetRef.current.kind : 'screen'
         if (emptyReason && (emptyReason === 'no-folder' || kind === 'browser')) { toast({ tone: 'warning', message: emptyReason === 'load-failed' ? t('app.recordNoPage') : t('app.recordNoFolder') }); return }
-        setCenterTab('browser')
         // 録画は書き込みなしで始まる。前回の停止が失敗して道具の表示が残っていても揃える
         setTool('none')
-        changeMode('feedback')
+        if (how !== 'plan') { setCenterTab('browser'); changeMode('feedback') }
         try {
           setRecordStatus(await window.ade.invoke('recording:start', { captureSystemAudio, captureMic, transcription, language, micDeviceId,
-            ...(how === 'screen' ? { fullScreen: true } : { captureTarget: captureTargetRef.current }), ...(appendTo ? { appendTo } : {}) }))
-        } catch (err) { changeMode('editor'); throw err }
+            ...(how === 'target' ? { captureTarget: captureTargetRef.current } : { fullScreen: true }), ...(appendTo ? { appendTo } : {}) }))
+        } catch (err) { if (how !== 'plan') changeMode('editor'); throw err }
       }
     }).finally(() => { recordLock.current = false; setRecordBusy(false) })
-  }, [recording, emptyReason, changeMode, run, refreshHistory, toast, captureMic, transcription, captureSystemAudio, language, micDeviceId, stayFeedbackOnStop])
+  }, [recording, emptyReason, changeMode, run, refreshHistory, toast, captureMic, transcription, captureSystemAudio, language, micDeviceId, stayFeedbackOnStop, stoppedTab])
   /** 録画ボタン・⌘⇧R・フィードバックのボタン。始めるときは画面全体（設定・選択なし） */
   const toggleRecording = useCallback(() => recordWith('screen'), [recordWith])
   /**
@@ -799,12 +810,20 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
    * ビジュアルレビュー（Agent が作る前に書いた計画。.ferret/visual-review/）。新しい計画が出たら知らせ、
    * ブラウザ・指摘を見ているだけなら（エディタで打っている・録画中でなければ）タブを開く
    */
-  const visualReviews = useVisualReviews(workspace.folderPath, (fresh) => {
-    toast({ tone: 'info', message: t('visualReview.newPlan', { title: fresh[0]!.title }) })
+  const openProposed = (target: 'visual-review' | 'value-usecases'): void => {
     const active = document.activeElement
     const typing = !!active && active !== document.body && !active.classList.contains('xterm-helper-textarea')
       && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || (active as HTMLElement).isContentEditable)
-    setCenterTab((tab) => (modeRef.current === 'editor' && shouldAutoOpenVisualReview({ tab, recording: recordingRef.current, typing }) ? 'visual-review' : tab))
+    setCenterTab((tab) => (modeRef.current === 'editor' && shouldAutoOpenVisualReview({ tab, recording: recordingRef.current, typing }) ? target : tab))
+  }
+  const visualReviews = useVisualReviews(workspace.folderPath, (fresh) => {
+    toast({ tone: 'info', message: t('visualReview.newPlan', { title: fresh[0]!.title }) })
+    openProposed('visual-review')
+  })
+  /* 価値ユースケース（.ferret/value-usecases/）。ビジュアルレビューと同じく、新しい文書が出たら知らせ、同じ決まりでタブを開く */
+  const valueUseCases = useValueUseCases(workspace.folderPath, (fresh) => {
+    toast({ tone: 'info', message: t('valueUseCase.newDoc', { title: fresh[0]!.title }) })
+    openProposed('value-usecases')
   })
   /** 全体の Agent が動いているか（右下のボタンの印） */
   const allActivity = useProjectActivity()
@@ -887,14 +906,14 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
       window.ade.on('annotation:history', setAnnotationHistory),
       window.ade.on('recording:warning', (message) => { toast({ tone: 'warning', message, duration: 0 }); showNotice(message) }),
       window.ade.on('review:ready', (data) => {
-        setReview(data); setSessionId(data.id); setCenterTab('findings'); setTool('none')
+        setReview(data); setSessionId(data.id); setCenterTab(stoppedTab()); setTool('none')
         if (!stayFeedbackOnStop) changeMode('editor')
         void refreshHistory()
       })
     ]
     void run(async () => { setAvailable(await window.ade.invoke('capture:availability')); setMicDevices(await window.ade.invoke('capture:devices')); await refreshHistory() })
     return () => offs.forEach((off) => off())
-  }, [workspace.folderPath, run, refreshHistory, toast, stayFeedbackOnStop, changeMode, showNotice])
+  }, [workspace.folderPath, run, refreshHistory, toast, stayFeedbackOnStop, changeMode, showNotice, stoppedTab])
 
   /*
    * Agent が progress.json（指摘の進み具合）を書いたら、サイドバーの「完了数/対象数」と開いている Findings を読み直す。
@@ -1235,6 +1254,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 pageTitle={browserState.title}
                 findingCount={review?.document.items.length ?? findings.length}
                 visualReviewCount={visualReviews.pending}
+                valueUseCaseCount={valueUseCases.pending}
                 onChange={setCenterTab}
                 files={files.files}
                 onCloseFile={files.requestClose}
@@ -1282,7 +1302,15 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 )
               ) : centerTab === 'visual-review' ? (
                 <ErrorBoundary name="visual-review"><Suspense fallback={<div className="editor-area" />}>
-                  <VisualReview listing={visualReviews.listing} onChanged={visualReviews.reload} />
+                  <VisualReview listing={visualReviews.listing} onChanged={visualReviews.reload}
+                    recording={{ pending: planRecording.pending?.kind === 'visual-review' ? planRecording.pending : null, busy: recording || recordBusy || (!!planRecording.pending && planRecording.pending.kind !== 'visual-review'), live,
+                      onStart: (plan, note) => { if (planRecording.begin('visual-review', plan, note)) recordWith('plan') }, onNote: (id, note) => planRecording.updateNote('visual-review', id, note), onStop: toggleRecording }} />
+                </Suspense></ErrorBoundary>
+              ) : centerTab === 'value-usecases' ? (
+                <ErrorBoundary name="value-usecases"><Suspense fallback={<div className="editor-area" />}>
+                  <ValueUseCases listing={valueUseCases.listing} onChanged={valueUseCases.reload}
+                    recording={{ pending: planRecording.pending?.kind === 'value-usecases' ? planRecording.pending : null, busy: recording || recordBusy || (!!planRecording.pending && planRecording.pending.kind !== 'value-usecases'), live,
+                      onStart: (doc, note) => { if (planRecording.begin('value-usecases', doc, note)) recordWith('plan') }, onNote: (id, note) => planRecording.updateNote('value-usecases', id, note), onStop: toggleRecording }} />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'browser' ? (
                 <ErrorBoundary name="browser">
@@ -1515,7 +1543,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
             orchestra={isOrchestra}
             notify={agents.notify}
             restore={agents.restoreTerminals}
-            sleepIdle={agents.sleepIdleAgents}
             onOpenFile={files.open}
             onOpenAgentSettings={openAgentSettings}
             onHide={mode === 'editor' ? hideTerminalPane : undefined}

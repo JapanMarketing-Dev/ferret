@@ -109,7 +109,7 @@
 
 /* ファイルのタブではURLツールバーが無いので2行になる（app.css の .pane と同じ考え方） */
 .pane:has(> .editor-area) {
-  grid-template-rows: var(--size-tabbar) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 /*

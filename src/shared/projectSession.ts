@@ -129,7 +129,7 @@ export function isRecordableUrl(url: string | undefined | null): url is string {
  */
 const FILE_PREFIX = 'file:'
 /** ファイル以外の中央のタブ（src/renderer/components/CenterTabs.tsx の CenterTab。settings は覚えない） */
-const KNOWN_TABS = ['dashboard', 'browser', 'findings', 'visual-review'] as const
+const KNOWN_TABS = ['dashboard', 'browser', 'findings', 'visual-review', 'value-usecases'] as const
 
 export function encodeCenterTab(tab: string, root: string | null): string | undefined {
   if (!tab.startsWith(FILE_PREFIX)) return tab

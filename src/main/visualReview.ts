@@ -23,33 +23,34 @@ import { assertContained, readFileNoFollow, writeFileNoFollow } from './sessions
  * - 返事は生の JSON に書き足し、リンクを置き換えない書き方（writeFileNoFollow）で戻す
  */
 
-function planDir(root: string): string {
-  return join(root, ...VISUAL_REVIEW_DIR.split('/'))
-}
+type Parse<T> = (raw: unknown, id: string) => { ok: true; value: T } | { ok: false; reason: string }
 
-/** 計画を新しい順に。読めないものは理由を付けて別に返す */
-export async function listVisualPlans(root: string): Promise<PlanListing> {
-  const dir = planDir(root)
+/**
+ * Agent が書く文書のフォルダ（`dirRel` の直下の <id>.json）を読む。ビジュアルレビューの計画と価値ユースケース（./valueUseCase）で共用。
+ * 読めないものは理由を付けて別に返す。リンク・大きすぎるもの・普通のファイルでないものは読まない
+ */
+export async function listReviewDocs<T>(root: string, dirRel: string, parse: Parse<T>, opts: { maxBytes: number; maxFiles: number }): Promise<{ entries: Array<{ plan: T; mtime: number }>; invalid: Array<{ file: string; reason: string }> }> {
+  const dir = join(root, ...dirRel.split('/'))
   try {
     assertContained(root, dir)
   } catch {
-    return { plans: [], invalid: [] }
+    return { entries: [], invalid: [] }
   }
   let names: string[]
   try {
     names = (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name)
   } catch {
-    return { plans: [], invalid: [] } // まだ無い（想定内）
+    return { entries: [], invalid: [] } // まだ無い（想定内）
   }
-  const invalid: PlanListing['invalid'] = []
-  const entries: Array<{ plan: VisualPlan; mtime: number }> = []
-  const files = names.filter((name) => name.endsWith('.json')).slice(0, LIMITS.plans * 2)
+  const invalid: Array<{ file: string; reason: string }> = []
+  const entries: Array<{ plan: T; mtime: number }> = []
+  const files = names.filter((name) => name.endsWith('.json')).slice(0, opts.maxFiles)
   await Promise.all(files.map(async (name) => {
     const id = planIdFromFile(name)
     if (!id) { invalid.push({ file: name, reason: 'invalid file name (use [A-Za-z0-9._-], up to 80 characters)' }); return }
     const file = join(dir, name)
     try {
-      const [text, info] = await Promise.all([readFileNoFollow(file, 'utf8', { maxBytes: LIMITS.planBytes }), stat(file)])
+      const [text, info] = await Promise.all([readFileNoFollow(file, 'utf8', { maxBytes: opts.maxBytes }), stat(file)])
       let raw: unknown
       try {
         raw = JSON.parse(text)
@@ -57,14 +58,47 @@ export async function listVisualPlans(root: string): Promise<PlanListing> {
         invalid.push({ file: name, reason: 'not valid JSON' })
         return
       }
-      const parsed = parseVisualPlan(raw, id)
-      if (parsed.ok) entries.push({ plan: parsed.plan, mtime: info.mtimeMs })
+      const parsed = parse(raw, id)
+      if (parsed.ok) entries.push({ plan: parsed.value, mtime: info.mtimeMs })
       else invalid.push({ file: name, reason: parsed.reason })
     } catch {
       invalid.push({ file: name, reason: 'cannot read (too large, a link, or not a regular file)' })
     }
   }))
   invalid.sort((a, b) => a.file.localeCompare(b.file))
+  return { entries, invalid }
+}
+
+/** 文書1つ（生の JSON と読んだもの）。読めなければ null */
+export async function readReviewDoc<T>(root: string, dirRel: string, id: string, parse: Parse<T>, maxBytes: number): Promise<{ raw: Record<string, unknown>; value: T } | null> {
+  if (!isValidPlanId(id)) return null
+  const file = join(root, ...dirRel.split('/'), `${id}.json`)
+  try {
+    assertContained(root, file)
+    const raw = JSON.parse(await readFileNoFollow(file, 'utf8', { maxBytes })) as unknown
+    const parsed = parse(raw, id)
+    if (!parsed.ok || typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    return { raw: raw as Record<string, unknown>, value: parsed.value }
+  } catch {
+    return null
+  }
+}
+
+/** 文書に書き戻す（リンクを置き換えない書き方） */
+export async function writeReviewDoc(root: string, dirRel: string, id: string, next: Record<string, unknown>): Promise<void> {
+  const file = join(root, ...dirRel.split('/'), `${id}.json`)
+  assertContained(root, file)
+  await writeFileNoFollow(file, `${JSON.stringify(next, null, 2)}\n`)
+}
+
+const parsePlan: Parse<VisualPlan> = (raw, id) => {
+  const parsed = parseVisualPlan(raw, id)
+  return parsed.ok ? { ok: true, value: parsed.plan } : parsed
+}
+
+/** 計画を新しい順に。読めないものは理由を付けて別に返す */
+export async function listVisualPlans(root: string): Promise<PlanListing> {
+  const { entries, invalid } = await listReviewDocs(root, VISUAL_REVIEW_DIR, parsePlan, { maxBytes: LIMITS.planBytes, maxFiles: LIMITS.plans * 2 })
   return { plans: sortPlans(entries), invalid }
 }
 
@@ -84,17 +118,8 @@ export async function readPlanImage(root: string, rel: string): Promise<string |
 
 /** 返事を書き足す前の計画（生の JSON と読んだもの）。読めなければ null */
 export async function readVisualPlan(root: string, id: string): Promise<{ raw: Record<string, unknown>; plan: VisualPlan } | null> {
-  if (!isValidPlanId(id)) return null
-  const file = join(planDir(root), `${id}.json`)
-  try {
-    assertContained(root, file)
-    const raw = JSON.parse(await readFileNoFollow(file, 'utf8', { maxBytes: LIMITS.planBytes })) as unknown
-    const parsed = parseVisualPlan(raw, id)
-    if (!parsed.ok || typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
-    return { raw: raw as Record<string, unknown>, plan: parsed.plan }
-  } catch {
-    return null
-  }
+  const doc = await readReviewDoc(root, VISUAL_REVIEW_DIR, id, parsePlan, LIMITS.planBytes)
+  return doc ? { raw: doc.raw, plan: doc.value } : null
 }
 
 /**
@@ -106,9 +131,7 @@ export async function writeVisualPlanResponse(root: string, id: string, response
   if (!current) return null
   const next = applyResponse(current.raw, current.plan, response)
   if (!next) return null
-  const file = join(planDir(root), `${id}.json`)
-  assertContained(root, file)
-  await writeFileNoFollow(file, `${JSON.stringify(next, null, 2)}\n`)
+  await writeReviewDoc(root, VISUAL_REVIEW_DIR, id, next)
   const parsed = parseVisualPlan(next, id)
   return parsed.ok ? parsed.plan : null
 }

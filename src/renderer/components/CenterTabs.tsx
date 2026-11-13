@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, ScanEye, Settings, X } from 'lucide-react'
+import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, ScanEye, Settings, Target, X } from 'lucide-react'
 import { moveItem } from '@shared/layout'
 import { CountBadge } from '../ui'
 import { useT } from '../lib/i18n'
@@ -16,7 +16,7 @@ import '../styles/editor.css'
 /**
  * settings … 設定のページ（⌘, で開閉。開いている間だけタブを出す）。
  */
-export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'visual-review' | 'settings' | FileTabId
+export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'visual-review' | 'value-usecases' | 'settings' | FileTabId
 
 /** タブのドラッグで運ぶデータの種類（ほかの DnD と混ざらないように） */
 const DRAG_TYPE = 'application/x-ade-center-tab'
@@ -44,6 +44,7 @@ export function CenterTabs({
   pageTitle,
   findingCount,
   visualReviewCount = 0,
+  valueUseCaseCount = 0,
   files = [],
   onChange,
   onCloseFile,
@@ -63,6 +64,8 @@ export function CenterTabs({
   findingCount: number
   /** ビジュアルレビューで返事を待っている計画の数 */
   visualReviewCount?: number
+  /** 価値ユースケースで返事を待っている文書の数 */
+  valueUseCaseCount?: number
   /** 開いているファイル（今のプロジェクトの分） */
   files?: OpenFile[]
   onChange: (tab: CenterTab) => void
@@ -170,6 +173,22 @@ export function CenterTabs({
               <CountBadge count={visualReviewCount} tone="warning" />
             </button>
           )
+          if (tab === 'value-usecases') return (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              className="cview"
+              aria-selected={active === 'value-usecases'}
+              onClick={() => onChange('value-usecases')}
+              data-testid="ctab-value-usecases"
+              title={valueUseCaseCount > 0 ? t('valueUseCase.tabPending', { count: valueUseCaseCount }) : t('centerTabs.valueUseCases')}
+            >
+              <Target size={13} strokeWidth={1.75} />
+              <span className="cview__label">{t('centerTabs.valueUseCases')}</span>
+              <CountBadge count={valueUseCaseCount} tone="warning" />
+            </button>
+          )
           return (
             <button key={tab} type="button" role="tab" className="cview" aria-selected={active === 'dashboard'} onClick={() => onChange('dashboard')} data-testid="ctab-dashboard" title={t('orchestra.dashboard')}>
               <LayoutDashboard size={13} strokeWidth={1.75} />
@@ -178,7 +197,7 @@ export function CenterTabs({
           )
         })}
       </div>
-      <div className="ctabs__files">
+      {ids.length > 0 && <div className="ctabs__files">
           {ids.map((tab) => {
             if (tab === 'settings') return (
               <div
@@ -241,7 +260,7 @@ export function CenterTabs({
               </div>
             )
           })}
-      </div>
+      </div>}
       {menu && onCloseFiles && (
         <TabMenu
           at={menu}

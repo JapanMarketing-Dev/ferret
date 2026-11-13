@@ -416,6 +416,22 @@ export async function prepareSendFeedback(paths: SessionPaths): Promise<string[]
   return ids
 }
 
+/**
+ * ビジュアルレビューの「声と書き込みでフィードバック」に添える、録画のレビューの中身（指摘・発言・画像の名前）。
+ * Agent が読む feedback.md を今の設定で書き直してから返す。記録が無ければ null
+ */
+export async function recordedReviewDigest(paths: SessionPaths): Promise<import('@shared/visualReviewRecording').RecordedReviewDigest | null> {
+  const record = await loadSession(paths)
+  if (!record) return null
+  await refreshFeedbackMarkdown(paths)
+  return {
+    id: paths.id,
+    relativeDir: paths.relativeDir,
+    items: record.document.items.map((item) => ({ title: item.title, request: item.request, images: item.images, include: item.include })),
+    transcript: record.transcript.map((segment) => ({ text: segment.text }))
+  }
+}
+
 export async function copyReview(paths: SessionPaths, template?: string | null, remote = false): Promise<void> {
   await refreshFeedbackMarkdown(paths)
   clipboard.writeText(remote ? await remoteReviewInstruction(paths) : await reviewInstruction(paths, template))

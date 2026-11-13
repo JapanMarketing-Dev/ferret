@@ -90,6 +90,7 @@ import { AutoUpdater } from './autoUpdate'
 import { installMethodFor } from '@shared/appUpdate'
 import { sanitizeLayout } from '@shared/layout'
 import { ResourceCollector } from './resources'
+import { MemoryWatch } from './memoryWatch'
 import { ProjectWatcher, invalidateFileIndex, listDirectory, listFiles, readTextFile, resolveInside, searchFiles, writeTextFile } from './files'
 import { copyEntries, createEntry, importEntries, importMediaForMarkdown, moveEntries, pathsForClipboard, renameEntry, terminalDirFor, trashEntries } from './fileOps'
 import { inspectProjectFile, projectMediaResponse, readOfficeFile } from './projectMedia'
@@ -97,7 +98,8 @@ import { isRiskyToOpenExternally } from '@shared/fileViewer'
 import { refreshPreviewIn, registerPreviewProtocol, renderPreviewSource } from './preview'
 import { PREVIEW_SCHEME, stripPreviewGrant } from '@shared/preview'
 import { PROJECT_PAGE_SCHEME } from '@shared/htmlPreview'
-import { canRespond, isValidPlanId, responseMessage, sanitizeReply } from '@shared/visualReview'
+import { canRespond, isValidPlanId, responseMessage, sanitizeRecordingNote, sanitizeReply, type PlanResponse, type RecordedReviewRef, type RecordingNote, type VisualPlanReplyResult } from '@shared/visualReview'
+import { VALUE_LIMITS, sanitizeValueReply, toValueBoxes, valueResponseMessage, type ValueReplyResult } from '@shared/valueUseCase'
 import { isInsideDir } from '@shared/sendTarget'
 import type { ScreenCache } from './screenCache'
 import { crashReportsActive, initCrashReporting, maybeSendTestEvent, reportMainError, sentryTestKinds, setTelemetryContext, noteQuitRequested, telemetryInstallId, trackIpc } from './telemetry'
@@ -255,6 +257,33 @@ const resources = new ResourceCollector({
     const wc = browser?.contents
     if (!wc || wc.isDestroyed()) return null
     return { pid: wc.getOSProcessId(), title: wc.getTitle(), url: wc.getURL() }
+  }
+})
+/** メモリの見張り。足りなくなったら知らせるだけで、何も止めない（止めるのは利用者が知らせの中で選ぶ。memoryWatch.ts） */
+let memoryNotification: Notification | null = null
+const memoryWatch = new MemoryWatch({
+  collect: () => resources.collect(),
+  latest: (maxAgeMs) => resources.latest(maxAgeMs),
+  send: (notice) => send('memoryAlert:update', notice),
+  notify: () => {
+    // 窓を見ているなら画面の知らせだけで足りる。裏・最小化のときだけ OS の通知も出す
+    const window = mainWindow
+    if (!window || window.isDestroyed() || (window.isFocused() && window.isVisible() && !window.isMinimized())) return
+    if (!Notification.isSupported()) return
+    // 参照を持たないと押される前に回収されて click が届かないことがある（agentNotify.ts と同じ）
+    // 前の通知が残っていれば差し替える（同じ知らせを通知センターに積まない）
+    memoryNotification?.close()
+    const notification = new Notification({ title: t('memoryAlert.notifyTitle', { name: PRODUCT_NAME }), body: t('memoryAlert.notifyBody'), silent: false })
+    memoryNotification = notification
+    notification.on('click', () => {
+      memoryNotification = null
+      const win = mainWindow
+      if (!win || win.isDestroyed()) return
+      if (win.isMinimized()) win.restore()
+      if (!win.isVisible()) win.show()
+      win.focus()
+    })
+    notification.show()
   }
 })
 let mode: AppMode = 'editor'
@@ -691,7 +720,7 @@ const fileWatcher = new ProjectWatcher((event) => {
   send('review:progressChanged', ids)
   // Agent が直した（human_review にした）ことを、オーケストラのフィードバックの記録に足す
   recordProgressFromDisk(ids)
-}, () => send('visualReview:changed'))
+}, (kind) => send(kind === 'value-usecases' ? 'valueUseCase:changed' : 'visualReview:changed'))
 
 /** Office の文書の形式を変える LibreOffice（1つを使い回す。作業フォルダは利用者のデータの下） */
 let officeConverterInstance: import('./officeConvert').OfficeConverter | null = null
@@ -1549,6 +1578,10 @@ function syncVisualReviewSkillNow(): void {
   void import('./visualReviewSkill')
     .then(({ syncVisualReviewSkill }) => syncVisualReviewSkill(app.getVersion()))
     .catch((err: unknown) => reportHandled(err, { area: 'review', op: 'sync visual review skill' }))
+  // システムの価値と、価値を得るまでの手順を先に定義して承認を待つ skill（ferret-value-usecases）
+  void import('./valueUseCaseSkill')
+    .then(({ syncValueUseCaseSkill }) => syncValueUseCaseSkill(app.getVersion()))
+    .catch((err: unknown) => reportHandled(err, { area: 'review', op: 'sync value use case skill' }))
 }
 
 /** 内蔵ブラウザの最新の画面の控え（プロジェクトの .ferret/screens/。src/main/screenCache.ts）。E2E では書かない */
@@ -1813,6 +1846,58 @@ function scheduleTrim(review: SessionPaths, n: number, result: import('./recordi
     if (!cuts) return
     await (await import('./review')).trimReviewTake(review, n, cuts, result.durationMs)
   })().catch((err: unknown) => reportHandled(err, { area: 'review', op: 'trim recording' }))
+}
+
+/**
+ * ビジュアルレビューの返事を計画に書き足し、計画を書いた Agent のターミナルへ送る（文の返事・声と書き込みの返事で共用）。
+ * 先に計画の JSON に書く（Agent がファイルを読み直しても、人の返事が分かる）。送れなければ人が貼る文を返す
+ */
+async function deliverVisualReply(root: string, id: string, reply: Omit<PlanResponse, 'at' | 'revision'>): Promise<VisualPlanReplyResult> {
+  const vr = await import('./visualReview')
+  const current = await vr.readVisualPlan(root, id)
+  if (!current) throw new UserFacingError(t('visualReview.errors.notFound'))
+  if (!canRespond(current.plan, reply.action)) throw new UserFacingError(t('visualReview.errors.notPending'))
+  const plan = await vr.writeVisualPlanResponse(root, id, { at: new Date().toISOString(), ...reply })
+  if (!plan) throw new UserFacingError(t('visualReview.errors.notPending'))
+  const text = responseMessage(current.plan, reply, getLocale() === 'ja' ? 'ja' : 'en')
+  const sent = await sendToAuthoringTerminal(root, current.plan.terminalId, text)
+  if (!sent.sent) return { ok: true, sent: false, message: sent.message, copyText: text, plan }
+  return { ok: true, sent: true, message: t(reply.action === 'approve' ? 'visualReview.sentApprove' : 'visualReview.sentFeedback'), plan }
+}
+
+/**
+ * 返事の文を、文書（ビジュアルレビューの計画・価値ユースケース）を書いた Agent のターミナルへ送る。
+ * 送り先は書いたターミナル（$FERRET_TERMINAL_ID）。同じプロジェクトで開いたものでなければ（番号は起動ごとに振り直す）使わず、
+ * 「Agent へ送信」と同じ選び方（同じプロジェクトの Agent）にする。送れなければ理由（人が貼る文は呼び出し側が返す）
+ */
+async function sendToAuthoringTerminal(root: string, terminalId: string | undefined, text: string): Promise<{ sent: true } | { sent: false; message: string }> {
+  const authored = terminalId ? terminals?.list().find((session) => session.id === terminalId) : undefined
+  const preferred = authored && isInsideDir(authored.cwd, root) ? authored.id : null
+  const target = terminals ? await terminals.resolveSendTarget(preferred, root) : null
+  if (!target) return { sent: false, message: t('visualReview.noAgent') }
+  const result = await terminals!.sendReview(target, text)
+  return result.ok ? { sent: true } : { sent: false, message: result.message }
+}
+
+/**
+ * 価値ユースケースの返事を文書に書き足し、書いた Agent のターミナルへ送る（文の返事・声と書き込みの返事で共用）。
+ * 囲みの screen（手順の通しの番号）は、ここで価値と手順の番号に直して書く
+ */
+async function deliverValueReply(root: string, id: string, reply: { action: 'approve' | 'feedback'; kind?: 'recording'; text?: string; boxes?: RecordingNote['boxes']; review?: RecordedReviewRef }): Promise<ValueReplyResult> {
+  const vu = await import('./valueUseCase')
+  const current = await vu.readValueUseCase(root, id)
+  if (!current) throw new UserFacingError(t('valueUseCase.errors.notFound'))
+  if (!canRespond(current.doc, reply.action)) throw new UserFacingError(t('valueUseCase.errors.notPending'))
+  const { boxes: rawBoxes, ...rest } = reply
+  const boxes = toValueBoxes(current.doc, rawBoxes)
+  const response = { ...rest, ...(boxes.length ? { boxes } : {}) }
+  if (response.action === 'feedback' && !response.text && !boxes.length && !response.review) throw new UserFacingError(t('visualReview.errors.invalid'))
+  const doc = await vu.writeValueUseCaseResponse(root, id, { at: new Date().toISOString(), ...response })
+  if (!doc) throw new UserFacingError(t('valueUseCase.errors.notPending'))
+  const text = valueResponseMessage(current.doc, response, getLocale() === 'ja' ? 'ja' : 'en')
+  const sent = await sendToAuthoringTerminal(root, current.doc.terminalId, text)
+  if (!sent.sent) return { ok: true, sent: false, message: sent.message, copyText: text, doc }
+  return { ok: true, sent: true, message: t(reply.action === 'approve' ? 'valueUseCase.sentApprove' : 'valueUseCase.sentFeedback'), doc }
 }
 
 async function stopReview(): Promise<RecordingStatus> {
@@ -2244,6 +2329,8 @@ function registerIpc(): void {
         if (wc && !wc.isDestroyed()) void wc.loadURL('about:blank').catch(() => undefined)
       }
     },
+    'memoryAlert:current': () => memoryWatch.current(),
+    'memoryAlert:dismiss': () => memoryWatch.dismiss(),
     'resources:cleanup': () => {
       const ids = resources.orphanIds()
       for (const id of ids) terminals?.close(id)
@@ -2283,23 +2370,53 @@ function registerIpc(): void {
       const root = workspace.folderPath
       const clean = sanitizeReply(reply)
       if (!root || !isValidPlanId(id) || !clean) throw new UserFacingError(t('visualReview.errors.invalid'))
+      return deliverVisualReply(root, id, clean)
+    },
+    'visualReview:attachRecording': async (id, reviewId, rawNote, revision) => {
+      // 声と書き込みのフィードバック。録画のレビュー（main が読んだもの）を計画の返事に添えて、文の返事と同じ道で送る。
+      // 添えられなくてもレビューは残す（ここでは消さない）。renderer からはレビューの id と、打った文・囲みだけを受ける
+      const root = workspace.folderPath
+      if (!root || !isValidPlanId(id) || typeof reviewId !== 'string') throw new UserFacingError(t('visualReview.errors.invalid'))
       const vr = await import('./visualReview')
       const current = await vr.readVisualPlan(root, id)
-      if (!current) throw new UserFacingError(t('visualReview.errors.notFound'))
-      if (!canRespond(current.plan)) throw new UserFacingError(t('visualReview.errors.notPending'))
-      // 先に計画の JSON に書く（Agent がファイルを読み直しても、人の返事が分かる）
-      const plan = await vr.writeVisualPlanResponse(root, id, { at: new Date().toISOString(), ...clean })
-      if (!plan) throw new UserFacingError(t('visualReview.errors.notPending'))
-      const text = responseMessage(current.plan, clean, getLocale() === 'ja' ? 'ja' : 'en')
-      // 送り先は計画を書いたターミナル（$FERRET_TERMINAL_ID）。同じプロジェクトで開いたものでなければ（番号は起動ごとに振り直す）使わず、
-      // 「Agent へ送信」と同じ選び方（同じプロジェクトの Agent）にする
-      const authored = current.plan.terminalId ? terminals?.list().find((session) => session.id === current.plan.terminalId) : undefined
-      const preferred = authored && isInsideDir(authored.cwd, root) ? authored.id : null
-      const target = terminals ? await terminals.resolveSendTarget(preferred, root) : null
-      if (!target) return { ok: true, sent: false, message: t('visualReview.noAgent'), copyText: text, plan }
-      const result = await terminals!.sendReview(target, text)
-      if (!result.ok) return { ok: true, sent: false, message: result.message, copyText: text, plan }
-      return { ok: true, sent: true, message: t(clean.action === 'approve' ? 'visualReview.sentApprove' : 'visualReview.sentFeedback'), plan }
+      if (!current) return { state: 'kept', message: t('visualReview.recording.keptNotFound') }
+      // 録っている間に Agent が計画を書き直した（版が変わった）なら、古い版への声は添えない
+      if (!canRespond(current.plan) || (typeof revision === 'number' && revision !== current.plan.revision)) return { state: 'kept', message: t('visualReview.recording.keptNotPending') }
+      const r = await import('./review')
+      const digest = await r.recordedReviewDigest(r.checkedPaths(root, reviewId))
+      const { recordedReviewRef } = await import('@shared/visualReviewRecording')
+      const review = digest ? recordedReviewRef(digest) : null
+      if (!review) return { state: 'kept', message: t('visualReview.recording.keptEmpty') }
+      const result = await deliverVisualReply(root, id, { action: 'feedback', kind: 'recording', review, ...sanitizeRecordingNote(rawNote) })
+      if (result.sent) return { state: 'sent', message: t('visualReview.recording.sent') }
+      return { state: 'manual', message: result.message, copyText: result.copyText ?? '' }
+    },
+    'valueUseCase:list': async () => {
+      const root = workspace.folderPath
+      if (!root) return { docs: [], invalid: [] }
+      return (await import('./valueUseCase')).listValueUseCases(root)
+    },
+    'valueUseCase:respond': async (id, reply) => {
+      const root = workspace.folderPath
+      const clean = sanitizeValueReply(reply)
+      if (!root || !isValidPlanId(id) || !clean) throw new UserFacingError(t('visualReview.errors.invalid'))
+      return deliverValueReply(root, id, clean)
+    },
+    'valueUseCase:attachRecording': async (id, reviewId, rawNote, revision) => {
+      // 声と書き込みのフィードバック（ビジュアルレビューと同じ。録画のレビューを文書の返事に添えて送る。レビューは消さない）
+      const root = workspace.folderPath
+      if (!root || !isValidPlanId(id) || typeof reviewId !== 'string') throw new UserFacingError(t('visualReview.errors.invalid'))
+      const current = await (await import('./valueUseCase')).readValueUseCase(root, id)
+      if (!current) return { state: 'kept', message: t('valueUseCase.recording.keptNotFound') }
+      if (!canRespond(current.doc) || (typeof revision === 'number' && revision !== current.doc.revision)) return { state: 'kept', message: t('valueUseCase.recording.keptNotPending') }
+      const r = await import('./review')
+      const digest = await r.recordedReviewDigest(r.checkedPaths(root, reviewId))
+      const { recordedReviewRef } = await import('@shared/visualReviewRecording')
+      const review = digest ? recordedReviewRef(digest) : null
+      if (!review) return { state: 'kept', message: t('valueUseCase.recording.keptEmpty') }
+      const result = await deliverValueReply(root, id, { action: 'feedback', kind: 'recording', review, ...sanitizeRecordingNote(rawNote, VALUE_LIMITS.totalSteps) })
+      if (result.sent) return { state: 'sent', message: t('valueUseCase.recording.sent') }
+      return { state: 'manual', message: result.message, copyText: result.copyText ?? '' }
     },
     'app:openUpdate': async () => {
       // 署名を確かめたこの OS・CPU 向けのファイルは、アプリが落として sha256 を確かめてから置く（security-4 [7]）
@@ -3740,6 +3857,8 @@ async function main(): Promise<void> {
   // 最初のタブを開く要求が届く前に、node-pty の読み込みと最初のシェルの起動（rc の読み込み）を済ませておく
   terminals.prewarm()
   registerIpc()
+  // メモリの見張り（60 秒ごと。起動の直後は重いので、最初は 60 秒待つ）
+  memoryWatch.start()
   // 裏での更新。配布版だけ、起動から少し待って確かめ、あとは6時間ごと（開発版では動かさない）
   autoUpdater().start()
   // スリープ明けはすぐ、ウインドウに戻ったときは前の確認から1時間たっていれば確かめる（6時間ごとの確認はスリープで遅れる）

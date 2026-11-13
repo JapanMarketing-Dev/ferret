@@ -164,6 +164,12 @@ function LevelMeter({ level, live }: { level: number; live: boolean }) {
   </div>
 }
 
+/** フッターの Resource Manager を開くよう頼む（メモリの知らせの「Resource Manager を開く」。フッターに出していなければ何もしない） */
+export const OPEN_RESOURCES_EVENT = 'ade:open-resources'
+export function requestOpenResources(): void {
+  window.dispatchEvent(new CustomEvent(OPEN_RESOURCES_EVENT))
+}
+
 /** マイクの一覧を読み直すよう App に頼む（App が capture:devices を呼び直す） */
 export const MIC_DEVICES_REFRESH_EVENT = 'ade:refresh-mics'
 export function requestMicDevicesRefresh(): void {
@@ -434,6 +440,11 @@ export function StatusBar({
   useEffect(() => { onPopoverChange(open !== null || usageOpen || apiUsageOpen) }, [open, usageOpen, apiUsageOpen, onPopoverChange])
 
   const close = useCallback(() => setOpen(null), [])
+  useEffect(() => {
+    const onOpen = () => setOpen('resources')
+    window.addEventListener(OPEN_RESOURCES_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_RESOURCES_EVENT, onOpen)
+  }, [])
   const toggle = (kind: PopoverKind) => setOpen((cur) => (cur === kind ? null : kind))
   const openSettings = () => { setOpen(null); onOpenSettings() }
 

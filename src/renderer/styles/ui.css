@@ -899,6 +899,99 @@
   line-height: var(--line-height-normal);
 }
 
+/* メモリが足りないときの知らせ（components/MemoryAlert.tsx）。トーストの見た目に、止められるものの表を足す */
+.memory-alert-host {
+  width: min(440px, calc(100vw - var(--space-7)));
+}
+
+.memory-alert__body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.memory-alert__critical {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.memory-alert__list {
+  display: flex;
+  max-height: 260px;
+  flex-direction: column;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  gap: var(--space-2);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.memory-alert__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--font-size-xs);
+}
+
+.memory-alert__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-muted);
+}
+
+.memory-alert__name {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.memory-alert__project {
+  overflow: hidden;
+  color: var(--color-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-alert__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-alert__state {
+  color: var(--color-text-muted);
+}
+
+.memory-alert__state.is-busy {
+  color: var(--color-warning);
+}
+
+.memory-alert__mem {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-alert__confirm {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+}
+
+.memory-alert__confirm p {
+  margin: 0 0 var(--space-2);
+}
+
+.memory-alert__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: var(--space-3);
+  gap: var(--space-2);
+}
+
 /* ── 空状態 ───────────────────────────────────────────── */
 
 .empty {

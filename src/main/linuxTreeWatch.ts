@@ -12,6 +12,7 @@ import { shouldIncludePath } from '@shared/files'
  * ここでは変更通知の対象（shouldIncludePath）のフォルダにだけ、1つずつ張る。
  * 例外として、指摘の進み具合（.ferret/reviews/<id>/progress.json）を拾うため .ferret/reviews/<id> までは降りる。
  * ビジュアルレビューの計画（.ferret/visual-review/<id>.json と画像のフォルダ）も拾うため .ferret/visual-review/<id> まで降りる。
+ * 価値ユースケース（.ferret/value-usecases/<id>.json と画像のフォルダ）も同じく .ferret/value-usecases/<id> まで降りる。
  */
 
 /** 張るフォルダの数の上限。超えた分は見張らない（上限に当たってほかのアプリの見張りまで止めないため） */
@@ -27,7 +28,7 @@ export const MAX_DISCOVERY_MS = 30_000
 /** このフォルダ（`/` 区切りの相対パス。'' はプロジェクトの直下）に降りて見張るか */
 export function shouldWatchDir(rel: string): boolean {
   if (rel === '' || shouldIncludePath(rel)) return true
-  if (/^\.ferret\/visual-review(?:\/[^/]+)?$/.test(rel)) return true
+  if (/^\.ferret\/(?:visual-review|value-usecases)(?:\/[^/]+)?$/.test(rel)) return true
   return /^\.(?:ferret|ade-movie)(?:\/reviews(?:\/[^/]+)?)?$/.test(rel)
 }
 

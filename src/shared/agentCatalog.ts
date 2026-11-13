@@ -608,7 +608,6 @@ export const DEFAULT_AGENT_PREFERENCES: AgentPreferences = {
   skipPermissions: true,
   notify: false,
   restoreTerminals: true,
-  sleepIdleAgents: true,
   windowsShell: 'powershell'
 }
 
@@ -917,7 +916,6 @@ export function sanitizeAgentPreferences(raw: unknown): AgentPreferences {
     skipPermissions,
     notify: typeof r.notify === 'boolean' ? r.notify : DEFAULT_AGENT_PREFERENCES.notify,
     restoreTerminals: typeof r.restoreTerminals === 'boolean' ? r.restoreTerminals : DEFAULT_AGENT_PREFERENCES.restoreTerminals,
-    sleepIdleAgents: typeof r.sleepIdleAgents === 'boolean' ? r.sleepIdleAgents : DEFAULT_AGENT_PREFERENCES.sleepIdleAgents,
     windowsShell: r.windowsShell === 'cmd' || r.windowsShell === 'powershell' ? r.windowsShell : DEFAULT_AGENT_PREFERENCES.windowsShell
   }
 }

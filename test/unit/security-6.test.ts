@@ -382,11 +382,12 @@ describe.skipIf(process.platform === 'win32')('security-6 [6] organizer CLIs sta
     const path = await resolveOrganizerCli('claude', { project, dirs, env: { PATH: dirs.join(':') } })
     expect(path).toMatch(/^\//)
     expect(path!.endsWith('/bin/claude')).toBe(true)
-    const r = await spawnText({ binary: 'claude', args: [], cwd: root, timeoutMs: 5000, project, env: { PATH: '' } },
+    // 子プロセスの起動はマシンが混んでいると数秒かかることがある（リリースのビルド中に 5 秒を超えた）。通る時間は変わらない
+    const r = await spawnText({ binary: 'claude', args: [], cwd: root, timeoutMs: 20_000, project, env: { PATH: '' } },
       { resolve: (b, o) => resolveOrganizerCli(b, { ...o, dirs }) })
     expect(r.stdout.trim()).toBe('hello')
     expect(existsSync(join(root, 'project-claude-ran'))).toBe(false)
-  })
+  }, 30_000)
 
   it('spawnText resolves before spawning and the organizer passes the project to both runners (shape check)', () => {
     const spawn = read('src/main/pipeline/organize/spawn.ts')

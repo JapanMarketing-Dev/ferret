@@ -332,7 +332,9 @@
 /* ── 中央ペインのタブ ─────────────────────────────────── */
 
 .ctabs {
+  /* 上の段：いつもある画面（ブラウザ・指摘・ビジュアルレビュー）。下の段：開いたファイルのタブ（開いていなければ出さない） */
   display: flex;
+  flex-direction: column;
   align-items: stretch;
   background: var(--color-bg-chrome);
   box-shadow: inset 0 -1px 0 var(--color-border);
@@ -415,15 +417,16 @@
 }
 
 /*
- * いつもある画面（ダッシュボード・ブラウザ・指摘）の切り替え。タブ列の左端に固定し、ファイルのタブとは別の軸にする。
+ * いつもある画面（ダッシュボード・ブラウザ・指摘・ビジュアルレビュー）の切り替え。上の段に置き、下の段のファイルのタブとは分ける。
  * 小さなセグメント（押し込んだ見た目で選択を示す）。右のファイルのタブ列は残りの幅をすべて使って横に流れる
  */
 .ctabs__views {
   display: flex;
   flex: none;
+  height: 32px;
   align-items: center;
   padding: 0 var(--space-2);
-  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
   gap: 2px;
 }
 
@@ -479,7 +482,10 @@
 }
 
 .ctabs__files {
-  flex: 1 1 auto;
+  display: flex;
+  flex: none;
+  height: var(--size-tabbar);
+  min-width: 0;
 }
 
 /* ── ブラウザのツールバー ─────────────────────────────── */
@@ -1403,6 +1409,28 @@ body[data-resizing='row'] * {
 .terminal-leaf__handle:hover,
 .terminal-leaf__handle:focus-visible {
   opacity: 1;
+}
+
+/* メモリの知らせの「止める」で休ませたペイン（ペインの「続きから再開」を押すまで起動し直さない） */
+.terminal-leaf__held {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  color: var(--color-text-muted);
+  text-align: center;
+  font-size: 12px;
+  background: var(--color-bg-app);
+}
+
+.terminal-leaf__held p {
+  max-width: 36em;
+  margin: 0;
 }
 
 .terminal-leaf__handle:active {

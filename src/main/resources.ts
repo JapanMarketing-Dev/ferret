@@ -176,6 +176,7 @@ export class ResourceCollector {
   private createdEpoch = new Map<string, number>()
   /** 前回のプロセス一覧（Windows で取り直しの間を空けるため） */
   private lastRows: { rows: ProcRow[]; at: number } | null = null
+  private lastSnapshot: ResourceSnapshot | null = null
 
   constructor(
     private readonly sources: ResourceSources,
@@ -218,8 +219,14 @@ export class ResourceCollector {
 
   collect(): Promise<ResourceSnapshot> {
     if (this.inflight) return this.inflight
-    this.inflight = this.run().finally(() => { this.inflight = null })
+    this.inflight = this.run().then((snapshot) => { this.lastSnapshot = snapshot; return snapshot }).finally(() => { this.inflight = null })
     return this.inflight
+  }
+
+  /** 直近の集計。maxAgeMs より古い・まだ無いなら null（メモリの見張りが ps を重ねて起動しないため。memoryWatch.ts） */
+  latest(maxAgeMs: number): ResourceSnapshot | null {
+    const last = this.lastSnapshot
+    return last && this.now() - last.collectedAt <= maxAgeMs ? last : null
   }
 
   private pushHistory(key: string, cpu: number, now: number): number[] {

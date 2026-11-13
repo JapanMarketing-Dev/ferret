@@ -113,7 +113,9 @@ describe('返事を書き足す', () => {
     expect(raw.status).toBe('approved')
     expect(raw.extra).toBe('keep')
     expect(raw.responses).toEqual([{ at: '2026-11-13T12:00:00Z', action: 'approve', revision: 1 }])
-    expect(await writeVisualPlanResponse(root, 'a', { at: 'later', action: 'feedback', text: 'x' })).toBeNull()
+    // 承認したあとでもフィードバックは書ける（いつでも送れる）。2回目の承認は書かない
+    expect((await writeVisualPlanResponse(root, 'a', { at: 'later', action: 'feedback', text: 'x' }))?.status).toBe('changes-requested')
+    expect(await writeVisualPlanResponse(root, 'a', { at: 'later2', action: 'approve' })).toBeNull()
   })
 
   it('フィードバックで changes-requested にし、囲んだ場所も残す', async () => {

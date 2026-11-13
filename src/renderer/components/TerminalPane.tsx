@@ -15,7 +15,7 @@ import { hasBusyAgent, publishAgentActivity } from '../terminal/agentActivity'
 import { AttentionThrottle, INITIAL_TRACK, advancePaneState, attentionEvents, type AttentionPane, type PaneTrack } from '../terminal/agentAttention'
 import { onAccountLoginRequest } from '../lib/accountLogin'
 import { SpawnQueue, partitionSpawns, type SpawnCandidate } from '../terminal/spawnQueue'
-import { SLEEP_CHECK_MS, panesToSleep, trackHidden } from '../terminal/sleepPolicy'
+import { SLEEP_TERMINAL_EVENT, publishPaneDirectory, resumableKeys, type SleepTerminalDetail } from '../terminal/sleepPolicy'
 import { panesDueForPoll } from '../terminal/pollSchedule'
 import { onTerminalCommandRequest } from '../lib/terminalCommand'
 import { onAgentLaunchRequest } from '../lib/agentLaunchRequest'
@@ -137,6 +137,8 @@ interface Pane {
   restoreText?: string | null
   /** 戻したタブ: まだ xterm を作っていない間に、覚え直すときに使う前の画面の文字 */
   savedScrollback?: string | null
+  /** メモリの知らせの「止める」で休ませた。ペインの「続きから再開」を押すまで、表示中のプロジェクトでも起動し直さない */
+  held?: boolean
 }
 
 /** 終了・閉じたあとに戻すペイン。アカウントのログインと1回きりのコマンド（gh auth login など）は戻さない */
@@ -304,7 +306,6 @@ function TerminalPaneImpl({
   onOpenFile,
   notify = false,
   restore = true,
-  sleepIdle = true,
   onHide
 }: {
   /** 分割幅など、レイアウトが変わったことを知らせる値 */
@@ -332,8 +333,6 @@ function TerminalPaneImpl({
   restore?: boolean
   /** ターミナルの欄を隠す（見出しの右端のボタン。渡されたときだけ出す） */
   onHide?: () => void
-  /** 裏のプロジェクトで入力を待ったままの Agent を休ませてメモリを空ける（設定の agents.sleepIdleAgents） */
-  sleepIdle?: boolean
 }) {
   const sectionRef = useRef<HTMLElement | null>(null)
   const t = useT()
@@ -976,6 +975,8 @@ function TerminalPaneImpl({
       const node = nodesRef.current.get(pane.key)
       if (!node) continue
       const paneProject = tabsRef.current.find((tab) => hasLeaf(tab.layout, pane.key))?.projectId ?? null
+      // メモリの知らせで休ませたペインは、ペインの「続きから再開」を押すまで作らない
+      if (pane.held && !getTerminal(pane.key)) continue
       const dormant = Boolean(pane.restoreText) && !pane.continueWork
       // 裏のプロジェクトの戻したタブ・休ませたタブは xterm も作らずに置き、そのプロジェクトを開いたときに作る（terminal/sleepPolicy.ts）
       if (dormant && !getTerminal(pane.key) && (paneProject ?? '') !== (projectId ?? '')) continue
@@ -1097,67 +1098,67 @@ function TerminalPaneImpl({
     return () => { stopped = true; clearInterval(timer) }
   }, [paneKeys])
 
-  // 裏のプロジェクトで入力を待ったまま SLEEP_AFTER_MS 経った Agent を休ませる（terminal/sleepPolicy.ts）。
-  // 画面の文字を覚えて PTY と xterm を閉じ、戻したタブと同じ形にしておく。そのプロジェクトを開けば会話を続けて起動し直す
-  const sleepIdleRef = useRef(sleepIdle)
-  sleepIdleRef.current = sleepIdle
-  const hiddenSinceRef = useRef(new Map<string, number>())
+  // メモリの知らせ（components/MemoryAlert.tsx）が「止める」の出し方を決めるのに、ペインの中身を置いておく
   useEffect(() => {
-    let stopped = false
-    const check = async () => {
-      const now = Date.now()
-      const ownerOf = (key: string) => tabsRef.current.find((tab) => hasLeaf(tab.layout, key))?.projectId ?? null
-      const current = Object.values(panesRef.current)
-      trackHidden(hiddenSinceRef.current, current.map((pane) => ({ key: pane.key, projectId: ownerOf(pane.key) })), projectKeyRef.current, now)
-      // 休ませたペインの画面の文字は main の覚えから戻す（読み込み直したとき）。覚えない設定では休ませない
-      if (!sleepIdleRef.current || !restoreRef.current) return
-      const keys = panesToSleep(current.map((pane) => ({
+    const current = Object.values(panes)
+    const resumable = restore
+      ? resumableKeys(current.map((pane) => ({
         key: pane.key,
-        projectId: ownerOf(pane.key),
         launch: pane.launch,
         cwd: pane.cwd,
         accountId: pane.accountId ?? null,
-        state: pane.state,
         awake: Boolean(getTerminal(pane.key)?.ptyId),
         restorable: isRestorable(pane)
-      })), projectKeyRef.current, hiddenSinceRef.current, now)
-      if (keys.length === 0) return
-      // 画面の印は裏では間を空けて読むので古いことがある。閉じる直前に今の状態を聞き直し、入力待ちのものだけ休ませる
-      const ids = keys.map((key) => getTerminal(key)?.ptyId ?? '')
-      const fresh = await window.ade.invoke('terminal:agentStates', ids).catch(() => null /* 画面の閉じかけなど（想定内） */)
-      if (stopped || !fresh) return
-      const banner = tNow('terminal.wokeSeparator', { time: formatRestoreTime(now) })
-      const slept: Pane[] = []
-      keys.forEach((key, index) => {
-        const pane = panesRef.current[key]
-        const handle = getTerminal(key)
-        if (!pane || !handle || handle.ptyId !== ids[index] || fresh[index]?.state !== 'idle') return
-        if ((ownerOf(key) ?? '') === projectKeyRef.current) return // 聞いている間にそのプロジェクトを開いた
-        const text = handle.scrollbackText()
-        releaseTerminal(key)
-        spawnedRef.current.delete(key)
-        slept.push({
-          key,
-          title: pane.title,
-          state: 'unknown',
-          launch: pane.launch,
-          cwd: pane.cwd,
-          customTitle: pane.customTitle ?? null,
-          accountId: pane.accountId ?? null,
-          resume: true,
-          restoreText: restoreReplayText(text, banner),
-          savedScrollback: text
-        })
-      })
-      if (slept.length === 0) return
-      setPanes((prev) => {
-        const next = { ...prev }
-        for (const pane of slept) if (next[pane.key]) next[pane.key] = pane
-        return next
-      })
+      })))
+      : new Set<string>()
+    publishPaneDirectory(current.flatMap((pane) => {
+      const ptyId = getTerminal(pane.key)?.ptyId
+      return ptyId ? [{ ptyId, launch: pane.launch, state: pane.state, resumable: resumable.has(pane.key) }] : []
+    }))
+  }, [panes, tabs, restore])
+  useEffect(() => () => publishPaneDirectory([]), [])
+
+  // メモリの知らせの「止める」で、Agent を休ませる（勝手には休ませない。terminal/sleepPolicy.ts）。
+  // 画面の文字を覚えて PTY と xterm を閉じ、戻したタブと同じ形にしておく。ペインの「続きから再開」で会話を続けて起動し直す
+  useEffect(() => {
+    const onSleep = (event: Event) => {
+      const detail = (event as CustomEvent<SleepTerminalDetail>).detail
+      if (!detail?.id) return
+      const key = Object.keys(panesRef.current).find((k) => getTerminal(k)?.ptyId === detail.id)
+      const pane = key ? panesRef.current[key] : undefined
+      const handle = key ? getTerminal(key) : undefined
+      if (!key || !pane || !handle || !restoreRef.current) { detail.done(false); return }
+      const candidates = Object.values(panesRef.current).map((p) => ({
+        key: p.key, launch: p.launch, cwd: p.cwd, accountId: p.accountId ?? null,
+        awake: Boolean(getTerminal(p.key)?.ptyId), restorable: isRestorable(p)
+      }))
+      if (!resumableKeys(candidates).has(key)) { detail.done(false); return }
+      const text = handle.scrollbackText()
+      const banner = tNow('terminal.wokeSeparator', { time: formatRestoreTime(Date.now()) })
+      releaseTerminal(key)
+      spawnedRef.current.delete(key)
+      const slept: Pane = {
+        key,
+        title: pane.title,
+        state: 'unknown',
+        launch: pane.launch,
+        cwd: pane.cwd,
+        customTitle: pane.customTitle ?? null,
+        accountId: pane.accountId ?? null,
+        resume: true,
+        restoreText: restoreReplayText(text, banner),
+        savedScrollback: text,
+        held: true
+      }
+      setPanes((prev) => (prev[key] ? { ...prev, [key]: slept } : prev))
+      detail.done(true)
     }
-    const timer = setInterval(() => void check(), SLEEP_CHECK_MS)
-    return () => { stopped = true; clearInterval(timer) }
+    window.addEventListener(SLEEP_TERMINAL_EVENT, onSleep)
+    return () => window.removeEventListener(SLEEP_TERMINAL_EVENT, onSleep)
+  }, [])
+  /** 休ませたペインを、会話を続けて起動し直す（ペインの「続きから再開」） */
+  const wakePane = useCallback((key: string) => {
+    setPanes((prev) => (prev[key]?.held ? { ...prev, [key]: { ...prev[key]!, held: false } } : prev))
   }, [])
 
   // 通知が押されたら、そのプロジェクトへ切り替えてそのタブを開く（main の agentNotify.ts）
@@ -1492,6 +1493,12 @@ function TerminalPaneImpl({
             onDragStart={(e) => startDrag(e, { kind: 'pane', tabKey: tab.key, paneKey: node.leafId })}
             onDragEnd={endDrag}
           />
+          {panes[node.leafId]?.held && (
+            <div className="terminal-leaf__held" data-testid={`terminal-pane-held-${node.leafId}`}>
+              <p>{t('terminal.held.message')}</p>
+              <Button variant="primary" onClick={() => wakePane(node.leafId)}>{t('terminal.held.resume')}</Button>
+            </div>
+          )}
         </div>
       )
     }

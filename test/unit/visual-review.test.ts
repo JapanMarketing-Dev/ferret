@@ -282,12 +282,15 @@ describe('並び・数・状態の移り変わり', () => {
     expect(pendingCount([])).toBe(0)
   })
 
-  it('返事できるのは proposed だけ（承認 → approved・フィードバック → changes-requested）', () => {
+  it('フィードバックはいつでも（→ changes-requested）。承認は proposed だけ（→ approved）', () => {
     expect(canRespond({ status: 'proposed' })).toBe(true)
+    expect(canRespond({ status: 'proposed' }, 'approve')).toBe(true)
     for (const status of ['approved', 'changes-requested', 'done'] as const) {
-      expect(canRespond({ status })).toBe(false)
+      expect(canRespond({ status })).toBe(true)
+      expect(canRespond({ status }, 'feedback')).toBe(true)
+      expect(canRespond({ status }, 'approve')).toBe(false)
       expect(nextStatus(status, 'approve')).toBeNull()
-      expect(nextStatus(status, 'feedback')).toBeNull()
+      expect(nextStatus(status, 'feedback')).toBe('changes-requested')
     }
     expect(nextStatus('proposed', 'approve')).toBe('approved')
     expect(nextStatus('proposed', 'feedback')).toBe('changes-requested')
