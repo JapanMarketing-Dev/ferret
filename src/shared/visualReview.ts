@@ -16,7 +16,11 @@ export const VISUAL_REVIEW_DIR = '.ferret/visual-review'
 export const REVIEW_DOC_KINDS = ['visual-review', 'value-usecases'] as const
 export type ReviewDocKind = (typeof REVIEW_DOC_KINDS)[number]
 
-export const PLAN_STATUSES = ['proposed', 'approved', 'changes-requested', 'done'] as const
+/**
+ * drafting … Agent が書いている途中の下書き（早く見せるために先に出す。書き足すたびに画面が変わる。承認はまだできない）。
+ * 仕上がったら proposed（返事待ち）にする
+ */
+export const PLAN_STATUSES = ['drafting', 'proposed', 'approved', 'changes-requested', 'done'] as const
 export type PlanStatus = (typeof PLAN_STATUSES)[number]
 
 export const ANNOTATION_KINDS = ['change', 'add', 'remove', 'move'] as const
@@ -330,7 +334,9 @@ export function parseVisualPlan(raw: unknown, fileId: string): { ok: true; plan:
     if (!after) return null
     return { before: text(value.before, LIMITS.text), after }
   })
-  if (screens.length === 0 && behaviour.length === 0) {
+  const status = parseStatus(raw.status)
+  // 下書きは、まだ画面も動きも無くてよい（タイトルと依頼だけでも先に出す）
+  if (screens.length === 0 && behaviour.length === 0 && status !== 'drafting') {
     return { ok: false, reason: Array.isArray(raw.screens) && raw.screens.length > 0
       ? 'no usable screen: "image" must be an image path under .ferret/ (e.g. .ferret/visual-review/<id>/screen-1.jpg)'
       : 'needs at least one entry in "screens" or "behaviour"' }
@@ -346,7 +352,7 @@ export function parseVisualPlan(raw: unknown, fileId: string): { ok: true; plan:
       request: text(raw.request, LIMITS.text * 2),
       revision,
       createdAt: Number.isNaN(Date.parse(createdAt)) ? '' : createdAt,
-      status: parseStatus(raw.status),
+      status,
       screens,
       behaviour,
       outOfScope: list(raw.outOfScope, LIMITS.listItems, (value) => optionalText(value, LIMITS.text) ?? null),
@@ -414,9 +420,15 @@ export function applyResponse<R extends { action: PlanAction }>(raw: Record<stri
   return { ...raw, status, responses: [...previous, { ...response, revision: plan.revision }] }
 }
 
-/** 新しく出た、返事を待っている計画（前に見たものを除く。知らせ・タブへの切り替えに使う） */
+/** 見せたい状態（下書き・返事待ち） */
+const SHOWN: readonly PlanStatus[] = ['drafting', 'proposed']
+
+/**
+ * 新しく出た、下書きか返事を待っている計画（前に見たものを除く。知らせ・タブへの切り替えに使う）。
+ * 下書きが出た時点で知らせる（書き上がるのを待たずに見せる）。同じ版の下書き → 返事待ちでは、もう一度は知らせない
+ */
 export function newlyProposed<T extends Pick<ReviewDocHead, 'id' | 'revision' | 'status'>>(previous: ReadonlyMap<string, string>, plans: readonly T[]): T[] {
-  return plans.filter((plan) => plan.status === 'proposed' && previous.get(plan.id) !== `${plan.revision}:proposed`)
+  return plans.filter((plan) => SHOWN.includes(plan.status) && !SHOWN.some((status) => previous.get(plan.id) === `${plan.revision}:${status}`))
 }
 
 /** 前の一覧の印（id → 版:状態） */

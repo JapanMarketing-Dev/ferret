@@ -221,6 +221,20 @@ describe('並び・待っている数・状態の移り変わり', () => {
     expect(newlyProposed(marks, [a, b2]).map((d) => d.id)).toEqual(['b'])
   })
 
+  it('下書き（drafting）は価値が無くてもよく、承認待ちの数に入れない。下書きでなければ価値が要る', () => {
+    const draft = parseValueUseCase(raw({ status: 'drafting', values: [] }), 'app')
+    expect(draft.ok && draft.doc.values.length === 0 && draft.doc.status === 'drafting').toBe(true)
+    expect(parseValueUseCase(raw({ status: 'drafting', values: undefined }), 'app').ok).toBe(true)
+    expect(parseValueUseCase(raw({ values: [] }), 'app').ok).toBe(false)
+    expect(parseValueUseCase(raw({ status: 'drafting', title: '' }), 'app').ok).toBe(false)
+    const d = parse({ status: 'drafting' }, 'a')
+    expect(pendingCount([d])).toBe(0)
+    expect(newlyProposed(planMarks([]), [d]).map((x) => x.id)).toEqual(['a'])
+    expect(newlyProposed(planMarks([d]), [parse({}, 'a')])).toEqual([])
+    expect(summarizeValues(parse({ status: 'drafting', values: [] }))).toMatchObject({ works: 0 })
+    expect(isComplete(parse({ status: 'drafting', values: [] }))).toBe(false)
+  })
+
   it('返事は待っているものにだけ。承認で approved、フィードバックで changes-requested。知らない項目は残す', () => {
     const doc = parse()
     const next = applyValueResponse({ ...raw(), extra: 'keep' }, doc, { at: 't', action: 'approve' })!

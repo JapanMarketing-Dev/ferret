@@ -109,6 +109,7 @@
 }
 .vr__muted { color: var(--color-text-muted); }
 .vr__row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.vr__drafting { display: inline-flex; align-items: center; gap: var(--space-2); color: #444; font-size: 13px; }
 
 .vr__manual {
   display: flex;
@@ -258,25 +259,13 @@
 .vr-kind--target { --vr-color: var(--vr-target, var(--color-accent)); }
 .vuc__summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 .vuc__purpose p { margin: 0; white-space: pre-wrap; font-size: var(--font-size-md); }
-.vuc__value {
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-elevated);
-}
-.vuc__value-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-3);
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.vuc__value-head:hover { background: var(--color-surface-hover); }
+/* 価値の横一列（左に価値のカード、右へ手順のカードを矢印でつなぐ） */
+.vuc__lane { display: flex; align-items: flex-start; gap: 0; }
+.vuc__value { width: 300px; flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); border-width: 2px; }
+.vuc-state--works .vuc__value { border-color: var(--color-success); }
+.vuc-state--partial .vuc__value { border-color: var(--color-warning); }
+.vuc-state--broken .vuc__value { border-color: var(--color-danger); }
+.vuc__value-head { display: flex; align-items: flex-start; gap: var(--space-2); }
 .vuc__value-no {
   display: inline-flex;
   align-items: center;
@@ -289,24 +278,131 @@
   font-weight: var(--font-weight-bold);
 }
 .vuc__value-name { flex: 1; min-width: 0; font-size: var(--font-size-md); font-weight: var(--font-weight-bold); }
-.vuc__value-body { display: flex; flex-direction: column; gap: var(--space-3); padding: 0 var(--space-4) var(--space-4); }
 .vuc__facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; }
 .vuc__facts dt { font-weight: var(--font-weight-medium); }
 .vuc__facts dd { margin: 0; white-space: pre-wrap; }
-.vuc__flow-title { margin: var(--space-2) 0 0; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); }
-.vuc__flow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.vuc__flow { list-style: none; margin: 0; padding: 0; display: flex; align-items: flex-start; }
+.vuc__flow-item { display: flex; align-items: flex-start; }
+.vuc__next { flex: none; margin: 80px var(--space-2) 0; color: #555; }
 .vuc__step {
+  width: 340px;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border-left: 3px solid var(--vr-target);
-  background: var(--color-bg-canvas);
+  border-top: 3px solid var(--vr-target);
 }
+.vuc__step .vr__shot { align-self: stretch; }
+.vuc__step .vr__shot img, .wbl__shot-card .vr__shot img { width: 100%; }
 .vuc__step-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .vuc__step-screen { font-weight: var(--font-weight-bold); }
 .vuc__noimage { padding: var(--space-2) 0; }
-.vuc__next { align-self: center; margin-top: var(--space-1); }
+.vuc__purpose { margin: 0; white-space: pre-wrap; font-size: var(--font-size-md); }
+
+/*
+ * 無限ホワイトボード（components/Whiteboard.tsx）。点の方眼の上を動かす・拡大縮小する。
+ * 承認・フィードバック（.wb__dock）と拡大縮小の道具（.wb__tools）はボードの上に浮かぶ
+ */
+.vr.is-list-collapsed { grid-template-columns: 40px 1fr; }
+.vr.is-list-collapsed .vr__list { padding: var(--space-1); }
+.vr__list-head { display: flex; justify-content: flex-end; }
+.vr.is-list-collapsed .vr__list-head { justify-content: center; }
+.vr__detail--board { position: relative; padding: 0; gap: 0; overflow: hidden; }
+.wb { position: relative; flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
+.wb__viewport {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background-color: #f6f6f7;
+  background-image: radial-gradient(circle, #cfcfd4 1.2px, transparent 1.3px);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.wb__viewport.is-panning, .wb__viewport.is-space { cursor: grabbing; }
+.wb__viewport.is-space .vr__shot.is-drawing { cursor: grabbing; }
+.wb__world { position: absolute; top: 0; left: 0; transform-origin: 0 0; width: max-content; will-change: transform; }
+.wb__tools {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--space-1);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+}
+.wb__scale, .wb__fit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.wb__scale { min-width: 44px; justify-content: center; font-variant-numeric: tabular-nums; }
+.wb__scale:hover, .wb__fit:hover { background: var(--color-surface-hover); }
+.wb__sep { width: 1px; height: 16px; background: var(--color-border); margin: 0 2px; }
+.wb__dock {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space-3));
+  max-height: 70%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  cursor: auto;
+  user-select: text;
+}
+.wb__dock:empty { display: none; }
+.wb__actions {
+  position: static;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
+}
+.wb__actions .vr__feedback { width: min(640px, calc(100vw - 96px)); }
+
+/* ボードの上の並び（.wbl）。カードは白・枠・角丸 */
+.wbl { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 40px; padding: 40px; }
+.wbl__lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.wbl__line { stroke: var(--vr-color, var(--vr-change)); stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
+.wbl__card {
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
+}
+.wbl__head { display: flex; flex-direction: column; gap: var(--space-2); min-width: 420px; max-width: 900px; }
+.wbl__screens { display: flex; align-items: flex-start; gap: 56px; }
+.wbl__screen { display: flex; flex-direction: column; gap: 56px; width: 880px; }
+.wbl__shot-card { display: flex; flex-direction: column; gap: var(--space-2); }
+.wbl__shot-card .vr__shot { align-self: stretch; }
+.wbl__notes { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.wbl__note { width: 280px; border: 1.5px solid var(--vr-color); }
+.wbl__stickies { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-4); max-width: 1900px; }
+.wbl__sticky { width: 340px; }
+.wbl__sticky h3 { margin: 0 0 var(--space-2); font-size: var(--font-size-sm); font-weight: var(--font-weight-bold); }
+.wbl__sticky--muted { background: #f4f4f5; }
+.wbl__sticky--question { background: #fef9c3; border-color: #eab308; }
+.wbl__body { display: flex; align-items: flex-start; gap: 56px; }
+.wbl__lanes { display: flex; flex-direction: column; gap: 48px; }
+.wbl__side { display: flex; flex-direction: column; gap: var(--space-4); }
 
 @container (max-width: 560px) {
   .vr { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }

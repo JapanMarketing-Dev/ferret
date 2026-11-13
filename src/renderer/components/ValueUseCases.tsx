@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDown, Check, ChevronDown, ChevronRight, MessageSquare, Mic, Square, Trash2 } from 'lucide-react'
+import { ArrowRight, Check, MessageSquare, Mic, Square, Trash2 } from 'lucide-react'
 import { canRespond, type PlanBox, type RecordingNote } from '@shared/visualReview'
 import {
   flatStepIndex,
@@ -16,7 +16,8 @@ import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
 import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
 import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
-import { InvalidPlans, ManualCopy, STATUS_TONE, Shot, formatTime, letter, useDocImages, type FeedbackBox, type Manual } from './VisualReview'
+import { InvalidPlans, ListToggle, ManualCopy, ResponseHistory, STATUS_TONE, Shot, formatTime, letter, useDocImages, useListCollapsed, type FeedbackBox, type Manual } from './VisualReview'
+import { Whiteboard } from './Whiteboard'
 import { useT } from '../lib/i18n'
 import '../styles/visualReview.css'
 
@@ -56,6 +57,7 @@ export function ValueUseCases({ listing, onChanged, recording }: {
   const { docs, invalid } = listing
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [manual, setManual] = useState<Manual | null>(null)
+  const [listCollapsed, toggleList] = useListCollapsed()
   const recordingId = recording?.pending?.planId
   const selected = docs.find((doc) => doc.id === (recordingId ?? selectedId)) ?? docs.find((doc) => doc.id === selectedId) ?? docs[0] ?? null
 
@@ -69,9 +71,10 @@ export function ValueUseCases({ listing, onChanged, recording }: {
   }
 
   return (
-    <div className="vr vuc" data-testid="value-usecases">
+    <div className={`vr vuc${listCollapsed ? ' is-list-collapsed' : ''}`} data-testid="value-usecases">
       <nav className="vr__list" aria-label={t('valueUseCase.listLabel')}>
-        {docs.map((doc) => {
+        <ListToggle collapsed={listCollapsed} onToggle={toggleList} />
+        {!listCollapsed && docs.map((doc) => {
           const summary = summarizeValues(doc)
           return (
             <button
@@ -92,7 +95,7 @@ export function ValueUseCases({ listing, onChanged, recording }: {
             </button>
           )
         })}
-        {invalid.length > 0 && <InvalidPlans invalid={invalid} title={t('valueUseCase.invalid')} />}
+        {!listCollapsed && invalid.length > 0 && <InvalidPlans invalid={invalid} title={t('valueUseCase.invalid')} />}
       </nav>
       {selected && (
         <DocDetail
@@ -129,7 +132,6 @@ function DocDetail({ doc, onChanged, manual, onManual, recording }: {
   const [text, setText] = useState(() => (recordingHere ? mine.note.text ?? '' : ''))
   const [boxes, setBoxes] = useState<FeedbackBox[]>(() => (recordingHere ? (mine.note.boxes ?? []).map((box) => ({ ...box, note: box.note ?? '' })) : []))
   const [busy, setBusy] = useState(false)
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const pending = canRespond(doc)
 
   const currentNote = (): RecordingNote => {
@@ -171,95 +173,18 @@ function DocDetail({ doc, onChanged, manual, onManual, recording }: {
     recording?.onStart(doc, currentNote())
   }
 
-  const toggle = (id: string): void => setCollapsed((current) => {
-    const next = new Set(current)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    return next
-  })
-  const allCollapsed = doc.values.every((value) => collapsed.has(value.id))
   const recordBlocked = busy || !!recording?.busy || !!recording?.pending
 
-  return (
-    <article className="vr__detail" data-testid="value-usecases-detail">
-      <header className="vr__head">
-        <div className="vr__head-row">
-          <h2 className="vr__title">{doc.title}</h2>
-          <Badge tone={STATUS_TONE[doc.status]}>{t(`visualReview.status.${doc.status}`)}</Badge>
-          <span className="vr__muted">{t('visualReview.revision', { n: doc.revision })}</span>
-        </div>
-        <div className="vuc__summary" data-testid="value-usecases-summary">
-          <strong>{t('valueUseCase.summary', { values: summary.values, works: summary.works })}</strong>
-          <span>{t('valueUseCase.summaryDetail', { ...summary })}</span>
-          {complete && <Badge tone="success">{t('valueUseCase.complete')}</Badge>}
-        </div>
-      </header>
-
+  const dock = (
+    <div className="wb__dock" data-no-pan>
       {manual && <ManualCopy manual={manual} onClose={() => onManual(null)} />}
-
-      {doc.purpose && (
-        <section className="vr__section vuc__purpose">
-          <h3>{t('valueUseCase.purpose')}</h3>
-          <p>{doc.purpose}</p>
-        </section>
-      )}
-
-      <div className="vr__row">
-        <Button variant="ghost" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(doc.values.map((value) => value.id)))}>
-          {t(allCollapsed ? 'valueUseCase.expandAll' : 'valueUseCase.collapseAll')}
-        </Button>
-      </div>
-
-      {doc.values.map((value, v) => (
-        <ValueCard
-          key={value.id}
-          doc={doc}
-          value={value}
-          index={v}
-          open={!collapsed.has(value.id)}
-          onToggle={() => toggle(value.id)}
-          images={images}
-          drawing={mode === 'feedback'}
-          boxes={boxes}
-          onDraw={(screen, box) => setBoxes((current) => [...current, { ...box, screen, note: '' }])}
-        />
-      ))}
-
-      {doc.outOfScope.length > 0 && (
-        <section className="vr__section">
-          <h3>{t('valueUseCase.outOfScope')}</h3>
-          <ul className="vr__plain">{doc.outOfScope.map((item, i) => <li key={i}>{item}</li>)}</ul>
-        </section>
-      )}
-
-      {doc.questions.length > 0 && (
-        <section className="vr__section vr__questions">
-          <h3>{t('valueUseCase.questions')}</h3>
-          <ul className="vr__plain">{doc.questions.map((item, i) => <li key={i}>{item}</li>)}</ul>
-        </section>
-      )}
-
-      {doc.responses.length > 0 && (
-        <section className="vr__section">
-          <h3>{t('visualReview.history')}</h3>
-          <ul className="vr__plain vr__muted">
-            {doc.responses.map((response, i) => (
-              <li key={i}>
-                {formatTime(response.at)} · {t('visualReview.revision', { n: response.revision })} · {t(response.action === 'approve' ? 'visualReview.approved' : response.kind === 'recording' ? 'visualReview.recordedFeedback' : 'visualReview.feedbackSent')}
-                {response.text ? `: ${response.text}` : ''}
-                {response.review && <> · {t('visualReview.recordedFindings', { count: response.review.findings.length })} · <code>{response.review.dir}</code></>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {pending && (
-        <footer className="vr__actions" data-testid="value-usecases-actions">
+        <footer className="vr__actions wb__actions" data-testid="value-usecases-actions">
           {processingHere ? (
             <div className="vr__row vr__recording-state" role="status"><Spinner size={14} />{t('valueUseCase.recording.processing')}</div>
           ) : mode === 'view' ? (
             <div className="vr__row">
+              {doc.status === 'drafting' && <span className="vr__drafting" role="status"><Spinner size={14} />{t('visualReview.drafting')}</span>}
               {canRespond(doc, 'approve') && <Button variant="primary" icon={<Check size={14} />} busy={busy} onClick={() => void respond({ action: 'approve' })} data-testid="value-usecases-approve">{t('visualReview.approve')}</Button>}
               <Button icon={<MessageSquare size={14} />} disabled={busy} onClick={() => setMode('feedback')} data-testid="value-usecases-feedback">{t('visualReview.feedback')}</Button>
               {recording && <Button icon={<Mic size={14} />} disabled={recordBlocked} title={t('valueUseCase.recordFeedbackTip')} onClick={startRecording} data-testid="value-usecases-record">{t('visualReview.recordFeedback')}</Button>}
@@ -319,17 +244,76 @@ function DocDetail({ doc, onChanged, manual, onManual, recording }: {
           )}
         </footer>
       )}
+    </div>
+  )
+
+  return (
+    <article className="vr__detail vr__detail--board" data-testid="value-usecases-detail">
+      <Whiteboard viewKey={`value-usecases:${doc.id}`} overlay={dock} testId="value-usecases-board">
+        <div className="wbl">
+          <header className="wbl__card wbl__head" data-board-card>
+            <div className="vr__head-row">
+              <h2 className="vr__title">{doc.title}</h2>
+              <Badge tone={STATUS_TONE[doc.status]}>{t(`visualReview.status.${doc.status}`)}</Badge>
+              <span className="vr__muted">{t('visualReview.revision', { n: doc.revision })}</span>
+            </div>
+            <div className="vuc__summary" data-testid="value-usecases-summary">
+              <strong>{t('valueUseCase.summary', { values: summary.values, works: summary.works })}</strong>
+              <span>{t('valueUseCase.summaryDetail', { ...summary })}</span>
+              {complete && <Badge tone="success">{t('valueUseCase.complete')}</Badge>}
+            </div>
+            {doc.purpose && <p className="vuc__purpose"><strong>{t('valueUseCase.purpose')}</strong> {doc.purpose}</p>}
+          </header>
+
+          <div className="wbl__body">
+            <div className="wbl__lanes">
+              {doc.values.map((value, v) => (
+                <ValueLane
+                  key={value.id}
+                  doc={doc}
+                  value={value}
+                  index={v}
+                  images={images}
+                  drawing={mode === 'feedback'}
+                  boxes={boxes}
+                  onDraw={(screen, box) => setBoxes((current) => [...current, { ...box, screen, note: '' }])}
+                />
+              ))}
+            </div>
+            {(doc.outOfScope.length > 0 || doc.questions.length > 0 || doc.responses.length > 0) && (
+              <div className="wbl__side">
+                {doc.questions.length > 0 && (
+                  <section className="wbl__card wbl__sticky wbl__sticky--question" data-board-card>
+                    <h3>{t('valueUseCase.questions')}</h3>
+                    <ul className="vr__plain">{doc.questions.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  </section>
+                )}
+                {doc.outOfScope.length > 0 && (
+                  <section className="wbl__card wbl__sticky wbl__sticky--muted" data-board-card>
+                    <h3>{t('valueUseCase.outOfScope')}</h3>
+                    <ul className="vr__plain">{doc.outOfScope.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  </section>
+                )}
+                {doc.responses.length > 0 && (
+                  <section className="wbl__card wbl__sticky wbl__sticky--muted" data-board-card>
+                    <h3>{t('visualReview.history')}</h3>
+                    <ResponseHistory responses={doc.responses} />
+                  </section>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </Whiteboard>
     </article>
   )
 }
 
-/** 価値1つのカード。見出し（番号・名前・今の作り）を押すとたためる。中身は誰が・なぜ・条件と、最初の画面からの流れ */
-function ValueCard({ doc, value, index, open, onToggle, images, drawing, boxes, onDraw }: {
+/** 価値1つの横一列。左に価値のカード（番号・名前・今の作り・誰が・なぜ・条件）、右へ最初の画面からの手順のカードを矢印でつなぐ */
+function ValueLane({ doc, value, index, images, drawing, boxes, onDraw }: {
   doc: ValueUseCaseDoc
   value: ValueItem
   index: number
-  open: boolean
-  onToggle: () => void
   images: Record<string, string | null>
   drawing: boolean
   boxes: FeedbackBox[]
@@ -338,52 +322,50 @@ function ValueCard({ doc, value, index, open, onToggle, images, drawing, boxes, 
   const t = useT()
   const state = value.status ?? 'unknown'
   return (
-    <section className="vuc__value" data-testid="value-usecases-value">
-      <button type="button" className="vuc__value-head" aria-expanded={open} onClick={onToggle} title={t(open ? 'valueUseCase.collapse' : 'valueUseCase.expand')}>
-        {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
-        <span className="vuc__value-no">{index + 1}</span>
-        <span className="vuc__value-name">{value.name}</span>
-        <Badge tone={STATE_TONE[state]}>{t(`valueUseCase.state.${state}`)}</Badge>
-      </button>
-      {open && (
-        <div className="vuc__value-body">
-          <dl className="vuc__facts">
-            {value.who && <><dt>{t('valueUseCase.who')}</dt><dd>{value.who}</dd></>}
-            {value.why && <><dt>{t('valueUseCase.why')}</dt><dd>{value.why}</dd></>}
-            {value.success && <><dt>{t('valueUseCase.success')}</dt><dd>{value.success}</dd></>}
-          </dl>
-          <h4 className="vuc__flow-title">{t('valueUseCase.flow')}</h4>
-          {value.flow.length === 0 ? <div className="vr__muted">{t('valueUseCase.noFlow')}</div> : (
-            <ol className="vuc__flow">
-              {value.flow.map((step, s) => {
-                const flat = flatStepIndex(doc, index, s)
-                return (
-                  <li key={s} className="vuc__step">
-                    <div className="vuc__step-head">
-                      <span className="vr__num vr-kind--target">{step.step}</span>
-                      <span className="vuc__step-screen">{step.screen || t('valueUseCase.step', { n: step.step })}</span>
-                      {step.url && <span className="vr__muted vr__url" title={step.url}>{step.url}</span>}
-                    </div>
-                    {step.image ? (
-                      <Shot
-                        src={images[step.image]}
-                        annotations={step.target ? [{ ...step.target, n: step.step, kind: 'target', label: step.action }] : []}
-                        drawing={drawing}
-                        boxes={boxes.map((box, i) => ({ ...box, i })).filter((box) => box.screen === flat)}
-                        onDraw={(box) => onDraw(flat, box)}
-                      />
-                    ) : <div className="vr__muted vuc__noimage">{t('valueUseCase.noImage')}</div>}
-                    <dl className="vuc__facts">
-                      {step.action && <><dt>{t('valueUseCase.action')}</dt><dd>{step.action}</dd></>}
-                      {step.expected && <><dt>{t('valueUseCase.expected')}</dt><dd>{step.expected}</dd></>}
-                    </dl>
-                    {s < value.flow.length - 1 && <ArrowDown size={18} className="vuc__next" aria-hidden="true" />}
-                  </li>
-                )
-              })}
-            </ol>
-          )}
+    <section className={`vuc__lane vuc-state--${state}`} data-testid="value-usecases-value">
+      <div className="wbl__card vuc__value" data-board-card>
+        <div className="vuc__value-head">
+          <span className="vuc__value-no">{index + 1}</span>
+          <span className="vuc__value-name">{value.name}</span>
         </div>
+        <Badge tone={STATE_TONE[state]}>{t(`valueUseCase.state.${state}`)}</Badge>
+        <dl className="vuc__facts">
+          {value.who && <><dt>{t('valueUseCase.who')}</dt><dd>{value.who}</dd></>}
+          {value.why && <><dt>{t('valueUseCase.why')}</dt><dd>{value.why}</dd></>}
+          {value.success && <><dt>{t('valueUseCase.success')}</dt><dd>{value.success}</dd></>}
+        </dl>
+      </div>
+      {value.flow.length === 0 ? <div className="wbl__card vuc__step vr__muted">{t('valueUseCase.noFlow')}</div> : (
+        <ol className="vuc__flow">
+          {value.flow.map((step, s) => {
+            const flat = flatStepIndex(doc, index, s)
+            return (
+              <li key={s} className="vuc__flow-item">
+                <ArrowRight size={22} className="vuc__next" aria-hidden="true" />
+                <div className="wbl__card vuc__step" data-board-card>
+                  <div className="vuc__step-head">
+                    <span className="vr__num vr-kind--target">{step.step}</span>
+                    <span className="vuc__step-screen">{step.screen || t('valueUseCase.step', { n: step.step })}</span>
+                  </div>
+                  {step.url && <span className="vr__muted vr__url" title={step.url}>{step.url}</span>}
+                  {step.image ? (
+                    <Shot
+                      src={images[step.image]}
+                      annotations={step.target ? [{ ...step.target, n: step.step, kind: 'target', label: step.action }] : []}
+                      drawing={drawing}
+                      boxes={boxes.map((box, i) => ({ ...box, i })).filter((box) => box.screen === flat)}
+                      onDraw={(box) => onDraw(flat, box)}
+                    />
+                  ) : <div className="vr__muted vuc__noimage">{t('valueUseCase.noImage')}</div>}
+                  <dl className="vuc__facts">
+                    {step.action && <><dt>{t('valueUseCase.action')}</dt><dd>{step.action}</dd></>}
+                    {step.expected && <><dt>{t('valueUseCase.expected')}</dt><dd>{step.expected}</dd></>}
+                  </dl>
+                </div>
+              </li>
+            )
+          })}
+        </ol>
       )}
     </section>
   )

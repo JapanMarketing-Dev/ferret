@@ -323,6 +323,39 @@ describe('並び・数・状態の移り変わり', () => {
     const after = [plan('a', 'x'), plan('b', 'x', 2), plan('c', 'x'), plan('d', 'x', 1, 'approved')]
     expect(newlyProposed(marks, after).map((p) => p.id)).toEqual(['b', 'c'])
   })
+
+  it('下書き（drafting）が出た時点で拾う。同じ版の下書き → 返事待ちでは、もう一度は拾わない', () => {
+    const marks = planMarks([])
+    const draft = [plan('a', 'x', 1, 'drafting')]
+    expect(newlyProposed(marks, draft).map((p) => p.id)).toEqual(['a'])
+    const afterDraft = planMarks(draft)
+    expect(newlyProposed(afterDraft, draft)).toEqual([])
+    expect(newlyProposed(afterDraft, [plan('a', 'x', 1, 'proposed')])).toEqual([])
+    // 次の版の下書きは、また拾う
+    expect(newlyProposed(planMarks([plan('a', 'x', 1, 'changes-requested')]), [plan('a', 'x', 2, 'drafting')]).map((p) => p.id)).toEqual(['a'])
+    // 下書きは返事待ちの数に入れない
+    expect(pendingCount([plan('a', 'x', 1, 'drafting'), plan('b', 'x')])).toBe(1)
+  })
+
+  it('下書きは承認できない（フィードバックは送れる）', () => {
+    const draft = parse(validRaw({ status: 'drafting' }))
+    expect(draft.status).toBe('drafting')
+    expect(canRespond(draft, 'approve')).toBe(false)
+    expect(canRespond(draft, 'feedback')).toBe(true)
+    expect(nextStatus('drafting', 'approve')).toBeNull()
+    expect(applyResponse(validRaw({ status: 'drafting' }), draft, { at: 'now', action: 'approve' })).toBeNull()
+  })
+
+  it('下書きは画面も動きも無くてよい（タイトルだけで先に出せる）。下書きでなければ要る', () => {
+    const bare = { title: '下書き', request: 'ボタンを足して', status: 'drafting' }
+    const drafted = parseVisualPlan(bare, 'd1')
+    expect(drafted.ok && drafted.plan.screens.length === 0 && drafted.plan.status === 'drafting').toBe(true)
+    expect(parseVisualPlan({ ...bare, status: 'proposed' }, 'd1').ok).toBe(false)
+    expect(parseVisualPlan({ ...bare, status: undefined }, 'd1').ok).toBe(false)
+    expect(parseVisualPlan({ ...bare, status: ' Drafting ' }, 'd1').ok).toBe(true)
+    // 下書きでもタイトルは要る
+    expect(parseVisualPlan({ status: 'drafting' }, 'd1').ok).toBe(false)
+  })
 })
 
 describe('Agent へ送る文', () => {

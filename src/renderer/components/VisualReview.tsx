@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowRight, Check, Copy, MessageSquare, Mic, Square, Trash2, X } from 'lucide-react'
+import { ArrowRight, Check, Copy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Square, Trash2, X } from 'lucide-react'
 import {
   canRespond,
   clampBox,
   type PlanBox,
   type PlanListing,
+  type PlanResponse,
   type PlanStatus,
   type RecordingNote,
   type VisualPlan,
@@ -14,6 +15,7 @@ import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
 import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
 import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
+import { Whiteboard, useConnectors } from './Whiteboard'
 import { useT } from '../lib/i18n'
 import '../styles/visualReview.css'
 
@@ -43,6 +45,7 @@ export interface PlanRecordingControls {
 }
 
 export const STATUS_TONE: Record<PlanStatus, BadgeTone> = {
+  drafting: 'neutral',
   proposed: 'warning',
   approved: 'success',
   'changes-requested': 'neutral',
@@ -60,6 +63,7 @@ export function VisualReview({ listing, onChanged, recording }: {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // 送れなかったときの貼る文。返事で計画の状態が変わって詳細を作り直しても消えないよう、ここで持つ
   const [manual, setManual] = useState<Manual | null>(null)
+  const [listCollapsed, toggleList] = useListCollapsed()
   // 選んでいたものが消えたら（または未選択なら）、いちばん新しい計画を選ぶ。声と書き込みで返している間はその計画を見せる
   const recordingId = recording?.pending?.planId
   const selected = plans.find((plan) => plan.id === (recordingId ?? selectedId)) ?? plans.find((plan) => plan.id === selectedId) ?? plans[0] ?? null
@@ -78,9 +82,10 @@ export function VisualReview({ listing, onChanged, recording }: {
   }
 
   return (
-    <div className="vr" data-testid="visual-review">
+    <div className={`vr${listCollapsed ? ' is-list-collapsed' : ''}`} data-testid="visual-review">
       <nav className="vr__list" aria-label={t('visualReview.listLabel')}>
-        {plans.map((plan) => (
+        <ListToggle collapsed={listCollapsed} onToggle={toggleList} />
+        {!listCollapsed && plans.map((plan) => (
           <button
             key={plan.id}
             type="button"
@@ -97,7 +102,7 @@ export function VisualReview({ listing, onChanged, recording }: {
             </span>
           </button>
         ))}
-        {invalid.length > 0 && <InvalidPlans invalid={invalid} />}
+        {!listCollapsed && invalid.length > 0 && <InvalidPlans invalid={invalid} />}
       </nav>
       {selected && (
         <PlanDetail
@@ -109,6 +114,36 @@ export function VisualReview({ listing, onChanged, recording }: {
           recording={recording}
         />
       )}
+    </div>
+  )
+}
+
+const LIST_COLLAPSED_KEY = 'ferret.reviewDocs.listCollapsed'
+
+/** 文書の一覧をたたむか（ビジュアルレビュー・価値ユースケースで共通。この利用者の画面の好みなので localStorage） */
+export function useListCollapsed(): [boolean, () => void] {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(LIST_COLLAPSED_KEY) === '1' } catch { return false }
+  })
+  const toggle = (): void => setCollapsed((current) => {
+    const next = !current
+    try { localStorage.setItem(LIST_COLLAPSED_KEY, next ? '1' : '0') } catch { /* 覚えられなくても動く */ }
+    return next
+  })
+  return [collapsed, toggle]
+}
+
+export function ListToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const t = useT()
+  return (
+    <div className="vr__list-head">
+      <IconButton
+        label={t(collapsed ? 'whiteboard.showList' : 'whiteboard.hideList')}
+        icon={collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+        size="sm"
+        onClick={onToggle}
+        data-testid="review-list-toggle"
+      />
     </div>
   )
 }
@@ -221,97 +256,19 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
     recording?.onStart(plan, currentNote())
   }
 
-  return (
-    <article className="vr__detail" data-testid="visual-review-detail">
-      <header className="vr__head">
-        <div className="vr__head-row">
-          <h2 className="vr__title">{plan.title}</h2>
-          <Badge tone={STATUS_TONE[plan.status]}>{t(`visualReview.status.${plan.status}`)}</Badge>
-          <span className="vr__muted">{t('visualReview.revision', { n: plan.revision })}</span>
-        </div>
-        {plan.request && <blockquote className="vr__request"><span className="vr__muted">{t('visualReview.request')}</span> {plan.request}</blockquote>}
-      </header>
+  const worldRef = useRef<HTMLDivElement>(null)
+  const lines = useConnectors(worldRef, [plan, images, mode])
 
+  const dock = (
+    <div className="wb__dock" data-no-pan>
       {manual && <ManualCopy manual={manual} onClose={() => onManual(null)} />}
-
-      {plan.screens.map((screen, index) => (
-        <section key={`${index}:${screen.image}`} className="vr__screen">
-          <div className="vr__screen-head">
-            <span className="vr__screen-no">{t('visualReview.screen', { n: index + 1 })}</span>
-            {screen.caption && <span>{screen.caption}</span>}
-            {screen.url && <span className="vr__muted vr__url" title={screen.url}>{screen.url}</span>}
-          </div>
-          <Shot
-            src={images[screen.image]}
-            annotations={numbered[index] ?? []}
-            drawing={mode === 'feedback'}
-            boxes={boxes.map((box, i) => ({ ...box, i })).filter((box) => box.screen === index)}
-            onDraw={(box) => setBoxes((current) => [...current, { ...box, screen: index, note: '' }])}
-          />
-        </section>
-      ))}
-
-      {numbered.some((list) => list.length > 0) && (
-        <section className="vr__section">
-          <h3>{t('visualReview.changes')}</h3>
-          <ol className="vr__changes">
-            {numbered.flat().map((item) => (
-              <li key={item.n} className={`vr__change vr-kind--${item.kind}`}>
-                <span className="vr__num">{item.n}</span>
-                <div>
-                  <div className="vr__change-label"><span className="vr__kind">{t(`visualReview.kind.${item.kind}`)}</span> {item.label}</div>
-                  <BeforeAfter before={item.before} after={item.after} />
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
-      {plan.behaviour.length > 0 && (
-        <section className="vr__section">
-          <h3>{t('visualReview.behaviour')}</h3>
-          <ul className="vr__plain">
-            {plan.behaviour.map((item, i) => <li key={i}><BeforeAfter before={item.before} after={item.after} /></li>)}
-          </ul>
-        </section>
-      )}
-
-      {plan.outOfScope.length > 0 && (
-        <section className="vr__section">
-          <h3>{t('visualReview.outOfScope')}</h3>
-          <ul className="vr__plain">{plan.outOfScope.map((item, i) => <li key={i}>{item}</li>)}</ul>
-        </section>
-      )}
-
-      {plan.questions.length > 0 && (
-        <section className="vr__section vr__questions">
-          <h3>{t('visualReview.questions')}</h3>
-          <ul className="vr__plain">{plan.questions.map((item, i) => <li key={i}>{item}</li>)}</ul>
-        </section>
-      )}
-
-      {plan.responses.length > 0 && (
-        <section className="vr__section">
-          <h3>{t('visualReview.history')}</h3>
-          <ul className="vr__plain vr__muted">
-            {plan.responses.map((response, i) => (
-              <li key={i}>
-                {formatTime(response.at)} · {t('visualReview.revision', { n: response.revision })} · {t(response.action === 'approve' ? 'visualReview.approved' : response.kind === 'recording' ? 'visualReview.recordedFeedback' : 'visualReview.feedbackSent')}
-                {response.text ? `: ${response.text}` : ''}
-                {response.review && <> · {t('visualReview.recordedFindings', { count: response.review.findings.length })} · <code>{response.review.dir}</code></>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {pending && (
-        <footer className="vr__actions" data-testid="visual-review-actions">
+        <footer className="vr__actions wb__actions" data-testid="visual-review-actions">
           {processingHere ? (
             <div className="vr__row vr__recording-state" role="status" data-testid="visual-review-processing"><Spinner size={14} />{t('visualReview.recording.processing')}</div>
           ) : mode === 'view' ? (
             <div className="vr__row">
+              {plan.status === 'drafting' && <span className="vr__drafting" role="status"><Spinner size={14} />{t('visualReview.drafting')}</span>}
               {canRespond(plan, 'approve') && <Button variant="primary" icon={<Check size={14} />} busy={busy} onClick={() => void respond({ action: 'approve' })} data-testid="visual-review-approve">{t('visualReview.approve')}</Button>}
               <Button icon={<MessageSquare size={14} />} disabled={busy} onClick={() => setMode('feedback')} data-testid="visual-review-feedback">{t('visualReview.feedback')}</Button>
               {recording && <Button icon={<Mic size={14} />} disabled={busy || recording.busy || !!recording.pending} title={t('visualReview.recordFeedbackTip')} onClick={startRecording} data-testid="visual-review-record">{t('visualReview.recordFeedback')}</Button>}
@@ -368,7 +325,107 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
           )}
         </footer>
       )}
+    </div>
+  )
+
+  return (
+    <article className="vr__detail vr__detail--board" data-testid="visual-review-detail">
+      <Whiteboard viewKey={`visual-review:${plan.id}`} overlay={dock} testId="visual-review-board">
+        <div ref={worldRef} className="wbl">
+          <svg className="wbl__lines" aria-hidden="true">
+            {lines.map((line) => <line key={line.key} className={`wbl__line vr-kind--${line.kind ?? 'change'}`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />)}
+          </svg>
+          <header className="wbl__card wbl__head" data-board-card>
+            <div className="vr__head-row">
+              <h2 className="vr__title">{plan.title}</h2>
+              <Badge tone={STATUS_TONE[plan.status]}>{t(`visualReview.status.${plan.status}`)}</Badge>
+              <span className="vr__muted">{t('visualReview.revision', { n: plan.revision })}</span>
+              {plan.createdAt && <span className="vr__muted">{formatTime(plan.createdAt)}</span>}
+            </div>
+            {plan.request && <blockquote className="vr__request"><span className="vr__muted">{t('visualReview.request')}</span> {plan.request}</blockquote>}
+          </header>
+
+          {plan.screens.length > 0 && (
+            <div className="wbl__screens">
+              {plan.screens.map((screen, index) => (
+                <section key={`${index}:${screen.image}`} className="wbl__screen">
+                  <div className="wbl__card wbl__shot-card" data-board-card>
+                    <div className="vr__screen-head">
+                      <span className="vr__screen-no">{t('visualReview.screen', { n: index + 1 })}</span>
+                      {screen.caption && <span>{screen.caption}</span>}
+                      {screen.url && <span className="vr__muted vr__url" title={screen.url}>{screen.url}</span>}
+                    </div>
+                    <Shot
+                      src={images[screen.image]}
+                      annotations={numbered[index] ?? []}
+                      drawing={mode === 'feedback'}
+                      boxes={boxes.map((box, i) => ({ ...box, i })).filter((box) => box.screen === index)}
+                      onDraw={(box) => setBoxes((current) => [...current, { ...box, screen: index, note: '' }])}
+                      link="vr-"
+                    />
+                  </div>
+                  {(numbered[index] ?? []).length > 0 && (
+                    <ol className="wbl__notes">
+                      {(numbered[index] ?? []).map((item) => (
+                        <li key={item.n} className={`wbl__card wbl__note vr-kind--${item.kind}`} data-board-card data-wb-to={`vr-${item.n}`} data-wb-kind={item.kind}>
+                          <div className="vr__change-label"><span className="vr__num">{item.n}</span> <span className="vr__kind">{t(`visualReview.kind.${item.kind}`)}</span> {item.label}</div>
+                          <BeforeAfter before={item.before} after={item.after} />
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              ))}
+            </div>
+          )}
+
+          <div className="wbl__stickies">
+            {plan.behaviour.length > 0 && (
+              <section className="wbl__card wbl__sticky" data-board-card>
+                <h3>{t('visualReview.behaviour')}</h3>
+                <ul className="vr__plain">
+                  {plan.behaviour.map((item, i) => <li key={i}><BeforeAfter before={item.before} after={item.after} /></li>)}
+                </ul>
+              </section>
+            )}
+            {plan.outOfScope.length > 0 && (
+              <section className="wbl__card wbl__sticky wbl__sticky--muted" data-board-card>
+                <h3>{t('visualReview.outOfScope')}</h3>
+                <ul className="vr__plain">{plan.outOfScope.map((item, i) => <li key={i}>{item}</li>)}</ul>
+              </section>
+            )}
+            {plan.questions.length > 0 && (
+              <section className="wbl__card wbl__sticky wbl__sticky--question" data-board-card>
+                <h3>{t('visualReview.questions')}</h3>
+                <ul className="vr__plain">{plan.questions.map((item, i) => <li key={i}>{item}</li>)}</ul>
+              </section>
+            )}
+            {plan.responses.length > 0 && (
+              <section className="wbl__card wbl__sticky wbl__sticky--muted" data-board-card>
+                <h3>{t('visualReview.history')}</h3>
+                <ResponseHistory responses={plan.responses} />
+              </section>
+            )}
+          </div>
+        </div>
+      </Whiteboard>
     </article>
+  )
+}
+
+/** 返事の記録（ビジュアルレビュー・価値ユースケースで共用） */
+export function ResponseHistory({ responses }: { responses: ReadonlyArray<Pick<PlanResponse, 'at' | 'revision' | 'action' | 'kind' | 'text' | 'review'>> }) {
+  const t = useT()
+  return (
+    <ul className="vr__plain vr__muted">
+      {responses.map((response, i) => (
+        <li key={i}>
+          {formatTime(response.at)} · {t('visualReview.revision', { n: response.revision })} · {t(response.action === 'approve' ? 'visualReview.approved' : response.kind === 'recording' ? 'visualReview.recordedFeedback' : 'visualReview.feedbackSent')}
+          {response.text ? `: ${response.text}` : ''}
+          {response.review && <> · {t('visualReview.recordedFindings', { count: response.review.findings.length })} · <code>{response.review.dir}</code></>}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -400,8 +457,10 @@ function BeforeAfter({ before, after }: { before?: string; after: string }) {
 }
 
 /** 画像と番号付きの枠。drawing の間は、ドラッグで場所を囲める（フィードバック）。価値ユースケースも使う */
-export function Shot({ src, annotations, drawing, boxes, onDraw }: {
+export function Shot({ src, annotations, drawing, boxes, onDraw, link }: {
   src: string | null | undefined
+  /** ボードの線の始まりの印（data-wb-from に「link + 番号」） */
+  link?: string
   annotations: Array<PlanBox & { n: number; kind: string; label: string }>
   drawing: boolean
   boxes: Array<FeedbackBox & { i: number }>
@@ -434,7 +493,7 @@ export function Shot({ src, annotations, drawing, boxes, onDraw }: {
     >
       <img src={src} alt="" draggable={false} />
       {annotations.map((a) => (
-        <div key={a.n} className={`vr__box vr-kind--${a.kind}`} style={boxStyle(a)} title={a.label}>
+        <div key={a.n} className={`vr__box vr-kind--${a.kind}`} style={boxStyle(a)} title={a.label} data-wb-from={link ? `${link}${a.n}` : undefined}>
           <span className="vr__num">{a.n}</span>
         </div>
       ))}

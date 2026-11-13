@@ -227,7 +227,9 @@ export function parseValueUseCase(raw: unknown, fileId: string): { ok: true; doc
   const values = Array.isArray(raw.values)
     ? raw.values.slice(0, VALUE_LIMITS.values * 2).map((value, index) => parseValue(value, index, used)).filter((value) => value !== null).slice(0, VALUE_LIMITS.values)
     : []
-  if (values.length === 0) {
+  const status = parseStatus(raw.status)
+  // 下書きは、まだ価値が無くてよい（存在意義だけでも先に出す）
+  if (values.length === 0 && status !== 'drafting') {
     return { ok: false, reason: Array.isArray(raw.values) && raw.values.length > 0 ? 'no usable value: each value needs a "name"' : 'needs at least one entry in "values"' }
   }
   const revision = typeof raw.revision === 'number' && Number.isFinite(raw.revision) ? Math.max(1, Math.floor(raw.revision)) : 1
@@ -241,7 +243,7 @@ export function parseValueUseCase(raw: unknown, fileId: string): { ok: true; doc
       revision,
       createdAt: isoOrEmpty(raw.createdAt),
       ...(updatedAt ? { updatedAt } : {}),
-      status: parseStatus(raw.status),
+      status,
       ...(terminalId ? { terminalId } : {}),
       purpose: text(raw.purpose, VR_LIMITS.text),
       values,

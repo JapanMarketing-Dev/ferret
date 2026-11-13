@@ -123,7 +123,7 @@ describe('skill「ferret-value-usecases」', () => {
     expect(isValueUseCaseSkill(text)).toBe(true)
     expect(text).toContain(VALUE_USECASE_SKILL_MARKER)
     expect(text).toContain('<!-- Ferret 1.2.3 -->')
-    for (const word of ['価値', 'ユースケース', '存在意義', '.ferret/value-usecases/<id>.json', '.ferret/screens/', 'very first screen', '$FERRET_TERMINAL_ID', 'Stop and wait', '"works"', '.ferret/reviews/<id>/']) {
+    for (const word of ['価値', 'ユースケース', '存在意義', '.ferret/value-usecases/<id>.json', '.ferret/screens/', 'very first screen', '$FERRET_TERMINAL_ID', 'Stop and wait', '"works"', '.ferret/reviews/<id>/', '"status": "drafting"', 'Keep it current']) {
       expect(text).toContain(word)
     }
     // 例の JSON はそのまま読める

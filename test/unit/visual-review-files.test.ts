@@ -237,7 +237,7 @@ describe('skill「ferret-visual-review」', () => {
     expect(isVisualReviewSkill(text)).toBe(true)
     expect(text).toContain(VISUAL_REVIEW_SKILL_MARKER)
     expect(text).toContain('<!-- Ferret 9.9.9 -->')
-    for (const word of ['.ferret/screens/latest.jpg', '.ferret/screens/index.json', '.ferret/visual-review/<id>.json', '$FERRET_TERMINAL_ID', 'end your turn', '"status": "proposed"', 'ビジュアルレビュー']) {
+    for (const word of ['.ferret/screens/latest.jpg', '.ferret/screens/index.json', '.ferret/visual-review/<id>.json', '$FERRET_TERMINAL_ID', 'end your turn', '"status": "proposed"', '"status": "drafting"', 'after-1.jpg', 'ビジュアルレビュー']) {
       expect(text).toContain(word)
     }
     const description = text.split('\n')[2]!
