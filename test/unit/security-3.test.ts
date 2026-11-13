@@ -12,7 +12,8 @@ import {
 } from '../../src/shared/agentCatalog'
 import { resolveAgentLaunchPolicy } from '../../src/shared/agentPolicy'
 import { applyAgentWorkspaceTrust, registeredProjectIdFor } from '../../src/main/agentWorkspaceTrust'
-import { isRemoteImageSource, previewCsp, renderPreviewBody, renderPreviewPage } from '../../src/main/preview/render'
+import { isRemoteImageSource, previewCsp, renderPreviewPage } from '../../src/main/preview/render'
+import { renderPreviewBody } from '../../src/main/preview/markdown'
 import { scrubBreadcrumb, scrubEvent, scrubString } from '../../src/shared/telemetry'
 import {
   RELEASE_PUBLIC_KEY,

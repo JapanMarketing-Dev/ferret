@@ -13,7 +13,11 @@ import {
   RESUME_GRACE_MS,
   QUIT_GRACE_MS,
   scrubEvent,
-  shouldReportEventLoopBlock
+  shouldReportEventLoopBlock,
+  isMachineOverloaded,
+  loadBucket,
+  thermalBucket,
+  OVERLOADED_LOAD_PER_CPU
 } from '../../src/shared/telemetry'
 
 /**
@@ -193,5 +197,51 @@ describe('送る止まりと送らない遅れ（FERRET-M: 0.4.1・0.4.4 の mac
     expect(shouldReportEventLoopBlock({ ...base, lagMs: 4100, cpuSpeedLimit: 5 })).toBe(true)
     expect(shouldReportEventLoopBlock({ ...base, lagMs: 3900, cpuSpeedLimit: 5 })).toBe(false)
     expect(shouldReportEventLoopBlock({ ...base, lagMs: 4100, cpuSpeedLimit: 0 })).toBe(true)
+  })
+})
+
+describe('マシン全体が詰まっている間の止まり（FERRET-M 0.7.13）', () => {
+  const base = { lagMs: 2200, thresholdMs: EVENT_LOOP_BLOCK_MS, quitting: false, appActive: true, msSinceResume: null }
+  it('熱で絞られている（serious・critical）間は送らない', () => {
+    expect(shouldReportEventLoopBlock({ ...base, thermalState: 'serious' })).toBe(false)
+    expect(shouldReportEventLoopBlock({ ...base, thermalState: 'critical' })).toBe(false)
+  })
+  it('nominal・fair・不明・null は今までどおり送る', () => {
+    for (const thermalState of ['nominal', 'fair', 'unknown', null, undefined]) {
+      expect(shouldReportEventLoopBlock({ ...base, thermalState })).toBe(true)
+    }
+  })
+  it('CPU あたりの負荷が 2 以上なら送らない（境界は 2 ちょうど）', () => {
+    expect(shouldReportEventLoopBlock({ ...base, loadPerCpu: OVERLOADED_LOAD_PER_CPU })).toBe(false)
+    expect(shouldReportEventLoopBlock({ ...base, loadPerCpu: 2.5 })).toBe(false)
+    expect(shouldReportEventLoopBlock({ ...base, loadPerCpu: 1.99 })).toBe(true)
+  })
+  it('負荷の値が壊れていたら無いものとして扱う', () => {
+    for (const loadPerCpu of [Number.NaN, Number.POSITIVE_INFINITY, null]) {
+      expect(isMachineOverloaded(null, loadPerCpu)).toBe(false)
+    }
+  })
+  it('閾値以下の遅れは、負荷にかかわらず送らない', () => {
+    expect(shouldReportEventLoopBlock({ ...base, lagMs: 900, loadPerCpu: 0.1 })).toBe(false)
+  })
+  it('熱と負荷をタグと手がかりに残す', () => {
+    const { tags, context } = eventLoopBlockContext([], [], { heapUsedMb: 30, rssMb: 280, axEnabled: true, axChangedMsAgo: 6000, cpuSpeedLimit: null, thermalState: 'fair', loadPerCpu: 1.234 })
+    expect(tags['block.thermal']).toBe('fair')
+    expect(tags['block.load']).toBe('1-2')
+    expect(context.load_per_cpu).toBe('1.23')
+  })
+  it('区分の境界', () => {
+    expect(loadBucket(0.49)).toBe('<0.5')
+    expect(loadBucket(0.5)).toBe('0.5-1')
+    expect(loadBucket(1)).toBe('1-2')
+    expect(loadBucket(2)).toBe('2+')
+    expect(loadBucket(null)).toBe('unknown')
+    expect(thermalBucket('weird')).toBe('unknown')
+    expect(thermalBucket(undefined)).toBe('unknown')
+  })
+  it('今までの手がかりは熱・負荷を渡さなければ変わらない', () => {
+    const { tags } = eventLoopBlockContext([], [], { heapUsedMb: 30, rssMb: 280, axEnabled: false, axChangedMsAgo: null })
+    expect(tags['block.thermal']).toBeUndefined()
+    expect(tags['block.load']).toBeUndefined()
   })
 })

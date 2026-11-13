@@ -1,4 +1,3 @@
-import { addBreadcrumb, captureEvent, captureException, init, setTag } from '@sentry/electron/renderer'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderErrorCapture, startupBreadcrumb, uiTabTag, type SentryTestKind } from '@shared/telemetry'
@@ -12,34 +11,37 @@ import { ErrorBoundary } from '../ui/ErrorBoundary'
  * イベントは main へ渡り、main の beforeSend で個人の情報を落としてから送られる。
  * 内蔵ブラウザのページは別のセッションなので対象外（アプリの画面の例外だけ）。
  * ここでは画面の操作の記録（クリック・console・fetch・画面遷移）を最初から集めない。
+ * Sentry の SDK はクラッシュレポートが ON のときだけ動的 import で読む（OFF の起動では読み込まない）。
  */
-let initialized = false
+type SentryRenderer = typeof import('@sentry/electron/renderer')
+let sentry: SentryRenderer | null = null
 
 export async function initRendererCrashReporting(): Promise<void> {
   const state = await window.ade.invoke('telemetry:state').catch(() => null)
   if (!state?.active || !state.enabled) return
-  init({
+  const sdk = await import('@sentry/electron/renderer')
+  sdk.init({
     // Breadcrumbs = クリック・console・fetch の記録。HttpContext = ページの URL
     integrations: (defaults) => defaults.filter((i) => i.name !== 'Breadcrumbs' && i.name !== 'HttpContext'),
     maxBreadcrumbs: 30
   })
-  initialized = true
+  sentry = sdk
   // 握りつぶしていた失敗・流れの区切りの送り先（src/shared/report.ts）。パンくずは main へ渡り、そこで scrub される
   setReporter({
-    handled: (err, tags, level) => captureException(err instanceof Error ? err : new Error(String(err)), { level, tags }),
-    message: (message, tags, level, fingerprint, contexts) => captureEvent({ message, level, tags, ...(fingerprint ? { fingerprint } : {}), ...(contexts ? { contexts } : {}) }),
-    breadcrumb: (message, data) => addBreadcrumb({ category: 'flow', message, ...(data ? { data } : {}) })
+    handled: (err, tags, level) => sdk.captureException(err instanceof Error ? err : new Error(String(err)), { level, tags }),
+    message: (message, tags, level, fingerprint, contexts) => sdk.captureEvent({ message, level, tags, ...(fingerprint ? { fingerprint } : {}), ...(contexts ? { contexts } : {}) }),
+    breadcrumb: (message, data) => sdk.addBreadcrumb({ category: 'flow', message, ...(data ? { data } : {}) })
   })
-  keepStartupFailures()
+  keepStartupFailures(sdk)
   runSentryTests(state.test)
 }
 
 /** console.error は送らない（騒がしい）。`[startup]` の失敗だけをパンくずに残す */
-function keepStartupFailures(): void {
+function keepStartupFailures(sdk: SentryRenderer): void {
   const original = console.error.bind(console)
   console.error = (...args: unknown[]) => {
     if (typeof args[0] === 'string' && args[0].startsWith('[startup]')) {
-      addBreadcrumb(startupBreadcrumb('error', args))
+      sdk.addBreadcrumb(startupBreadcrumb('error', args))
     }
     original(...args)
   }
@@ -47,13 +49,12 @@ function keepStartupFailures(): void {
 
 /** どの画面（中央のタブ）を見ていたか。renderer のイベントにタグ ui.tab で付く（ファイルのパスは入れない） */
 export function setUiTab(tab: string): void {
-  if (initialized) setTag('ui.tab', uiTabTag(tab))
+  sentry?.setTag('ui.tab', uiTabTag(tab))
 }
 
 /** ErrorBoundary で捕まえた描画のエラーを送る。componentStack はコンポーネントの階層 */
 export function reportRenderError(error: unknown, boundary: string, componentStack?: string | null): void {
-  if (!initialized) return
-  captureException(error, renderErrorCapture(boundary, componentStack))
+  sentry?.captureException(error, renderErrorCapture(boundary, componentStack))
 }
 
 function TestBomb(): never {

@@ -14,8 +14,21 @@ import { setViewBoundsForToasts } from '../lib/toastPlacement'
  * 戻り値を置き場所の要素の `ref` に渡す。モード切替で要素が入れ替わっても、
  * 新しい要素の位置を測り直すだけで、ビュー自体は作り直さない（ページは再読込されない）。
  */
-/** 同じ値でも置き直す間隔（1 秒ごとの測り直しの何回に1回か） */
-const HEAL_EVERY = 5
+/** 予備の測り直しの間隔。変化は ResizeObserver（自分・祖先・その前の兄弟）とウインドウのイベントで追い、これは取りこぼしの予備 */
+export const HEAL_MS = 5000
+
+/**
+ * 位置を動かしうる要素。自分と祖先（body の手前まで）と、それぞれの前の兄弟（上・左に並ぶツールバーなど）。
+ * これらの大きさが変われば、自分の大きさが同じでも位置が動く
+ */
+export function layoutNeighbors(node: Element): Element[] {
+  const out: Element[] = []
+  for (let el: Element | null = node; el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; el = el.parentElement) {
+    out.push(el)
+    for (let s = el.previousElementSibling; s; s = s.previousElementSibling) out.push(s)
+  }
+  return out
+}
 
 export function useViewBounds(
   layoutKey: string,
@@ -64,24 +77,21 @@ export function useViewBounds(
       return
     }
     schedule()
-    const observer = new ResizeObserver(schedule)
-    observer.observe(node)
+    // 大きさが同じまま位置だけが動く（上のツールバーの高さが変わる）のも拾うよう、前に並ぶ要素と祖先も見る
+    const observer = new ResizeObserver(() => schedule())
+    for (const el of layoutNeighbors(node)) observer.observe(el)
     window.addEventListener('resize', schedule)
     // フォント読み込みなどで後からレイアウトが動く場合に取りこぼさない
     const timer = window.setTimeout(schedule, 150)
     /*
-     * ResizeObserver は大きさしか見ない。大きさが同じまま位置だけが動く（上のツールバーの高さが変わる・一時的に
-     * 違う位置で測った）と、ビューがツールバーに重なったまま残る（録画のツールバーが消えて見えた）。
-     * 見せている間は 1 秒ごとに測り、変わったときだけ置き直す。main 側のビューだけがずれた場合も戻すため、
-     * HEAL_EVERY 回に1回は同じ値でも送る（毎秒の IPC とビューの置き直しを減らす）
+     * ResizeObserver で拾えない動き（一時的に違う位置で測った・兄弟が足された・main 側のビューだけがずれた）の予備に、
+     * 見せている間は HEAL_MS ごとに測り、同じ値でも置き直す（以前は 1 秒ごとに測っていた）。
+     * 最小化・裏の間は置き直さない（表に戻ったら visibilitychange ですぐ置き直す）
      */
-    // 最小化・裏の間は置き直さない（表に戻ったら visibilitychange ですぐ置き直す）
-    let tick = 0
     const healer = window.setInterval(() => {
       if (document.hidden) return
-      tick += 1
-      schedule(tick % HEAL_EVERY === 0)
-    }, 1000)
+      schedule(true)
+    }, HEAL_MS)
     const onVisible = () => { if (!document.hidden) schedule(true) }
     document.addEventListener('visibilitychange', onVisible)
     const onFocus = () => schedule(true)
@@ -98,12 +108,8 @@ export function useViewBounds(
         frameRef.current = null
       }
     }
-  }, [node, visible, schedule])
-
-  // モード・分割幅・表示幅が変わったら、同じフレームで測り直す
-  useEffect(() => {
-    schedule()
-  }, [schedule, layoutKey])
+    // レイアウトが変わったら（モード・分割幅・表示幅）、見る要素を集め直して測り直す
+  }, [node, visible, schedule, layoutKey])
 
   return setNode
 }

@@ -17,26 +17,14 @@ import { normalizeSystemLocale } from '@shared/i18n'
  * 許可リストは src/shared/ipc.ts が正本で、未宣言のチャネルは呼べない。
  */
 
-/**
- * 落とした File の実パス。JS で作った File（new File）は空になる。
- * E2E（ADE_E2E=1）だけは、合成した drop イベントのために File の名前に置いたパス（`ade-e2e-path:` ＋ encodeURIComponent）を使う
- */
-const E2E_PATH_PREFIX = 'ade-e2e-path:'
+/** 落とした File の実パス。JS で作った File（new File）は空になる */
 function droppedFilePath(file: File): string {
-  let path = ''
   try {
-    path = webUtils.getPathForFile(file)
+    return webUtils.getPathForFile(file)
   } catch {
     // File でないものが渡された（想定内。そのものだけ除く）
+    return ''
   }
-  if (!path && process.env.ADE_E2E === '1' && typeof file?.name === 'string' && file.name.startsWith(E2E_PATH_PREFIX)) {
-    try {
-      path = decodeURIComponent(file.name.slice(E2E_PATH_PREFIX.length))
-    } catch {
-      // 壊れた書き方（想定内。そのものだけ除く）
-    }
-  }
-  return path
 }
 
 const requestChannels = new Set<string>(IPC_REQUEST_CHANNELS)
@@ -68,8 +56,7 @@ const api: AdeApi = {
   platform: process.platform,
   systemVersion: process.getSystemVersion(),
 
-  // 見本データは ADE_DEMO=1 のときだけ。非表示実行(ADE_E2E)とは別の軸にして、
-  // 「製品と同じ見た目のまま非表示で撮る」ことも出来るようにする
+  // 見本データは ADE_DEMO=1 のときだけ
   demo: process.env.ADE_DEMO === '1',
 
   // main が additionalArguments で渡す（--ade-theme=light|dark）。無ければダーク

@@ -1,11 +1,11 @@
 import { ExternalDropOverlay, useExternalDrop } from './hooks/useExternalDrop'
-import { currentOrchestra, orchestraMembers } from '@shared/orchestras'
+import { orchestraMembers } from '@shared/orchestras'
 import { planEditorDrop, readDrop } from './lib/externalDrop'
 import { preloadable } from './lib/preloadable'
 import { embedMedia, markdownDropTargetAt, planMediaDrop, planTreeMediaDrop } from './editor/markdownDrop'
 import { isMarkdownLanguage } from './editor/language'
 import { delay } from '@shared/delay'
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { createPortal } from 'react-dom'
 import {
   DEFAULT_AGENT_PREFERENCES,
@@ -13,7 +13,6 @@ import {
   DEFAULT_URL,
   type AgentPreferences,
   type AppMode,
-  type BrowserState,
   type ProjectsState,
   type WorkspaceState
 } from '@shared/types'
@@ -21,6 +20,7 @@ import { BrowserSlot, type SlotEmptyReason } from './components/BrowserSlot'
 import { BrowserToolbar } from './components/BrowserToolbar'
 import { BrowserTabs } from './components/BrowserTabs'
 import { UrlField } from './components/NavControls'
+import { setBrowserState, useAppBrowserState, useBrowserState } from './lib/browserStore'
 import { CenterTabs, isFileTab, type CenterTab } from './components/CenterTabs'
 import { browserFocusLayout, layoutSignature, mainSplitGrid, withPanel, workspaceGrid, type Dock } from '@shared/layout'
 import { exitBrowserFocus, initLayout, setLayout, togglePanelShown, useBrowserFocus, useLayout } from './lib/layout'
@@ -52,18 +52,15 @@ import { TitleBar } from './components/TitleBar'
 import { useViewBounds } from './hooks/useViewBounds'
 import { useAnyModalOpen } from './lib/openModals'
 import { useProjectSession } from './hooks/useProjectSession'
+import { useVisualReviews } from './hooks/useVisualReviews'
+import { shouldAutoOpenVisualReview } from '@shared/visualReview'
 import { matchWindowSource } from '@shared/projectTargets'
-import { newReviewNeedsPage, planNewReview } from './lib/newReview'
-import { useProductRound } from './hooks/useProductRound'
-import { RoundBar } from './components/RoundBar'
+import { feedbackPressStartsRecording, planNewReview } from './lib/newReview'
 import { useProjectActivity } from './terminal/agentActivity'
 import { OrchestraDock } from './components/OrchestraDock'
 import { currentDockGroup, groupDockTargets } from '@shared/dockGroups'
-import { pageItems } from '@shared/humanChecklist'
-import type { ChecklistItem } from '@shared/humanChecklist'
 import { RemoteFilesNotice } from './components/AddProjectDialog'
 import { targetFromSource } from '@shared/captureTarget'
-import { installTestHooks } from './testHooks'
 import { ErrorBoundary, ToastProvider, setToastNoticeFallback, useToast } from './ui'
 import { sanitizeAgentPreferences } from '@shared/agentCatalog'
 import { CrashReportNotice } from './components/CrashReportNotice'
@@ -91,55 +88,35 @@ import { StarPromptHost } from './components/StarPrompt'
 import { FeedbackDialogHost } from './components/FeedbackDialog'
 import { OPEN_REVIEW_EVENT } from './lib/importedReview'
 import { setRecordingLevel } from './lib/recordingLevel'
-import { usePublishPanelRequest } from './lib/publishPanel'
-import { PublishPanel } from './components/PublishPanel'
 import { ReviewHub } from './components/ReviewHub'
 import { reportAnomaly, reportHandled } from '@shared/report'
 import type { SttLanguageCode } from '@shared/sttLanguages'
 
-/** エディタは重いので、起動の後で読む（起動時間 NF-5）。読み終わっていれば、開いたときに Suspense で待たせない */
-const { Component: FileEditor, preload: preloadFileEditor } = preloadable(() => import('./editor/FileEditor'))
 /**
- * 開いたときだけ要る画面も、起動の JS から外す（設定のページは十数の節と CSS を持つ）。
- * よく開く設定と全体のダッシュボードは、エディタと一緒に手が空いたときに先読みする
+ * エディタは重いので、初めてファイルを開いたときに読む（起動時間 NF-5）。
+ * 起動の後に先読みしていたが、ファイルを開かない起動でも数MB（tiptap・Monaco）を読んで解析していたのでやめた
+ */
+const { Component: FileEditor } = preloadable(() => import('./editor/FileEditor'))
+/**
+ * 開いたときだけ要る画面も、起動の JS から外す（設定のページは十数の節と CSS を持つ）。開いたときに読む
  */
 /** 遅れて読む部品の props（型だけを読む） */
 type PropsOf<C> = C extends (props: infer P) => unknown ? P : never
-const { Component: SettingsPage, preload: preloadSettingsPage } = preloadable<PropsOf<typeof import('./components/SettingsPage').SettingsPage>>(() => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-const { Component: OrchestraDashboard, preload: preloadOrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
+const { Component: SettingsPage } = preloadable<PropsOf<typeof import('./components/SettingsPage').SettingsPage>>(() => import('./components/SettingsPage').then((m) => ({ default: m.SettingsPage })))
+const { Component: OrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
 const { Component: OnboardingFlow } = preloadable<PropsOf<typeof import('./onboarding/OnboardingFlow').OnboardingFlow>>(() => import('./onboarding/OnboardingFlow').then((m) => ({ default: m.OnboardingFlow })))
 const { Component: MeetingImportDialog } = preloadable<PropsOf<typeof import('./components/MeetingImportDialog').MeetingImportDialog>>(() => import('./components/MeetingImportDialog').then((m) => ({ default: m.MeetingImportDialog })))
+const { Component: VisualReview } = preloadable<PropsOf<typeof import('./components/VisualReview').VisualReview>>(() => import('./components/VisualReview').then((m) => ({ default: m.VisualReview })))
 const { Component: Gallery } = preloadable<PropsOf<typeof import('./gallery/Gallery').Gallery>>(() => import('./gallery/Gallery').then((m) => ({ default: m.Gallery })))
-/** 起動してからエディタを先読みするまでの待ち（起動直後の描画・Agent の起動と重ねない） */
-const EDITOR_PRELOAD_DELAY_MS = 2500
-
-/**
- * 起動して手が空いたら、エディタ（Markdown のプレビューの編集・Monaco）を先に読む。
- * 初めて Markdown・HTML を開いて書き始めるときに、数MBの読み込みを待たせない
- */
-function scheduleEditorPreload(): () => void {
-  let idle: number | undefined
-  const timer = window.setTimeout(() => {
-    const run = () => {
-      void preloadFileEditor().then((m) => (m as typeof import('./editor/FileEditor')).preloadEditors()).catch(() => undefined)
-      void preloadSettingsPage().catch(() => undefined)
-      void preloadOrchestraDashboard().catch(() => undefined)
-    }
-    idle = typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(run, { timeout: 5000 }) : window.setTimeout(run, 0)
-  }, EDITOR_PRELOAD_DELAY_MS)
-  return () => {
-    window.clearTimeout(timer)
-    if (idle !== undefined && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idle)
-  }
+/** 内蔵ブラウザの状態をそのまま読む部品（読み込み中の印・タブの一覧は App を描き直さずにここだけ描き直す。lib/browserStore.ts） */
+function LiveBrowserTabs(props: Omit<ComponentProps<typeof BrowserTabs>, 'state'>) {
+  return <BrowserTabs {...props} state={useBrowserState()} />
 }
-
-const INITIAL_BROWSER_STATE: BrowserState = {
-  url: '',
-  title: '',
-  canGoBack: false,
-  canGoForward: false,
-  loading: false,
-  viewport: 'desktop'
+function LiveUrlField(props: Omit<ComponentProps<typeof UrlField>, 'state'>) {
+  return <UrlField {...props} state={useBrowserState()} />
+}
+function LiveBrowserToolbar(props: Omit<ComponentProps<typeof BrowserToolbar>, 'state'>) {
+  return <BrowserToolbar {...props} state={useBrowserState()} />
 }
 
 /** 非表示のモードの置き場所は測らない（測ると0サイズを送ってビューが消える） */
@@ -197,7 +174,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const [meetingOpen, setMeetingOpen] = useState(false)
   /** 設定とワークスペースを読み終えたか。終わるまでターミナルは作らない（projectId=null 用の余分なシェルを残さない） */
   const [projectsLoaded, setProjectsLoaded] = useState(false)
-  const [browserState, setBrowserState] = useState<BrowserState>(INITIAL_BROWSER_STATE)
+  // 内蔵ブラウザの状態は lib/browserStore.ts に置く。App は URL・タイトルなど使う値が変わったときだけ描き直す
+  const browserState = useAppBrowserState()
   const [splitRatio, setSplitRatio] = useState(DEFAULT_SPLIT_RATIO)
   /**
    * パネルの置き場所と表示（設定の「レイアウト」・メニューの ⌘B / ⌘J と同じ値。lib/layout.ts）。
@@ -210,6 +188,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const isOrchestra = !!projects.projects.find((p) => p.id === workspace.projectId)?.editorWorkspace
   /** 全体では、フィードバックの対象を大きく見せるためターミナルの欄を閉じる（右下のボタンで開く。設定の配置は変えない） */
   const [terminalPeek, setTerminalPeek] = useState(false)
+  /** ターミナルの欄を隠す（ターミナルの見出しのボタン）。出すのは右下のボタン・表示メニュー・Ctrl+` */
+  const hideTerminalPane = useCallback(() => setTerminalPeek(false), [])
   const baseLayout = browserFocus ? browserFocusLayout(savedLayout) : savedLayout
   // オーケストラ前提：どのプロジェクトでも、ターミナルの欄は閉じておき右下の小さなボタンで開く（フィードバックの対象を大きく見せる）
   const layout = !terminalPeek ? { ...baseLayout, panels: { ...baseLayout.panels, terminal: { ...baseLayout.panels.terminal, visible: false } } } : baseLayout
@@ -226,7 +206,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const [onboarding, setOnboarding] = useState<OnboardingState | null | undefined>(undefined)
   const onboardingOpen = onboarding !== undefined && !gallery && shouldShowOnboarding(onboarding ?? undefined)
   const [terminalsAllowed, setTerminalsAllowed] = useState(false)
-  useEffect(() => scheduleEditorPreload(), [])
   useEffect(() => {
     if (onboarding === undefined || onboardingOpen || terminalsAllowed) return
     setTerminalsAllowed(true)
@@ -344,6 +323,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     setLayout((prev) => (prev.panels.terminal.visible ? prev : withPanel(prev, 'terminal', { visible: true })))
   }), [])
   const [quickOpenOpen, setQuickOpenOpen] = useState(false)
+  const openQuickOpen = useCallback(() => setQuickOpenOpen(true), [])
   /** フィードバックモードの右パネル（レビュー対象）。開閉と幅はこの端末に覚える */
   // 正本は settings.json の feedbackTargets。以前は localStorage に置いていたので、設定に無ければ1度だけそこから移す
   /** 内蔵ブラウザで開いた URL の履歴（右パネルの URL ツリーの元。パネルを閉じていても積む） */
@@ -388,9 +368,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   const liveAlert = liveProblem && !(targetsOpen && shownSideTab === 'transcript') ? t('liveTranscript.alert') : null
   const fileError = useCallback((message: string) => toast({ tone: 'danger', message }), [toast])
   const files = useOpenFiles({ root: workspace.folderPath, activeTab: centerTab, setActiveTab: setCenterTab, onError: fileError })
-  // 発信（X への投稿の下書き）。フッター・エディタから開く
-  const publishRequest = usePublishPanelRequest()
-  // 外からエディタの領域へ落としたファイルを開く。プロジェクトの外はファイルツリーへの取り込みを案内し、フォルダはプロジェクトとして開く。
+  // 外からエディタの領域へ落としたファイルを開く。プロジェクトの外のファイルはプロジェクトの根へコピーしてから開き、フォルダはプロジェクトとして開く。
   // Markdown のエディタ（ソース・プレビュー）の上に落とした画像・動画は、開かずにその位置へ埋め込む（外のものは隣の assets/ などへコピー。markdownDrop.ts）
   const importMedia = useCallback((markdownRel: string, paths: string[]) => window.ade.invoke('fs:importMedia', markdownRel, paths), [])
   const editorDrop = useExternalDrop((dataTransfer, point) => {
@@ -406,8 +384,13 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
       }
       const plan = planEditorDrop(rest)
       for (const path of plan.open) files.open(path)
-      if (plan.outside) toast({ tone: 'info', message: t('drop.editor.outside', { name: plan.outside }) })
-      else if (plan.unreadable) toast({ tone: 'warning', message: t('drop.errors.unreadable') })
+      if (plan.unreadable) toast({ tone: 'warning', message: t('drop.errors.unreadable') })
+      if (plan.copy.length > 0) {
+        // ファイルツリーは fs:changed で読み直す
+        const copied = await window.ade.invoke('fs:import', plan.copy, '')
+        for (const transfer of copied) files.open(transfer.to)
+        if (copied.length > 0) toast({ tone: 'info', message: t('drop.editor.copied', { names: copied.map((c) => c.to).join(', ') }) })
+      }
       if (plan.folder) await window.ade.invoke('project:addDropped', plan.folder)
     }).catch((err) => toast({ tone: 'warning', message: errorMessage(err) }))
   }, true, (relPaths, point) => void (async () => {
@@ -581,6 +564,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     setCenterTab('settings')
     if (section) setSettingsFocus((prev) => ({ section, nonce: (prev?.nonce ?? 0) + 1 }))
   }, [changeMode])
+  const openAgentSettings = useCallback(() => openSettings('agents'), [openSettings])
   const closeSettings = useCallback(() => {
     setSettingsOpen(false)
     setCenterTab((tab) => (tab === 'settings' ? 'browser' : tab))
@@ -714,7 +698,11 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     return () => offs.forEach((off) => off())
   }, [toast, t, refreshHistory])
 
-  const toggleRecording = useCallback(() => {
+  /**
+   * 録画の開始・停止。始めるときは既定で「ワンクリック録画」（Ferret の窓がある画面の全体を、選択画面なしで録る。main が画面を決める）。
+   * 'target' は選んだ対象（内蔵ブラウザ・選択画面で選んだもの）を録る（対象の選択画面から始めたとき）
+   */
+  const recordWith = useCallback((how: 'screen' | 'target') => {
     // Findings の「追加で録る」から来たときだけ、開いているレビューへ足す（1回限り）
     const appendTo = appendNext.current
     appendNext.current = null
@@ -739,17 +727,32 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
         await refreshHistory()
       } else {
         // 画面全体・別のウインドウを録るなら、内蔵ブラウザにページが無くてもよい（保存先のフォルダは要る）
-        if (emptyReason && (emptyReason === 'no-folder' || captureTargetRef.current.kind === 'browser')) { toast({ tone: 'warning', message: emptyReason === 'load-failed' ? t('app.recordNoPage') : t('app.recordNoFolder') }); return }
+        const kind = how === 'screen' ? 'screen' : captureTargetRef.current.kind
+        if (emptyReason && (emptyReason === 'no-folder' || kind === 'browser')) { toast({ tone: 'warning', message: emptyReason === 'load-failed' ? t('app.recordNoPage') : t('app.recordNoFolder') }); return }
         setCenterTab('browser')
         // 録画は書き込みなしで始まる。前回の停止が失敗して道具の表示が残っていても揃える
         setTool('none')
         changeMode('feedback')
         try {
-          setRecordStatus(await window.ade.invoke('recording:start', { captureSystemAudio, captureMic, transcription, language, micDeviceId, captureTarget: captureTargetRef.current, ...(appendTo ? { appendTo } : {}) }))
+          setRecordStatus(await window.ade.invoke('recording:start', { captureSystemAudio, captureMic, transcription, language, micDeviceId,
+            ...(how === 'screen' ? { fullScreen: true } : { captureTarget: captureTargetRef.current }), ...(appendTo ? { appendTo } : {}) }))
         } catch (err) { changeMode('editor'); throw err }
       }
     }).finally(() => { recordLock.current = false; setRecordBusy(false) })
   }, [recording, emptyReason, changeMode, run, refreshHistory, toast, captureMic, transcription, captureSystemAudio, language, micDeviceId, stayFeedbackOnStop])
+  /** 録画ボタン・⌘⇧R・フィードバックのボタン。始めるときは画面全体（設定・選択なし） */
+  const toggleRecording = useCallback(() => recordWith('screen'), [recordWith])
+  /**
+   * 上の「フィードバック」を押したら、その場で画面全体の録画を始める（設定・対象の選択・確認なし）。
+   * 録画中・開始の途中・フォルダが無い・全体（オーケストラ。ページの URL でプロダクトに分けるので帯の「全部録る」を使う）は、画面を切り替えるだけ
+   */
+  const pressMode = (next: AppMode) => {
+    if (feedbackPressStartsRecording({ next, mode: modeRef.current, recording, starting: recordLock.current, hasFolder: workspace.folderPath !== null, orchestra: isOrchestra })) {
+      toggleRecording()
+      return
+    }
+    changeMode(next)
+  }
 
   /*
    * サイドバーのプロジェクトごとの「新しいレビュー」。どのプロジェクトで始めるかは planNewReview が決める。
@@ -760,8 +763,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   toggleRecordingRef.current = toggleRecording
   const workspaceProjectRef = useRef<string | null>(workspace.projectId ?? null)
   workspaceProjectRef.current = workspace.projectId ?? null
-  const emptyReasonRef = useRef(emptyReason)
-  emptyReasonRef.current = emptyReason
   /** 履歴からレビューを選んで開く（指摘のページの左の一覧） */
   const selectReview = (id: string) => {
     setSessionId(id)
@@ -788,46 +789,23 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
       }
       await new Promise((done) => requestAnimationFrame(() => done(null)))
     }
-    // レビューするページがまだ無い（URL を入れていない）なら、警告は出さずにフィードバックの画面へ移るだけ。
-    // URL はそこで入れてから録画を始める
-    if (newReviewNeedsPage(emptyReasonRef.current, captureTargetRef.current.kind)) {
-      setCenterTab('browser')
-      changeMode('feedback')
-      return
-    }
+    // 新しいレビューは画面全体を録る（ワンクリック録画）ので、内蔵ブラウザにページが無くても始められる
     toggleRecordingRef.current()
   }), [run, projects.projects, recording, toast, t, changeMode])
 
-  /**
-   * 確認の巡回（オーケストラ）。全プロダクトの確認待ちを順に開き、「次へ」で進む（src/renderer/hooks/useProductRound.ts）
-   */
-  const openReviewIn = useCallback(async (projectId: string, reviewId: string) => {
-    if (workspaceProjectRef.current !== projectId) {
-      await window.ade.invoke('project:switch', projectId)
-      for (let i = 0; i < 40 && workspaceProjectRef.current !== projectId; i++) await delay(50)
-      await new Promise((done) => requestAnimationFrame(() => done(null)))
-    }
-    setSessionId(reviewId)
-    setReview(await window.ade.invoke('review:load', reviewId))
-    setCenterTab('findings')
-    changeMode('editor')
-  }, [changeMode])
-  const productRound = useProductRound({
-    projects: projects.projects,
-    openReview: (projectId, reviewId) => run(() => openReviewIn(projectId, reviewId)),
-    openOverview: () => {
-      const editor = currentOrchestra(projects.projects, workspaceProjectRef.current)
-      if (editor) void window.ade.invoke('project:switch', editor.id).catch(() => undefined)
-    },
-    notify: (tone, message) => toast({ tone, message }),
-    messages: {
-      confirmDone: () => t('round.confirmDone'),
-      nothingToConfirm: () => t('round.nothingToConfirm')
-    }
-  })
-
   const recordingRef = useRef(recording)
   recordingRef.current = recording
+  /*
+   * ビジュアルレビュー（Agent が作る前に書いた計画。.ferret/visual-review/）。新しい計画が出たら知らせ、
+   * ブラウザ・指摘を見ているだけなら（エディタで打っている・録画中でなければ）タブを開く
+   */
+  const visualReviews = useVisualReviews(workspace.folderPath, (fresh) => {
+    toast({ tone: 'info', message: t('visualReview.newPlan', { title: fresh[0]!.title }) })
+    const active = document.activeElement
+    const typing = !!active && active !== document.body && !active.classList.contains('xterm-helper-textarea')
+      && (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || (active as HTMLElement).isContentEditable)
+    setCenterTab((tab) => (modeRef.current === 'editor' && shouldAutoOpenVisualReview({ tab, recording: recordingRef.current, typing }) ? 'visual-review' : tab))
+  })
   /** 全体の Agent が動いているか（右下のボタンの印） */
   const allActivity = useProjectActivity()
   const orchestraBusy = !!workspace.projectId && allActivity[workspace.projectId] === 'working'
@@ -838,100 +816,16 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     else setCenterTab((tab) => (tab === 'dashboard' ? 'browser' : tab))
   }, [isOrchestra, workspace.projectId])
 
-  /** フィードバックの画面でそのページを開く（録画中なら止めずに移る。1回のフィードバックで全部のプロダクトを確かめる） */
-  const openForFeedback = useCallback((url: string) => {
-    setCenterTab('browser')
-    changeMode('feedback')
-    void window.ade.invoke('browser:navigate', url).catch(() => undefined)
-  }, [changeMode])
-  /** 確認リストを順に開く（human.md）。1件目を開いて録画を始め、「次へ」で次のページへ。最後で録画を止める */
-  const [checklistTour, setChecklistTour] = useState<{ urls: string[]; index: number } | null>(null)
-  const startChecklistTour = useCallback((urls: string[]) => {
-    if (!urls.length) return
-    setChecklistTour({ urls, index: 0 })
-    openForFeedback(urls[0]!)
-    void run(async () => {
-      for (let i = 0; i < 50; i++) {
-        const state = await window.ade.invoke('browser:state')
-        if (state.url && state.url !== 'about:blank' && !state.loading) break
-        await delay(100)
-      }
-      if (!recordingRef.current) toggleRecordingRef.current()
-    })
-  }, [openForFeedback, run])
-  const stopAfterStart = useRef(false)
-  useEffect(() => {
-    if (recordBusy || !stopAfterStart.current) return
-    stopAfterStart.current = false
-    if (recording) toggleRecordingRef.current()
-  }, [recordBusy, recording])
-  const tourRef = useRef(checklistTour)
-  tourRef.current = checklistTour
-  const moveTour = useCallback((delta: 1 | -1) => {
-    // 録画の停止とページの移動は state の更新関数の外で行う（更新関数は2回呼ばれることがある）
-    const tour = tourRef.current
-    if (!tour) return
-    const index = tour.index + delta
-    if (index < 0) return
-    if (index >= tour.urls.length) {
-      // 最後のページのあと：録画を止める（止めると全体の Agent に渡せる指摘の一覧になる）。
-      // 録画の開始がまだ終わっていなければ、終わってから止める
-      setChecklistTour(null)
-      if (recordLock.current) stopAfterStart.current = true
-      else if (recordingRef.current) toggleRecordingRef.current()
-      return
-    }
-    setChecklistTour({ ...tour, index })
-    void window.ade.invoke('browser:navigate', tour.urls[index]!).catch(() => undefined)
-  }, [])
-  /** 全体のフィードバックの帯に出すページ：確認リスト（human.md）と、対象のプロジェクトの確認先 */
-  const [dockChecklist, setDockChecklist] = useState<ChecklistItem[]>([])
-  useEffect(() => {
-    if (!isOrchestra || mode !== 'feedback') return
-    let cancelled = false
-    void window.ade.invoke('orchestra:checklist').then((items) => { if (!cancelled) setDockChecklist(items) }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [isOrchestra, mode])
   const dockGroups = isOrchestra
-    ? groupDockTargets(orchestraMembers(projects.projects, workspace.projectId ?? ''), pageItems(dockChecklist))
+    ? groupDockTargets(orchestraMembers(projects.projects, workspace.projectId ?? ''))
     : []
-  const dockGroupsRef = useRef(dockGroups)
-  dockGroupsRef.current = dockGroups
   /** 帯で開いているプロダクト（文字のフィードバックの宛先） */
   const dockProduct = (() => {
     const id = currentDockGroup(dockGroups, browserState.url)
     const group = dockGroups.find((g) => g.id === id)
     return group ? { name: group.label, url: browserState.url } : null
   })()
-  const roundBar = productRound.round && <RoundBar round={productRound.round} projects={projects.projects}
-    onNext={productRound.skip} onStop={productRound.stop} />
 
-  /**
-   * 全プロダクトを1回の録画でフィードバックする。全体（すべてのプロダクト）のフィードバックの画面を開き、
-   * 最初のプロダクトのページで録画を始める。録画は止めずに帯のタブでプロダクトを切り替えると、その間の指摘はそのプロダクトのものになる
-   * （送るときに main がプロダクトごとに分けて、それぞれの Agent へ並行して渡す。@shared/productSplit）
-   */
-  const recordAll = useCallback(() => void run(async () => {
-    if (recordingRef.current) { setCenterTab('browser'); changeMode('feedback'); return }
-    const editor = currentOrchestra(projects.projects, workspaceProjectRef.current)
-    if (editor && workspaceProjectRef.current !== editor.id) {
-      await window.ade.invoke('project:switch', editor.id)
-      for (let i = 0; i < 40 && workspaceProjectRef.current !== editor.id; i++) await delay(50)
-    }
-    setCenterTab('browser')
-    changeMode('feedback')
-    const state = await window.ade.invoke('browser:state')
-    const first = dockGroupsRef.current[0]?.items[0]?.url
-    if ((!state.url || state.url === 'about:blank') && first) await window.ade.invoke('browser:navigate', first).catch(() => undefined)
-    for (let i = 0; i < 50; i++) {
-      const now = await window.ade.invoke('browser:state')
-      if (now.url && now.url !== 'about:blank' && !now.loading) break
-      await delay(100)
-    }
-    await new Promise((done) => requestAnimationFrame(() => done(null)))
-    if (newReviewNeedsPage(emptyReasonRef.current, captureTargetRef.current.kind)) return
-    if (!recordingRef.current) toggleRecordingRef.current()
-  }), [run, projects.projects, changeMode])
 
   /** 録画の対象を選んで、次回のために覚える */
   const chooseTarget = (target: CaptureTarget) => {
@@ -1188,6 +1082,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
         case 'toggleFooter':
           setLayout((prev) => ({ ...prev, footer: { ...prev.footer, visible: !prev.footer.visible } }))
           break
+        case 'toggleTerminal':
+          setTerminalPeek((v) => !v)
+          break
         case 'toggleSettings':
           // ⌘, 開いていて表示中なら閉じ、それ以外は開いて前に出す
           if (settingsOpen && centerTab === 'settings') closeSettings()
@@ -1213,7 +1110,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
     return () => window.removeEventListener('hashchange', sync)
   }, [])
 
-  useEffect(() => installTestHooks(), [])
   // クラッシュのタグ：どの画面を見ていたか（src/renderer/lib/telemetry.ts）
   useEffect(() => setUiTab(centerTab), [centerTab])
 
@@ -1290,7 +1186,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           projects={projects}
           mode={mode}
           recording={recording}
-          onChangeMode={changeMode}
+          onChangeMode={pressMode}
           onProjectMenuChange={setProjectMenuOpen}
           onToggleRecording={toggleRecording}
           onOpenSettings={() => openSettings()}
@@ -1299,7 +1195,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           noteMode={noteMode}
           noteDisabled={!noteStartable}
           onToggleNote={toggleNote}
-          round={mode === 'editor' && roundBar}
         />
 
         {/* 列と行は配置（layout）から作る。隠したパネルも大きさ 0 で残す（src/shared/layout.ts） */}
@@ -1339,6 +1234,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 active={centerTab}
                 pageTitle={browserState.title}
                 findingCount={review?.document.items.length ?? findings.length}
+                visualReviewCount={visualReviews.pending}
                 onChange={setCenterTab}
                 files={files.files}
                 onCloseFile={files.requestClose}
@@ -1354,12 +1250,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 <ErrorBoundary name="orchestra"><Suspense fallback={<div className="editor-area" />}>
                   <OrchestraDashboard
                     projects={projects.projects}
+                    orchestraId={workspace.projectId ?? ''}
                     onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)}
-                    onOpenUrl={openForFeedback}
-                    onReviewChecklist={startChecklistTour}
-                    onRecordAll={recordAll}
-                    onStartRound={() => void run(() => productRound.start())}
-                    onOpenFile={files.open}
                   />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'settings' && settingsOpen ? (
@@ -1388,12 +1280,15 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                   </Suspense>
                   </ErrorBoundary>
                 )
+              ) : centerTab === 'visual-review' ? (
+                <ErrorBoundary name="visual-review"><Suspense fallback={<div className="editor-area" />}>
+                  <VisualReview listing={visualReviews.listing} onChanged={visualReviews.reload} />
+                </Suspense></ErrorBoundary>
               ) : centerTab === 'browser' ? (
                 <ErrorBoundary name="browser">
                   <div className="browser-chrome" data-browser-chrome="">
-                  <BrowserTabs state={browserState} onNewTab={focusUrlField} />
-                  <BrowserToolbar
-                    state={browserState}
+                  <LiveBrowserTabs onNewTab={focusUrlField} />
+                  <LiveBrowserToolbar
                     urlInputRef={urlInputRef}
                     project={projects.projects.find((p) => p.id === workspace.projectId) ?? null}
                     onOverlayChange={setUrlDialogOpen}
@@ -1462,7 +1357,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
               dirtyPaths={files.dirtyPaths}
               onOpen={files.open}
               onOpenSource={files.openSource}
-              onQuickOpen={() => setQuickOpenOpen(true)}
+              onQuickOpen={openQuickOpen}
               onRenamed={files.followRename}
               onDeleted={files.closeDeleted}
             />}
@@ -1490,12 +1385,12 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onManageAccounts={manageAccounts}
         /></ErrorBoundary>}
       </div>
-      {publishRequest && <ErrorBoundary name="publish"><PublishPanel request={publishRequest} /></ErrorBoundary>}
 
-      {/* 全体では、ターミナルの欄を閉じて右下の小さなボタンにする（フィードバックの対象を大きく見せる。ChatGPT の画面のように） */}
-      {mode === 'editor' && <button type="button" className={`orchestra-peek${orchestraBusy ? ' is-busy' : ''}`} onClick={() => setTerminalPeek((v) => !v)}
-        aria-pressed={terminalPeek} title={t(terminalPeek ? 'orchestra.hideTerminal' : 'orchestra.showTerminal')} data-testid="orchestra-terminal-toggle">
-        <span className="orchestra-peek__dot" aria-hidden="true" />{t(terminalPeek ? 'orchestra.hideTerminal' : 'orchestra.showTerminal')}
+      {/* 全体では、ターミナルの欄を閉じて右下の小さなボタンにする（フィードバックの対象を大きく見せる。ChatGPT の画面のように）。
+          開いたあとの「ターミナルを閉じる」は右のファイルの欄と重なるので出さない（2026-11-13 削除） */}
+      {mode === 'editor' && !terminalPeek && <button type="button" className={`orchestra-peek${orchestraBusy ? ' is-busy' : ''}`} onClick={() => setTerminalPeek(true)}
+        title={t('orchestra.showTerminal')} data-testid="orchestra-terminal-toggle">
+        <span className="orchestra-peek__dot" aria-hidden="true" />{t('orchestra.showTerminal')}
       </button>}
       {mode === 'feedback' && <div className="orchestra-peeks">
         <button type="button" className={`orchestra-peek orchestra-peek--inline${orchestraBusy ? ' is-busy' : ''}`} aria-pressed={orchestraSideOpen && shownSideTab === 'terminal'}
@@ -1507,13 +1402,10 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           {t('orchestra.showTargets')}
         </button>
       </div>}
-      <div className={`shell shell--feedback${productRound.round || (isOrchestra && mode === 'feedback') ? ' shell--round' : ''}`} hidden={mode !== 'feedback'}>
-        {/* 巡回の帯と、全体のフィードバックの帯（上の帯とブラウザの間の段に出す。ブラウザの枠は測り直される） */}
-        {mode === 'feedback' && (roundBar || isOrchestra) && <div className="round-dock">
-          {roundBar}
-          {isOrchestra && <OrchestraDock groups={dockGroups} currentUrl={browserState.url} product={dockProduct} onOpen={(url) => void window.ade.invoke('browser:navigate', url).catch(() => undefined)}
-            tour={checklistTour ? { index: checklistTour.index, total: checklistTour.urls.length } : null}
-            onPrev={() => moveTour(-1)} onNext={() => moveTour(1)} onEndTour={() => setChecklistTour(null)} />}
+      <div className={`shell shell--feedback${isOrchestra && mode === 'feedback' ? ' shell--round' : ''}`} hidden={mode !== 'feedback'}>
+        {/* 全体のフィードバックの帯（上の帯とブラウザの間の段に出す。ブラウザの枠は測り直される） */}
+        {mode === 'feedback' && isOrchestra && <div className="round-dock">
+          <OrchestraDock groups={dockGroups} currentUrl={browserState.url} product={dockProduct} onOpen={(url) => void window.ade.invoke('browser:navigate', url).catch(() => undefined)} />
         </div>}
         <FeedbackToolbar
           state={browserState}
@@ -1538,7 +1430,6 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onToggleNote={toggleNote}
           onBackToEditor={() => changeMode('editor')}
           target={captureTarget}
-          onPickTarget={() => setTargetPickerOpen(true)}
           tracks={tracks}
           onSwitchTrack={(id) => void run(async () => { await window.ade.invoke('recording:switchTrack', id) })}
           onAddTrack={() => setAddTrackOpen(true)}
@@ -1560,8 +1451,8 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           {/* 内蔵ブラウザのタブと URL 欄。メールのコードを別のタブで見て戻る、などをフィードバックモードのまま行う */}
           {showsBrowserNav(captureTarget) && (
             <div className="fb-tabbar" data-browser-chrome="" data-testid="feedback-tabbar">
-              <BrowserTabs state={browserState} onNewTab={focusUrlField} testId="feedback-tabs" />
-              <UrlField state={browserState} inputRef={feedbackUrlRef} testId="feedback-url-input" />
+              <LiveBrowserTabs onNewTab={focusUrlField} testId="feedback-tabs" />
+              <LiveUrlField inputRef={feedbackUrlRef} testId="feedback-url-input" />
             </div>
           )}
           <BrowserSlot
@@ -1621,11 +1512,13 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
             projectId={workspace.projectId ?? null}
             cwd={workspace.folderPath}
             startupAgents={agents.startupAgents}
+            orchestra={isOrchestra}
             notify={agents.notify}
             restore={agents.restoreTerminals}
             sleepIdle={agents.sleepIdleAgents}
             onOpenFile={files.open}
-            onOpenAgentSettings={() => openSettings('agents')}
+            onOpenAgentSettings={openAgentSettings}
+            onHide={mode === 'editor' ? hideTerminalPane : undefined}
           />
           </ErrorBoundary>
         ) : (
@@ -1650,7 +1543,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
         value={captureTarget}
         pageTitle={browserState.title || browserState.url}
         onChoose={(target) => { chooseTarget(target); setTargetPickerOpen(false) }}
-        onStart={(target) => { chooseTarget(target); setTargetPickerOpen(false); toggleRecording() }}
+        onStart={(target) => { chooseTarget(target); setTargetPickerOpen(false); recordWith('target') }}
         onClose={() => setTargetPickerOpen(false)}
       />}
       {onboardingOpen && <Suspense fallback={null}><OnboardingFlow

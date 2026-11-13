@@ -1,14 +1,15 @@
 import { foregroundAgentOf, isReopenTerminalKey } from '../terminal/terminalKeys'
+import { startupLaunches } from '../terminal/startupLaunch'
 import { hasExternalFiles, readDrop } from '../lib/externalDrop'
 import { shellPathsText, shellQuotingFor, treePathsForTerminal } from '@shared/externalDrop'
 import { hasTreePaths, treeDragPaths } from '../lib/treeDrag'
 import { droppedProjectPath, hasProjectDrag } from '../lib/projectDrag'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Columns2, Plus, Rows2, SquareTerminal, X } from 'lucide-react'
+import { Columns2, EyeOff, Plus, Rows2, SquareTerminal, X } from 'lucide-react'
 import { TUI_AGENT_LABEL, type AccountLoginRequest, type AgentOption, type Project, type TuiAgent } from '@shared/types'
 import { SHORTCUTS, formatShortcut } from '../lib/shortcut'
-import { Button, EmptyState, IconTile } from '../ui'
+import { Button, EmptyState, IconButton, IconTile } from '../ui'
 import { acquireTerminal, getTerminal, holdPtyResize, releaseTerminal } from '../terminal/terminalClient'
 import { hasBusyAgent, publishAgentActivity } from '../terminal/agentActivity'
 import { AttentionThrottle, INITIAL_TRACK, advancePaneState, attentionEvents, type AttentionPane, type PaneTrack } from '../terminal/agentAttention'
@@ -18,7 +19,6 @@ import { SLEEP_CHECK_MS, panesToSleep, trackHidden } from '../terminal/sleepPoli
 import { panesDueForPoll } from '../terminal/pollSchedule'
 import { onTerminalCommandRequest } from '../lib/terminalCommand'
 import { onAgentLaunchRequest } from '../lib/agentLaunchRequest'
-import type { TerminalPreset } from '@shared/codexAudit'
 import {
   ACTIVE_PANE_OPACITY,
   DIVIDER_HIT_PADDING_PX,
@@ -127,10 +127,6 @@ interface Pane {
   autoStart?: boolean
   /** 上限での自動切り替えで開くタブ（main の failover:launch の token） */
   failoverToken?: string | null
-  /** Agent どうしの依頼で開くタブ（main の agentMail:launch の token） */
-  agentMailToken?: string
-  /** 決まった起動（@shared/codexAudit）。開くときに1回だけ使う */
-  preset?: TerminalPreset
   /** 起動したアカウント（Claude Code / Codex。main の返事）。null はシステムの既定。戻したタブではこのアカウントで開く */
   accountId?: string | null
   /** 戻したタブ: 前の会話を続けて起動する（@shared/terminalRestore の panesToResume） */
@@ -214,8 +210,10 @@ function dropLabel(target: TerminalDropTarget): TranslationKey {
 }
 /** Resource Manager（フッター）から、そのターミナルのタブへ移るよう頼むイベント。detail は { id: ptyId } */
 const FOCUS_TERMINAL_EVENT = 'ade:focus-terminal'
-/** 通知が入のとき、裏で状態を読む間隔（秒）。表では 1 秒ごと */
-const BACKGROUND_POLL_EVERY = 5
+/** Agent の状態を読む間隔。1 秒ごとだと、見ていても変わらない間に main へ問い合わせ続けていた */
+const AGENT_POLL_MS = 2500
+/** 通知が入のとき、裏で状態を読むのは AGENT_POLL_MS の何回に1回か（約5秒ごと） */
+const BACKGROUND_POLL_EVERY = 2
 /** 分割元のカレントを調べるのを待つ上限。macOS の lsof は初回だけ遅いことがある（Orca と同じ値） */
 const SPLIT_CWD_TIMEOUT_MS = 1000
 /** 区切り線の掴める幅（見える線 ＋ 両側の余白） */
@@ -232,15 +230,13 @@ interface PaneSpec {
   title?: string | null
   autoStart?: boolean
   failoverToken?: string | null
-  agentMailToken?: string | null
-  preset?: TerminalPreset | null
 }
 
-function newPane({ launch = null, cwd, accountLogin = null, command = null, title = null, autoStart = false, failoverToken = null, agentMailToken = null, preset = null }: PaneSpec): Pane {
+function newPane({ launch = null, cwd, accountLogin = null, command = null, title = null, autoStart = false, failoverToken = null }: PaneSpec): Pane {
   const label =
     title ||
     (accountLogin ? tNow('terminal.loginTitle', { agent: TUI_AGENT_LABEL[accountLogin.agent] }) : launch ? agentLabel(launch) : tNow('terminal.shell'))
-  return { key: `pane${++paneSeq}`, title: label, state: 'unknown', launch, cwd, accountLogin, command, customTitle: title, autoStart, failoverToken, ...(agentMailToken ? { agentMailToken } : {}), ...(preset ? { preset } : {}) }
+  return { key: `pane${++paneSeq}`, title: label, state: 'unknown', launch, cwd, accountLogin, command, customTitle: title, autoStart, failoverToken }
 }
 
 /** 読み込み直しの前に書いた記録（同じウインドウの読み込み直しでは残る sessionStorage）。読めなければ null */
@@ -295,7 +291,7 @@ function splitDirectionForKey(event: React.KeyboardEvent): PaneSplitDirection | 
  */
 export const CLOSE_REQUEST_EVENT = 'ade:close-request'
 
-export function TerminalPane({
+function TerminalPaneImpl({
   layoutKey,
   onReady,
   commandRef,
@@ -303,11 +299,13 @@ export function TerminalPane({
   projectId = null,
   cwd = null,
   startupAgents = [],
+  orchestra = false,
   onOpenAgentSettings,
   onOpenFile,
   notify = false,
   restore = true,
-  sleepIdle = true
+  sleepIdle = true,
+  onHide
 }: {
   /** 分割幅など、レイアウトが変わったことを知らせる値 */
   layoutKey: string
@@ -322,6 +320,8 @@ export function TerminalPane({
   cwd?: string | null
   /** 初めて開いたプロジェクトで自動で開くAgent（順序どおり）。空なら素のシェル1つ */
   startupAgents?: TuiAgent[]
+  /** 表示中のプロジェクトがオーケストラ。初めて開いても Agent もシェルも自動で開かない（terminal/startupLaunch.ts） */
+  orchestra?: boolean
   /** 「＋」メニューの「Agent設定…」。渡されたときだけ出す */
   onOpenAgentSettings?: () => void
   /** 「＋」の検索でファイルを選んだとき（エディタで開く）。渡されたときだけファイルを検索する */
@@ -330,6 +330,8 @@ export function TerminalPane({
   notify?: boolean
   /** タブと画面の文字を覚えて、終了・閉じたあとに戻す（設定の agents.restoreTerminals） */
   restore?: boolean
+  /** ターミナルの欄を隠す（見出しの右端のボタン。渡されたときだけ出す） */
+  onHide?: () => void
   /** 裏のプロジェクトで入力を待ったままの Agent を休ませてメモリを空ける（設定の agents.sleepIdleAgents） */
   sleepIdle?: boolean
 }) {
@@ -557,7 +559,7 @@ export function TerminalPane({
     []
   )
   // 「Agentへ送信」でどこにも Agent が居なかったとき、既定の Agent のタブを開く（ReviewFindings）
-  useEffect(() => onAgentLaunchRequest((agent, preset) => addTabRef.current(agent, preset ? { preset } : {})), [])
+  useEffect(() => onAgentLaunchRequest((agent) => addTabRef.current(agent, {})), [])
 
   // メニューの「右に分割／下に分割」をクリックしたとき（キーは下の onKeyDownCapture が拾う）
   const splitPaneRef = useRef<(direction: PaneSplitDirection) => void>(() => undefined)
@@ -618,21 +620,7 @@ export function TerminalPane({
       }
       if (notice.toTerminalId) window.dispatchEvent(new CustomEvent(FOCUS_TERMINAL_EVENT, { detail: { id: notice.toTerminalId } }))
     })
-    // Agent どうしの依頼: 宛先の Agent が居ないので、送り手のペインを上下に分けて開く（送り手も相手も見える）。
-    // 送り手のペインが見つからなければ（別のプロジェクトのタブなど）新しいタブで開く。フォーカスは送り手のまま
-    const offMail = window.ade.on('agentMail:launch', (request) => {
-      const from = paneOf(request.fromTerminalId)
-      const pane = newPane({ launch: request.agent, cwd: request.cwd, agentMailToken: request.token })
-      setPanes((prev) => ({ ...prev, [pane.key]: pane }))
-      if (from) {
-        setTabs((prev) => prev.map((tab) => (tab.key === from.tab.key && hasLeaf(tab.layout, from.paneKey)
-          ? { ...tab, layout: splitLeaf(tab.layout, from.paneKey, 'horizontal', pane.key) }
-          : tab)))
-        return
-      }
-      setTabs((prev) => [...prev, { key: `tab${++tabSeq}`, projectId, layout: leaf(pane.key), activePane: pane.key }])
-    })
-    return () => { offLaunch(); offNotice(); offMail() }
+    return () => { offLaunch(); offNotice() }
   }, [projectId])
 
   // 「＋」の検索に出す登録URL（全プロジェクト分）
@@ -696,11 +684,12 @@ export function TerminalPane({
     if (visibleTabs.length > 0) return
     // 無効にしたエージェントは開かない（一覧がまだ届いていなければそのまま）
     const disabled = new Set(agentOptionsRef.current.filter((o) => !o.enabled).map((o) => o.id))
-    const enabledStartup = startupAgents.filter((agent) => !disabled.has(agent))
     // プロジェクトを開いていないとき（ホームなど）はエージェントを自動で起動しない。素のシェルを1つだけ開く。
     // 登録したプロジェクトでだけ起動する。自動起動は普通の（権限確認のある）起動で、フォルダの信頼は
     // 利用者が設定で許したプロジェクトにだけ main が書く（security-3 [1]。登録＝信頼とはみなさない）
-    const launches: Array<TuiAgent | null> = projectId && enabledStartup.length > 0 ? enabledStartup : [null]
+    // オーケストラは何も開かない（startupLaunch.ts）
+    const launches = startupLaunches({ projectId, orchestra, startupAgents, disabled })
+    if (launches.length === 0) return
     const created = launches.map((launch) => newPane({ launch, cwd, autoStart: launch !== null }))
     const createdTabs: Tab[] = created.map((pane) => ({
       key: `tab${++tabSeq}`,
@@ -935,8 +924,6 @@ export function TerminalPane({
         title: pane.customTitle ?? null,
         autoStart: pane.autoStart === true,
         failoverToken: pane.failoverToken ?? null,
-        ...(pane.agentMailToken ? { agentMailToken: pane.agentMailToken } : {}),
-        ...(pane.preset ? { preset: pane.preset } : {}),
         // 戻したタブ: 前の会話を続け、前と同じアカウントで開く
         ...(pane.resume ? { resume: true } : {}),
         ...(pane.accountId !== undefined ? { accountId: pane.accountId } : {})
@@ -1032,8 +1019,8 @@ export function TerminalPane({
     const update = async () => {
       tick += 1
       // 最小化・裏に隠れている間は問い合わせない。Windows ではそのたびに PowerShell でプロセス一覧を取るので、
-      // ほかのアプリを使っている間（フォーカスが無い間）も止める（Orca #10686 #12288。戻れば1秒以内に取り直す）。
-      // 通知が入なら、終わった・確認待ちを知らせるため、裏でも BACKGROUND_POLL_EVERY 秒ごとに読む
+      // ほかのアプリを使っている間（フォーカスが無い間）も止める（Orca #10686 #12288。戻れば AGENT_POLL_MS 以内に取り直す）。
+      // 通知が入なら、終わった・確認待ちを知らせるため、裏でも BACKGROUND_POLL_EVERY 回に1回（約5秒ごと）読む
       const background = document.visibilityState === 'hidden' || (window.ade.platform === 'win32' && !document.hasFocus())
       if (background && (!notifyRef.current || tick % BACKGROUND_POLL_EVERY !== 0)) return
       // 表示中のプロジェクトのペインは毎回、裏のプロジェクトのペインは間を空けて調べる（terminal/pollSchedule.ts）。
@@ -1106,7 +1093,7 @@ export function TerminalPane({
         }).catch((err: unknown) => reportHandled(err, { area: 'terminal', op: 'agent notification' }))
       }
     }
-    const timer = setInterval(() => void update(), 1000)
+    const timer = setInterval(() => void update(), AGENT_POLL_MS)
     return () => { stopped = true; clearInterval(timer) }
   }, [paneKeys])
 
@@ -1610,6 +1597,9 @@ export function TerminalPane({
             onNewTerminal={() => splitPane('horizontal')}
             onLaunchAgent={(agent) => splitPane('horizontal', agent)}
           />
+          {/* 欄を隠す（ほかの欄に重ならないよう、ターミナルの見出しの中に置く） */}
+          {onHide && <IconButton size="sm" label={t('terminal.hidePanel')} title={`${t('terminal.hidePanel')} (${SHORTCUTS.toggleTerminal()})`}
+            icon={<EyeOff size={14} strokeWidth={1.75} />} onClick={onHide} data-testid="terminal-hide" />}
         </div>
       </div>
 
@@ -1794,3 +1784,6 @@ function PaneContextMenu({ at, onClose, onSplit, onClosePane }: {
     document.body
   )
 }
+
+/** 親（App）が描き直しても、渡す値が同じなら描き直さない（内蔵ブラウザの状態などの変化で重い部品を描き直さない） */
+export const TerminalPane = memo(TerminalPaneImpl)

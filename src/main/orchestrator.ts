@@ -24,6 +24,7 @@ import {
   type OrchestratorChild
 } from '@shared/orchestrator'
 import { basename } from 'node:path'
+import { globalAgentsTemplate, globalClaudeTemplate, globalReadmeTemplate, type GlobalGuide } from '@shared/globalOrchestra'
 
 /**
  * オーケストレーターのフォルダに、Agent が使うものを書く・消す（@shared/orchestrator）。
@@ -176,9 +177,9 @@ const syncQueues = new Map<string, Promise<unknown>>()
  * 同じフォルダへの呼び出しは1本の列に並べる。プロジェクトを消す・開くと「すべてのプロダクト」の合わせが同時に2回走り、
  * settings.local.json の読み書きが重なって一時ファイルの名前もぶつかっていた（Sentry FERRET-1T: EEXIST）
  */
-export function syncOrchestrator(folder: string, registered: Registered, enabled = true, members: readonly string[] = [], lang: GuideLanguage = 'en', rules?: OrchestraRules, name?: string): Promise<OrchestratorSync> {
+export function syncOrchestrator(folder: string, registered: Registered, enabled = true, members: readonly string[] = [], lang: GuideLanguage = 'en', rules?: OrchestraRules, name?: string, global?: GlobalGuide): Promise<OrchestratorSync> {
   const key = resolve(folder)
-  const run = () => syncOrchestratorNow(folder, registered, enabled, members, lang, rules, name)
+  const run = () => syncOrchestratorNow(folder, registered, enabled, members, lang, rules, name, global)
   const next = (syncQueues.get(key) ?? Promise.resolve()).then(run, run)
   // 失敗は呼び出し側へ返す。列には順番待ちのためだけに残し、終わったら外す（想定内）
   const tail = next.catch(() => undefined)
@@ -187,7 +188,7 @@ export function syncOrchestrator(folder: string, registered: Registered, enabled
   return next
 }
 
-async function syncOrchestratorNow(folder: string, registered: Registered, enabled: boolean, members: readonly string[], lang: GuideLanguage, rules?: OrchestraRules, name?: string): Promise<OrchestratorSync> {
+async function syncOrchestratorNow(folder: string, registered: Registered, enabled: boolean, members: readonly string[], lang: GuideLanguage, rules?: OrchestraRules, name?: string, global?: GlobalGuide): Promise<OrchestratorSync> {
   const claude = await claudeDir(folder)
   const managed = await readManaged(folder)
   const links = await syncMemberLinks(folder, registered, enabled ? members : [], managed.links)
@@ -200,10 +201,11 @@ async function syncOrchestratorNow(folder: string, registered: Registered, enabl
   await syncAdditionalDirectories(claude, outsideFolders(children), links)
   // CLAUDE.md: Agent への進め方（Ferret の欄）＋人が書く共通・プロダクトごとのルール。AGENTS.md は CLAUDE.md を読むよう伝える。
   // README.md: 人向けの使い方とプロダクトの一覧。人が書く部分は最初に作るときの雛形だけ
-  const guide = renderOrchestratorGuide(children, rules)
-  await syncGuide(folder, 'CLAUDE.md', enabled ? guide : null, rulesTemplate(children, lang))
-  await syncGuide(folder, 'AGENTS.md', enabled ? guide : null, agentsTemplate(lang))
-  await syncGuide(folder, 'README.md', enabled ? renderReadmeBlock(children, lang) : null, readmeTemplate(basename(folder), lang), 'before')
+  // グローバルのオーケストラは、全部への適用の仕方を欄の先頭に足し、人が書く部分の雛形も rules.md を指すものにする（@shared/globalOrchestra）
+  const guide = renderOrchestratorGuide(children, rules, global)
+  await syncGuide(folder, 'CLAUDE.md', enabled ? guide : null, global ? globalClaudeTemplate(lang, global.rulesPath) : rulesTemplate(children, lang))
+  await syncGuide(folder, 'AGENTS.md', enabled ? guide : null, global ? globalAgentsTemplate(lang) : agentsTemplate(lang))
+  await syncGuide(folder, 'README.md', enabled ? renderReadmeBlock(children, lang) : null, global ? globalReadmeTemplate(name ?? basename(folder), lang) : readmeTemplate(basename(folder), lang), 'before')
   // フィードバックから学ぶプレイブック（feedback/playbook.md）。無いときだけ雛形を作り、あるものは上書きしない。
   // 作れなくても（リンク・書けないフォルダ）ほかの同期は済んでいるので続ける
   if (enabled) await (await import('./feedbackLog')).seedPlaybook(folder, name ?? basename(folder)).catch(() => false)

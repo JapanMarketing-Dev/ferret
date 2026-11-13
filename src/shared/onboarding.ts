@@ -59,7 +59,7 @@ export function shouldShowOnboarding(state: OnboardingState | undefined): boolea
 /**
  * 設定ファイルを読んだときに1度だけ通す引き継ぎ。
  * オンボーディングを足す前から使っている人（プロジェクトを登録済み）には出さず、済んだ扱いにする。
- * skip は E2E などで出したくないとき。onboarding が既にあれば何もしない（途中の人はそのまま再開する）。
+ * skip は出したくないとき。onboarding が既にあれば何もしない（途中の人はそのまま再開する）。
  */
 export function migrateOnboarding<T extends { onboarding?: OnboardingState; projects: readonly unknown[] }>(
   settings: T,

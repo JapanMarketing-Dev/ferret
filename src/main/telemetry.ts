@@ -2,7 +2,7 @@ import { app, BrowserWindow, crashReporter, dialog, powerMonitor, session, type 
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { availableParallelism, homedir, loadavg } from 'node:os'
 import { join } from 'node:path'
 import { performance, PerformanceObserver } from 'node:perf_hooks'
 import * as Sentry from '@sentry/electron/main'
@@ -52,13 +52,13 @@ import {
 import { parseMinidumpCrash } from '@shared/minidump'
 import { flow, noteSlowOp, recentSlowOps, reportHandled, reportPerf, setReporter } from '@shared/report'
 import { version } from '../../package.json'
-import { configDir, currentSettings } from './settings'
+import { configDir, currentSettings, onSettingsChanged } from './settings'
 import { attachDebugIds, remapDevFrames } from './telemetrySourceMaps'
 
 /**
  * クラッシュレポート（Sentry）。設定の「クラッシュレポートを送る」と src/shared/telemetry.ts を参照。
  *
- * - 配布版（production）と dev 起動（development）の両方で送る。E2E・単体テストでは初期化しない。
+ * - 配布版（production）と dev 起動（development）の両方で送る。単体テストでは初期化しない。
  *   配布版は JS の例外を半分・1回の起動で10件まで、dev は全部・50件まで。同じエラーはどちらも1度だけ。
  * - 起動時に設定が OFF なら初期化しない。起動後に OFF にしたら beforeSend で全部捨てる
  *   （ON に戻したときは次の起動から送る。minidump の受け口は ready の前にしか入れられないため）。
@@ -203,8 +203,14 @@ const anomalyGate = createAnomalyGate()
 
 /**
  * main のイベントループが長く止まったら warning を送る（種類ごとに10分に1度）。
- * 250ms ごとのタイマーの遅れで測る。スタックは取れない（ネイティブの計測は入れていない）。
+ * EVENT_LOOP_WATCH_MS ごとのタイマーの遅れで測る。スタックは取れない（ネイティブの計測は入れていない）。
  */
+/**
+ * 止まりを測るタイマーの間隔。以前の 250ms は main を毎秒4回起こしていた。
+ * 遅れ（lag）は止まりの長さの下限なので、送るのはしきい値を確かに超えた止まりだけ（しきい値の意味は変わらない）。
+ * 間隔のぶん短く測ることがある（1〜2秒の止まりの一部は送られない）
+ */
+export const EVENT_LOOP_WATCH_MS = 1000
 /** 処理中の IPC（止まったときの手がかり）。index.ts の IPC の登録が trackIpc で包む */
 const inflightIpc = createInflightTracker()
 
@@ -229,7 +235,7 @@ export function noteQuitRequested(): void {
 
 /** initCrashReporting から呼ぶ。テスト（telemetry-quit-block.test.ts）からも直接呼ぶ */
 export function watchEventLoop(threshold: number): void {
-  const INTERVAL = 250
+  const INTERVAL = EVENT_LOOP_WATCH_MS
   // 単調な時計で測る（Date.now は時計合わせ・スリープで飛ぶ）
   let expected = performance.now() + INTERVAL
   // 送らない遅れの見分け（shouldReportEventLoopBlock）：終了の途中・裏にいる間（App Nap）・スリープから戻った直後
@@ -242,6 +248,11 @@ export function watchEventLoop(threshold: number): void {
   let lockedAt: number | null = null
   // OS が掛けている CPU の速度の上限（止まりの手がかり。eventLoopBlockContext の cpuSpeedLimit）
   let cpuSpeedLimit: number | null = null
+  // macOS の熱の状態（serious・critical の間は OS が CPU を絞る。isMachineOverloaded）
+  let thermalState: string | null = null
+  // 1分の load average ÷ CPU の数（Windows は常に 0 なので null 扱い）
+  const cpuCount = Math.max(1, availableParallelism())
+  const loadPerCpu = (): number | null => process.platform === 'win32' ? null : loadavg()[0] / cpuCount
   const isActive = (): boolean => app.isReady() && BrowserWindow.getFocusedWindow() !== null
   let activeAtLastTick = false
   app.on('will-quit', () => { quitting = true })
@@ -253,6 +264,7 @@ export function watchEventLoop(threshold: number): void {
     powerMonitor.on('suspend', () => { resumedAt = null; suspendedAt = performance.now() })
     powerMonitor.on('lock-screen', () => { lockedAt = performance.now() })
     powerMonitor.on('speed-limit-change', (details: { limit?: unknown }) => { cpuSpeedLimit = typeof details?.limit === 'number' ? details.limit : null })
+    powerMonitor.on('thermal-state-change', (details: { state?: unknown }) => { thermalState = typeof details?.state === 'string' ? details.state : null })
   })
   // 補助技術の切り替え（FERRET-M では 25 秒ごとに来ていた）。パンくずには残さないので、最後の時刻だけ覚える
   let axChangedAt: number | null = null
@@ -278,13 +290,13 @@ export function watchEventLoop(threshold: number): void {
     const report = shouldReportEventLoopBlock({
       lagMs: lag, thresholdMs: threshold, quitting, appActive,
       msSinceQuitRequest: quitRequestedAt === null ? null : now - quitRequestedAt, msSinceResume: resumedAt === null ? null : now - resumedAt,
-      msSinceSuspend: suspendedAt === null ? null : now - suspendedAt, cpuSpeedLimit
+      msSinceSuspend: suspendedAt === null ? null : now - suspendedAt, cpuSpeedLimit, thermalState, loadPerCpu: loadPerCpu()
     })
     if (report && anomalyGate('event-loop')) {
       // 手がかり：まだ終わっていない IPC（長い順の上位3つ）、直前に終わった重い処理（同期の fs・ps・which・GC など）、メモリの量、補助技術
       const inflight = inflightIpc.snapshot()
       const memory = process.memoryUsage()
-      const ax = { axEnabled: app.accessibilitySupportEnabled, axChangedMsAgo: axChangedAt === null ? null : Date.now() - axChangedAt, cpuSpeedLimit }
+      const ax = { axEnabled: app.accessibilitySupportEnabled, axChangedMsAgo: axChangedAt === null ? null : Date.now() - axChangedAt, cpuSpeedLimit, thermalState, loadPerCpu: loadPerCpu() }
       // GC の記録は少し遅れて届くので、待ってから重い処理を集める。スリープ・ロックの知らせも止まりの後に届くので、待ってから見分ける
       setTimeout(() => {
         if (sleepNearBlock({ blockEndAt: now, lagMs: lag, sleepAt: [suspendedAt, lockedAt] })) return
@@ -350,8 +362,6 @@ function installProcessHooks(): void {
 export function initCrashReporting(): void {
   const dsn = resolveSentryDsn(process.env)
   const send = shouldSendCrashReports({
-    e2e: process.env.ADE_E2E === '1',
-    forced: sentryEnv(process.env, 'FORCE') === '1',
     unitTest: Boolean(process.env.VITEST),
     enabled: readCrashReportsSetting(),
     dsn
@@ -376,8 +386,9 @@ export function initCrashReporting(): void {
     onDisable: () => Sentry.endSession(),
     onEnable: () => { Sentry.startSession(); Sentry.captureSession() }
   })
-  // 何も送らないあいだも ON / OFF の切り替わりに気づけるよう、軽く見張る（セッションの始め直しのため）
-  setInterval(() => gate.sync(), 2000).unref?.()
+  // 何も送らないあいだも ON / OFF の切り替わりに気づけるよう、設定が変わったら確かめる（セッションの始め直しのため）。
+  // 以前は 2 秒ごとに見ていた。settings.json の外からの書き換えも、取り込んだときに同じ知らせが来る
+  onSettingsChanged(() => gate.sync())
   const limit = createEventLimiter(profile.maxEventsPerRun)
   // 握りつぶしていた失敗・性能の異常（warning）は別に数え、クラッシュの枠を食わない
   const limitWarnings = createEventLimiter(profile.maxWarningsPerRun)
@@ -400,9 +411,9 @@ export function initCrashReporting(): void {
   Sentry.init({
     dsn,
     release: packaged ? sentryRelease(version) : sentryRelease(version, { gitHash: devGitHash() }),
-    // 確認用の起動（FERRET_SENTRY_FORCE・ADE_E2E）と -verify の版は verification（production のアラートと
+    // 確認用の起動（FERRET_SENTRY_FORCE）と -verify の版は verification（production のアラートと
     // クラッシュしなかった割合を汚さない）。src/shared/telemetry.ts の resolveEnvironment
-    environment: resolveEnvironment({ packaged, version, forced, e2e: process.env.ADE_E2E === '1' }),
+    environment: resolveEnvironment({ packaged, version, forced }),
     // OFF のあいだは transport で全部止める（gate）
     // OFF のあいだはためもしない（外側）。ネットへ送る直前にも送ってよい項目だけに絞る（内側。前の版がためた minidump も送らない）
     transport: (options) => gateTransport(Sentry.makeElectronOfflineTransport((o) => filterTransport(Sentry.makeElectronTransport(o)))(options), gate.allow),
@@ -437,11 +448,9 @@ export function initCrashReporting(): void {
     },
     // どのウインドウの renderer か（main のウインドウ・録画ウインドウ）
     getRendererName: (contents) => (contents.getURL().includes('/recorder/') ? 'recorder' : 'main-window'),
-    // main の捕まえていない例外：E2E（画面を出さない確認）ではダイアログを出さずに終わる。
-    // ふだんは Electron の既定と同じダイアログを出す（Sentry の既定の動きと同じ）
+    // main の捕まえていない例外：Electron の既定と同じダイアログを出す（Sentry の既定の動きと同じ）
     onFatalError: (error: Error) => {
-      if (process.env.ADE_E2E === '1') app.exit(1)
-      else dialog.showErrorBox('A JavaScript error occurred in the main process', `Uncaught Exception:\n${error.stack ?? error.message}`)
+      dialog.showErrorBox('A JavaScript error occurred in the main process', `Uncaught Exception:\n${error.stack ?? error.message}`)
     },
     beforeBreadcrumb: (crumb) => (gate.allow() && keepBreadcrumb(crumb) ? scrubBreadcrumb(crumb, scrubContext()) : null),
     beforeSend: async (event, hint) => {
@@ -493,7 +502,7 @@ export function initCrashReporting(): void {
 /**
  * 確認用の、アプリを止める・落とすもの（名前を書いたときだけ。src/shared/telemetry.ts の SENTRY_DESTRUCTIVE_TEST_KINDS）。
  *   hang         … 起動直後に main を 5.5 秒止める（起動が遅い・イベントループの停止の warning）
- *   uncaught     … main で捕まえていない例外（E2E ではダイアログを出さずに終わる）
+ *   uncaught     … main で捕まえていない例外
  *   crash-main   … main のネイティブのクラッシュ（minidump は次の起動で送られる）
  *   crash-renderer … main のウインドウの renderer を強制的に落とす
  */

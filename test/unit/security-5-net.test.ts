@@ -235,14 +235,11 @@ describe('security-5 [6] saved credentials are bound to approved origins in main
     expect(organize.indexOf('gateCredentials(')).toBeGreaterThan(0)
     expect(organize.indexOf('gateCredentials(')).toBeLessThan(organize.indexOf('providerKey('))
     expect(index).toMatch(/authorize: \(prefs, url, interactive\) => gateCredentials\(/)
-    // providerKey を呼ぶ所は、定義・判定の readKey・上の2つの「接続を確かめる」・整理・録画の文字起こし・発信の下書き・browser-use の中継だけ（増えたら gate を通すこと）
-    expect(index.match(/providerKey\(/g)?.length).toBe(8)
+    // providerKey を呼ぶ所は、定義・判定の readKey・上の2つの「接続を確かめる」・整理・録画の文字起こし・browser-use の中継だけ（増えたら gate を通すこと）
+    expect(index.match(/providerKey\(/g)?.length).toBe(7)
     const browserUse = index.slice(index.indexOf('llmKey: async (id) => {'))
     expect(browserUse.indexOf('gateCredentials(`browser-use:')).toBeGreaterThan(0)
     expect(browserUse.indexOf('gateCredentials(')).toBeLessThan(browserUse.indexOf('providerKey('))
-    const publish = index.slice(index.indexOf('async function publishRunner('))
-    expect(publish.indexOf('gateCredentials(')).toBeGreaterThan(0)
-    expect(publish.indexOf('gateCredentials(')).toBeLessThan(publish.indexOf('providerKey('))
     const stt = index.slice(index.indexOf("const gate = await gateCredentials(`stt:${provider}`"))
     expect(stt.indexOf('gateCredentials(')).toBeLessThan(stt.indexOf('providerKey('))
     // 送り主は main ウィンドウの本体のフレームだけ（IPC の共通の入口）

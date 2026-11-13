@@ -1,0 +1,58 @@
+/* サイドバーの一覧の下の「アーカイブ済み（n）」（components/ArchivedProjects.tsx）。畳んでおき、開くと名前と「元に戻す」 */
+.sb-archive {
+  margin-top: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.sb-archive__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.sb-archive__head:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sb-archive__head .is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.sb-archive__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sb-archive__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.sb-archive__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-archive__restore {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}

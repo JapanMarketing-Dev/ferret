@@ -198,7 +198,7 @@ describe('製品の考え方の文言（最初の画面・最後の手順・指�
   })
 
   it('指摘が無い画面は、廃止した文字入力に触れない（声とペン・四角の枠）', () => {
-    const { en } = LOCALES
+    const en = LOCALES.en!
     expect(en['review.emptyDescription']).not.toMatch(/write/i)
     expect(en['review.emptyDescription']).toMatch(/box/)
   })

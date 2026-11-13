@@ -7,7 +7,6 @@ import {
   MAX_FEEDBACK_ENTRY_BYTES,
   TRUNCATED_MARKER,
   afterImageName,
-  answersFeedbackText,
   cleanText,
   feedbackTarget,
   fileSafe,
@@ -405,14 +404,6 @@ describe('feedbackTarget（どのオーケストラに記録するか）', () =>
 })
 
 describe('経路ごとの文', () => {
-  it('human.md の答えは答えた項目だけ', () => {
-    const text = answersFeedbackText([
-      { key: 'D1', label: 'Shop', note: 'Pick the pricing layout', answer: '1. Three tiers — like Stripe' },
-      { key: 'D2', label: 'Blog', note: 'unanswered' },
-      { key: 'D3', label: '', note: '', answer: '  ' }
-    ])
-    expect(text).toBe('- D1 [Shop] Pick the pricing layout → 1. Three tiers — like Stripe')
-  })
   it('依頼は組み込みのままなら名前だけ、変えた・自作なら文面も', () => {
     const text = requestsFeedbackText([
       { title: 'Security check', text: 'long built-in text', custom: false, edited: false },

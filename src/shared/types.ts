@@ -138,6 +138,8 @@ export type ProjectUpdate = Pick<Project, 'id'> & Partial<Pick<Project, 'name' |
   orchestraExcluded?: boolean
   /** 内蔵ブラウザのログインの組（空文字で共有に戻す。@shared/browserProfile） */
   browserProfile?: string
+  /** アーカイブする（true）・元に戻す（false）。消さずに一覧・オーケストラから隠す（@shared/projectArchive） */
+  archived?: boolean
 }
 
 /** 事前に登録したフォルダ。ターミナルは常にここをカレントにして起動する（worktreeは使わない） */
@@ -177,6 +179,22 @@ export interface Project {
    * 普通のフォルダとして並べる（設定に残った値を読めるように型だけ残す）
    */
   research?: true
+  /**
+   * アーカイブ（一時的に使わない・待ちのプロジェクト）。消さずにサイドバー・オーケストラ・巡回から隠し、「元に戻す」でそのまま戻る。
+   * オーケストラをアーカイブすると、属するプロジェクトもいっしょに隠れる（@shared/projectArchive）
+   */
+  archived?: true
+  /**
+   * Ferret が既定で用意する「work」（いつでもサクッと試せる作業用のフォルダ。src/main/workProject.ts）。
+   * オーケストラには入れず、サイドバーの最後に普通のフォルダとして並べる。隠すときはアーカイブにする（外しても次の起動で戻る）
+   */
+  work?: true
+  /**
+   * Ferret が既定で用意する「グローバル」のオーケストラ（editorWorkspace と組。src/main/globalOrchestra.ts）。
+   * 登録したプロジェクトの全部が対象で、全体に適用したいことをここの Agent に頼む。どのプロジェクトもここには属さない。
+   * 隠すときはアーカイブにする（外しても次の起動で戻る）
+   */
+  global?: true
   /**
    * 内蔵ブラウザのログインの組。無ければすべてのプロジェクトで共有（一度ログインすればどこでもログインしたまま）。
    * クライアントが違うなど分けたいときに名前を付け、同じ名前のプロジェクト同士で共有する（@shared/browserProfile）
@@ -319,11 +337,6 @@ export interface AgentPreferences {
    * Windows のターミナルのシェル（既定は PowerShell）。cmd.exe は履歴を残さないので ↑ で前のコマンドが出ない（main の resolveWindowsShell）
    */
   windowsShell: WindowsShell
-  /**
-   * Agent どうしの依頼（既定は入）。ターミナルの Agent が別の Agent（Codex・Claude Code など）に、見えるターミナルで仕事を頼み、
-   * 結果をファイルで受け取る。各タブに FERRET_AGENT_CLI などを渡し、Claude Code・Codex に skill を入れる（main の agentMail.ts）
-   */
-  agentMail: boolean
 }
 
 /** Windows のターミナルのシェル */
@@ -368,8 +381,6 @@ export interface TerminalCreateOptions {
   autoStart?: boolean
   /** 上限での自動切り替えで開くタブ（main の failover:launch の token）。会話の再開と引き継ぎの指示文は main が行う */
   failoverToken?: string | null
-  /** Agent どうしの依頼で開くタブ（main の agentMail:launch の token）。依頼の貼り付けは main が行う */
-  agentMailToken?: string | null
   /**
    * 前の会話を続けて起動する（終了・閉じたあとにタブを戻したとき。Claude Code の --continue、Codex の resume --last）。
    * 続けられないとき（会話が無い・SSH のプロジェクトの Claude Code など）は普通に起動する
@@ -380,8 +391,6 @@ export interface TerminalCreateOptions {
    * 消したアカウントなら今選んでいるアカウント（タブを戻したとき、前と同じアカウントで開くため）
    */
   accountId?: string | null
-  /** 決まった起動（@shared/codexAudit。今は Codex のセキュリティ監査だけ）。引数は main が作る */
-  preset?: import('./codexAudit').TerminalPreset | null
 }
 
 /** 復元対象の設定（WS-1 ＋ 分割幅） */
@@ -553,6 +562,8 @@ export type MenuCommand =
   | 'toggleTargets'
   /** フッターの表示・非表示 */
   | 'toggleFooter'
+  /** Ctrl+`（macOS も Control）ターミナルの欄を隠す・出す */
+  | 'toggleTerminal'
   /** ⌘, 設定のページ（中央のタブ）の開閉 */
   | 'toggleSettings'
   /** ヘルプ → セットアップをもう一度（オンボーディングを開き直す） */
@@ -608,6 +619,11 @@ export interface StartRecordingOptions {
   transcription?: SttProvider
   /** 録る対象。省略時は内蔵ブラウザ */
   captureTarget?: CaptureTarget
+  /**
+   * ワンクリック録画。Ferret の窓がある画面の全体を、選択画面なしで録る（captureTarget より優先。@shared/quickCapture）。
+   * 押したこと（main が受けた本物の操作）を、その画面を録る同意とする
+   */
+  fullScreen?: boolean
   /** このレビュー（ID）に追記する（Findings の「このレビューに追加で録る」）。省略時は新しいレビュー */
   appendTo?: string
 }

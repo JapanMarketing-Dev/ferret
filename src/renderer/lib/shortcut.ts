@@ -79,5 +79,7 @@ export const SHORTCUTS = {
   focusUrl: () => formatShortcut('Mod', 'L'),
   reload: () => formatShortcut('Mod', 'R'),
   newTerminal: () => formatShortcut('Mod', 'T'),
-  closeTerminal: () => formatShortcut('Mod', 'W')
+  closeTerminal: () => formatShortcut('Mod', 'W'),
+  /** menu.ts の TOGGLE_TERMINAL_ACCELERATOR（Ctrl+`。macOS も Control） */
+  toggleTerminal: () => formatShortcut('Ctrl', '`')
 } as const

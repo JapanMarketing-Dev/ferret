@@ -113,4 +113,18 @@ describe('settings.json のスキーマ', () => {
       { id: 'g', folderPath: '/tmp/g', source: 'github', remoteUrl: 'https://github.com/o/r.git' }] }, SETTINGS_SCHEMA)).toEqual([])
     expect(validateAgainstSchema({ projects: [{ id: 'r', folderPath: '/tmp/r', source: 'ssh', ssh: { host: 'gpu-box' } }] }, SETTINGS_SCHEMA)[0]?.path).toBe('/projects/0/ssh')
   })
+
+  it('削除した機能の項目（発信のフッター・Agent どうしの依頼）が残る古い設定も読め、読み込みで捨てる', () => {
+    const old = {
+      agents: { ...DEFAULT_AGENT_PREFERENCES, agentMail: false },
+      layout: { ...DEFAULT_LAYOUT, footer: { ...DEFAULT_LAYOUT.footer, items: { ...DEFAULT_LAYOUT.footer.items, publish: false } } }
+    }
+    expect(validateAgainstSchema(old, SETTINGS_SCHEMA)).toEqual([])
+    // 知らないフッターの項目は、これまでどおり違反にする
+    expect(validateAgainstSchema({ layout: { footer: { items: { nope: true } } } }, SETTINGS_SCHEMA)[0]?.path).toBe('/layout/footer/items/nope')
+    const s = sanitize(old)
+    expect('agentMail' in s.agents).toBe(false)
+    expect('publish' in s.layout!.footer.items).toBe(false)
+    expect(validateAgainstSchema(splitSettings(s).config, SETTINGS_SCHEMA)).toEqual([])
+  })
 })

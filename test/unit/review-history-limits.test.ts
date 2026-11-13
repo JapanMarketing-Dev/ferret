@@ -33,12 +33,15 @@ const LISTED = (limits as { HISTORY_LIMITS?: { listed: number } }).HISTORY_LIMIT
 
 describe('security-4 [10] レビューの一覧は件数・読む量・時間に上限がある', () => {
   it('security-4 [10] 上限より多いレビューがあっても、新しい順に上限までしか返さない', async () => {
+    // 500 件を作ると遅いので、上限を小さくして同じ動きを確かめる（既定の上限は LISTED）
     const dir = await project()
-    const names = ids(LISTED + 20)
+    const names = ids(30)
     await reviews(dir, names)
-    const list = await history.listSessions(dir)
-    expect(list.length).toBeLessThanOrEqual(LISTED)
-    expect(list[0]!.id).toBe(names[names.length - 1])
+    const list = (await history.listSessionsPage(dir, { ...limits.HISTORY_LIMITS, listed: 10 })).sessions
+    expect(list).toHaveLength(10)
+    expect(list.map((s) => s.id)).toEqual(names.slice(-10).reverse())
+    expect(LISTED).toBe(500)
+    expect((await history.listSessions(dir)).length).toBe(30)
   })
 
   it('security-4 [10] 打ち切ったことを truncated で返す。見る名前の数にも上限がある', async () => {

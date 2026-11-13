@@ -1,7 +1,6 @@
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
-import type { BlogTargetInput, PostBlogResult, PostDraftPatch, PostXResult, PublishConnectionsInfo, PublishGenerateRequest, PublishSnapshot } from './publish'
 import type { ShareRecordingStatus, ShareSettingsInput, ShareSettingsView, ShareSnapshot, ShareSummaryInfo, ShareUrl } from './feedbackShare'
 import type { MeetingImportProgress, MeetingImportRequest, MeetingMediaPick, MeetingScoreResult, MeetingTranscriptPick } from './meetingImport'
 import type { AgentNotifyOpen, AgentNotifyRequest } from './agentNotify'
@@ -75,12 +74,14 @@ import type { LocalePreference, SupportedLocale } from './i18n'
 import type { ResourceKillTarget, ResourceSnapshot } from './resources'
 import type { FsChangedEvent, FsCreated, FsEntry, FsFileList, FsReadResult, FsSearchMode, FsSearchResult, FsTransfer, FsWriteResult } from './files'
 import type { FsFileInfo } from './fileViewer'
+import type { OfficeOpenResult } from './office/open'
 import type { FsGitStatus } from './gitDecorations'
 import type { StarActionResult, StarPromptMode } from './starPrompt'
 import type { FeedbackEnvironment, FeedbackSubmitInput, FeedbackSubmitResult } from './feedback'
 import type { GitActionResult, GitRepoStatus } from './github'
 import type { FetchTrigger, GitSyncAction } from './gitSync'
 import type { DroppedEntry } from './externalDrop'
+import type { PlanListing, VisualPlanReply, VisualPlanReplyResult } from './visualReview'
 
 /**
  * IPC の全チャネルを1か所で宣言する。
@@ -129,6 +130,12 @@ export interface IpcRequests {
    * feedback は人が打ったフィードバックそのもの（あればオーケストラの feedback/ に記録する。@shared/feedbackLog）
    */
   'agent:sendText': (text: string, feedback?: { text: string; product?: string }) => { ok: boolean; message: string; noAgent?: boolean }
+  /** 開いているプロジェクトのビジュアルレビューの計画（.ferret/visual-review/。新しい順。@shared/visualReview） */
+  'visualReview:list': () => PlanListing
+  /** 計画の画像（プロジェクトの .ferret/ の下の画像だけ）を data URL で。読めなければ null */
+  'visualReview:image': (rel: string) => string | null
+  /** 計画に返事する（承認・フィードバック）。計画の JSON を書き換え、計画を書いた Agent のターミナルへ送る */
+  'visualReview:respond': (id: string, reply: VisualPlanReply) => VisualPlanReplyResult
   /** Resource Manager。アプリ・内蔵ブラウザ・ターミナルの CPU と RSS */
   'resources:snapshot': () => ResourceSnapshot
   /** ターミナルを止める／内蔵ブラウザのページを閉じる（about:blank にする） */
@@ -192,22 +199,8 @@ export interface IpcRequests {
   'settings:agentRequests': (prefs: import('./agentRequests').AgentRequestPrefs) => void
   /** 選んだ依頼文を、開いているプロジェクトの Agent へ送る（複数ならまとめて1つの依頼） */
   'agentRequests:send': (ids: string[]) => { ok: boolean; message: string; noAgent?: boolean }
-  /** 全プロダクトの確認待ちのレビュー（確認の巡回。src/shared/productRound.ts） */
-  'review:pendingAcross': () => Array<{ projectId: string; reviewId: string; count: number }>
-  /** 全体のダッシュボード：プロジェクトごとの進み具合・コスト、人の確認リスト（human.md）。src/main/orchestraOverview.ts */
-  'orchestra:overview': () => import('./orchestraOverview').OrchestraOverview
-  /** 全体の human.md の確認リストだけ（フィードバックの帯。コストは数えない） */
-  'orchestra:checklist': () => import('./humanChecklist').ChecklistItem[]
-  /** 人の答えを全体の human.md の「## 回答」に書く（空の答えは消す）。書いたあとの確認リストを返す */
-  'orchestra:answer': (entries: Array<{ key: string; answer: string }>) => import('./humanChecklist').ChecklistItem[]
-  /** human.md の答えと「人の確認なしで進めてよい操作」をまとめて、全体の Agent に1回で送る */
-  'orchestra:sendAnswers': () => { ok: boolean; message: string; noAgent?: boolean }
-  /** 開いているオーケストラのフィードバックの記録（log）・プレイブック（playbook）を用意して、オーケストラのフォルダからの相対パスを返す */
-  'orchestra:feedbackFile': (which: 'log' | 'playbook') => string
   /** 全体（すべてのプロダクト）の共通のルールとプロダクトごとのルール */
   'settings:orchestra': (rules: import('./orchestrator').OrchestraRules) => void
-  /** 全体として人の確認なしで進めてよい操作だけを書き換える（ダッシュボード） */
-  'settings:orchestraAllowed': (allowed: string) => void
 
   /** Claude Code / Codex のアカウント。一覧を読むたびにログインの済んだ行を登録し直す */
   'accounts:list': () => AgentAccountsState
@@ -301,36 +294,6 @@ export interface IpcRequests {
   'passwords:fill': (id: string) => number
   /** 資格情報が複数あるときのネイティブのメニュー（at はウインドウの中の位置）。選んだものを入れたら true、管理を選んだら 'manage' */
   'passwords:menu': (at: { x: number; y: number }) => boolean | 'manage'
-  /** 発信（X とブログへの投稿。src/main/publish/）。このプロジェクトの下書きとバックグラウンドの生成の様子（メディアは見本だけ） */
-  'publish:list': () => PublishSnapshot
-  /** AI に下書きを作らせる（intent＝何を発信したいか・文章を渡せばそれから、無ければプロジェクトの最近の変更から）。作った数（新しいものが一覧の先頭） */
-  'publish:generate': (request: PublishGenerateRequest) => number
-  /** 手で書く下書きを作る */
-  'publish:create': (text: string) => string
-  'publish:update': (id: string, patch: PostDraftPatch) => void
-  'publish:remove': (id: string) => void
-  /** 画像・動画を選んで下書きに付ける（ファイルの選択は main が出す。実パスは main だけが持つ）。付けた数 */
-  'publish:pickMedia': (id: string) => number
-  /** プロジェクトの中のファイル（相対パス）を下書きに付ける（ファイルツリーからのドロップ） */
-  'publish:addProjectMedia': (id: string, relPaths: string[]) => number
-  /** バックグラウンドで下書きを作るか */
-  'publish:setBackground': (enabled: boolean) => void
-  /** 接続先（X の Client ID・つながっているか・ブログの一覧）。トークン・パスワードは返さない */
-  'publish:connections': () => PublishConnectionsInfo
-  /** X の Client ID を保存する（空なら消す。変えたら前のトークンは捨てる） */
-  'publish:setXClientId': (clientId: string) => PublishConnectionsInfo
-  /** 既定のブラウザで X の認証を開き、許可されるまで待ってトークンを保存する */
-  'publish:connectX': () => PublishConnectionsInfo
-  /** 待っている X の認証をやめる */
-  'publish:cancelConnectX': () => void
-  'publish:disconnectX': () => PublishConnectionsInfo
-  /** ブログの接続先を、接続を確かめてから足す */
-  'publish:addBlog': (input: BlogTargetInput) => PublishConnectionsInfo
-  'publish:removeBlog': (id: string) => PublishConnectionsInfo
-  /** 保存した下書きを X API で投稿する（長ければスレッド。メディアは1件目） */
-  'publish:postX': (id: string) => PostXResult
-  /** 保存した下書きの記事をブログへ投稿する（draft なら下書きとして置く） */
-  'publish:postBlog': (id: string, blogId: string, draft: boolean) => PostBlogResult
   /** ログイン無しで誰でも指摘を送れる共有リンク（src/main/feedbackShare/）。このプロジェクトの共有の一覧 */
   'share:list': () => { shares: ShareSummaryInfo[]; persisted: boolean }
   /** 開いているページの共有（同じ URL の期限内のもの）を返す。無ければ作る。リンクは画面がコピーする */
@@ -538,6 +501,10 @@ export interface IpcRequests {
   'fs:inspect': (relPath: string) => FsFileInfo
   /** Office の文書（.docx・.xlsx・.pptx など）の中身。プレビューのために renderer で HTML にする（ほかの種類・上限を超えるものは断る） */
   'fs:readOffice': (relPath: string) => Uint8Array
+  /** Office の文書を開く（古い形式・OpenDocument・iWork は LibreOffice で .docx・.xlsx・.pptx に変える。src/main/officeFiles.ts） */
+  'fs:openOffice': (relPath: string) => OfficeOpenResult
+  /** 編集した Office の文書（OOXML の中身）を書く。古い形式なら LibreOffice で元の形式へ戻してから置き換える */
+  'fs:writeOffice': (relPath: string, data: Uint8Array) => FsWriteResult
   /** ファイルツリーの git の色分け（変更・追跡外・削除・.gitignore の対象）。git のリポジトリでなければ isGit: false（src/main/gitDecorations.ts） */
   'fs:gitStatus': () => FsGitStatus
   /** ファイルツリーから空のファイル・フォルダを作る（名前の / で途中のフォルダも）。作ったものの相対パスを返す（既にあれば断る。src/main/fileOps.ts） */
@@ -670,20 +637,18 @@ export interface IpcEvents {
   'note:error': (message: string) => void
   /** 開いているプロジェクトのレビューの progress.json（指摘の進み具合）が変わった。Agent の書き込みを画面へ反映する */
   'review:progressChanged': (ids: string[]) => void
+  /** 開いているプロジェクトの .ferret/visual-review/ が変わった（Agent が計画を書いた・直した） */
+  'visualReview:changed': () => void
   /** 使用量が変わった（取得中・成功・失敗） */
   'usage:changed': (state: UsageState) => void
   /** 上限での自動切り替え: このタブを開いて（開いたら main が引き継ぐ） */
   'failover:launch': (request: FailoverLaunchRequest) => void
-  /** Agent どうしの依頼: 宛先の Agent が居ないので、送り手の隣にこの Agent を開いて（開いたら main が依頼を貼る） */
-  'agentMail:launch': (request: import('./agentMail').AgentMailLaunchRequest) => void
   /** 上限での自動切り替え: 切り替えた・できなかった（フッターとトースト） */
   'failover:notice': (notice: FailoverNotice) => void
   /** Agent の通知が押された: そのプロジェクトへ切り替え、そのタブを開く */
   'agentNotify:open': (target: AgentNotifyOpen) => void
   /** プロジェクトの中のファイルが外部（Agent など）で変わった */
   'fs:changed': (event: FsChangedEvent) => void
-  /** 発信の下書きが増えた・変わった（バックグラウンドの生成など） */
-  'publish:changed': () => void
   /** 解決済みの配色が変わった（設定の変更、または system のときの OS の切り替え） */
   'theme:changed': (theme: ResolvedTheme) => void
   /** 解決済みの画面の言語が変わった */
@@ -747,7 +712,7 @@ export const IPC_REQUEST_CHANNELS = [
   'settingsFile:info', 'settingsFile:read', 'settingsFile:write', 'settingsFile:reveal', 'settings:feedbackTargets',
   'app:version',
   'app:checkUpdate',
-  'app:openUpdate', 'app:openExternal', 'agent:sendText',
+  'app:openUpdate', 'app:openExternal', 'agent:sendText', 'visualReview:list', 'visualReview:image', 'visualReview:respond',
   'update:status', 'update:download', 'update:install', 'update:setAutoDownload', 'update:versions', 'update:chooseVersion',
   'resources:snapshot',
   'resources:kill',
@@ -779,14 +744,7 @@ export const IPC_REQUEST_CHANNELS = [
   'settings:agentPrompt',
   'settings:agentRequests',
   'agentRequests:send',
-  'review:pendingAcross',
-  'orchestra:overview',
-  'orchestra:checklist',
-  'orchestra:answer',
-  'orchestra:sendAnswers',
-  'orchestra:feedbackFile',
   'settings:orchestra',
-  'settings:orchestraAllowed',
   'accounts:list',
   'accounts:add',
   'accounts:rename',
@@ -812,8 +770,6 @@ export const IPC_REQUEST_CHANNELS = [
   'browser:state',
   'browserExtensions:list', 'browserExtensions:addFolder', 'browserExtensions:scanInstalled', 'browserExtensions:import', 'browserExtensions:setEnabled', 'browserExtensions:remove', 'browserExtensions:menu', 'browserExtensions:open', 'browserExtensions:installFromStore', 'browserExtensions:addCrx',
   'browserImport:status', 'browserImport:importPasswords', 'browserImport:findExports', 'browserImport:trashExport', 'browserImport:clearPasswords', 'browserImport:historySources', 'browserImport:importHistory', 'browserImport:clearHistory', 'browserImport:suggest', 'passwords:forPage', 'passwords:fill', 'passwords:menu',
-  'publish:list', 'publish:generate', 'publish:create', 'publish:update', 'publish:remove', 'publish:pickMedia', 'publish:addProjectMedia', 'publish:setBackground',
-  'publish:connections', 'publish:setXClientId', 'publish:connectX', 'publish:cancelConnectX', 'publish:disconnectX', 'publish:addBlog', 'publish:removeBlog', 'publish:postX', 'publish:postBlog',
   'share:list', 'share:forPage', 'share:create', 'share:settings', 'share:update', 'share:copyPassword', 'share:open', 'share:setStatus', 'share:import', 'share:delete',
   'terminal:create',
   'terminal:write',
@@ -841,7 +797,7 @@ export const IPC_REQUEST_CHANNELS = [
   'annotation:redo',
   'review:list', 'review:activity', 'review:label', 'review:delete', 'review:load', 'review:edit', 'review:progress', 'review:verdict', 'review:ngPrompt', 'review:resent', 'review:copy', 'review:folder', 'review:frames', 'review:organize', 'review:restore', 'meeting:pickMedia', 'meeting:pickTranscript', 'meeting:import', 'meeting:score', 'capture:model', 'capture:apiKey', 'capture:devices', 'settings:capture', 'capture:availability', 'capture:testConnection', 'settings:stt', 'settings:organizer', 'organize:testConnection', 'settings:decision', 'decision:testConnection', 'usage:apiCalls', 'usage:openApiLog', 'capture:whisperModels', 'capture:downloadModel', 'capture:cancelModelDownload',
   'capture:screenAccess', 'capture:sources', 'capture:setTarget', 'capture:openScreenSettings', 'capture:apps', 'capture:launchApp',
-  'fs:list', 'fs:read', 'fs:write', 'fs:files', 'fs:search', 'fs:inspect', 'fs:readOffice', 'fs:gitStatus', 'fs:create', 'fs:copy', 'fs:move', 'fs:import', 'fs:pasteClipboard', 'fs:importMedia', 'fs:copyPath', 'fs:terminalDir', 'fs:rename', 'fs:trash', 'fs:reveal', 'fs:openExternal', 'editor:unsaved', 'editor:quitSave', 'preview:render',
+  'fs:list', 'fs:read', 'fs:write', 'fs:files', 'fs:search', 'fs:inspect', 'fs:readOffice', 'fs:openOffice', 'fs:writeOffice', 'fs:gitStatus', 'fs:create', 'fs:copy', 'fs:move', 'fs:import', 'fs:pasteClipboard', 'fs:importMedia', 'fs:copyPath', 'fs:terminalDir', 'fs:rename', 'fs:trash', 'fs:reveal', 'fs:openExternal', 'editor:unsaved', 'editor:quitSave', 'preview:render',
   'github:open', 'github:repoStatus', 'github:autoFetch', 'github:gitAction', 'github:autoFetchConsent',
   'github:repoCreateInfo', 'github:createPrivateRepo', 'settings:github',
   'star:star', 'star:openWeb', 'star:later', 'star:never', 'star:fromMenu',
@@ -867,13 +823,13 @@ export const IPC_EVENT_CHANNELS = [
   'recording:tracksChanged',
   'recording:level',
   'recording:warning', 'transcript:status', 'transcript:segments', 'capture:targetChanged', 'annotation:history', 'annotation:shortcut', 'capture:modelProgress', 'usage:apiCallsChanged', 'review:ready', 'review:progressChanged', 'meeting:progress',
+  'visualReview:changed',
   'note:added', 'note:mode', 'note:error',
   'fs:changed',
-  'publish:changed',
   'theme:changed',
   'locale:changed',
   'usage:changed',
-  'failover:launch', 'failover:notice', 'agentMail:launch', 'agentNotify:open',
+  'failover:launch', 'failover:notice', 'agentNotify:open',
   'github:headChanged',
   'star:show',
   'feedback:ask',

@@ -6,7 +6,6 @@ import {
   cliInstallCommand,
   cliLoginCommand,
   cliToolForInstallUrl,
-  isKnownCliInstallCommand,
   parseCliVersion
 } from '@shared/cliTools'
 
@@ -106,17 +105,6 @@ describe('parseCliVersion', () => {
   it('版が無ければ null', () => {
     expect(parseCliVersion('')).toBeNull()
     expect(parseCliVersion('command not found')).toBeNull()
-  })
-})
-
-describe('isKnownCliInstallCommand（E2E で本物を走らせないための見分け）', () => {
-  it('表のインストールコマンドだけ true', () => {
-    expect(isKnownCliInstallCommand('brew install gh')).toBe(true)
-    expect(isKnownCliInstallCommand('  npm install -g wrangler  ')).toBe(true)
-    expect(isKnownCliInstallCommand(cliInstallCommand('ollama', 'win32')!)).toBe(true)
-    expect(isKnownCliInstallCommand('gh auth login --web -h github.com')).toBe(false)
-    expect(isKnownCliInstallCommand('ls')).toBe(false)
-    expect(isKnownCliInstallCommand('')).toBe(false)
   })
 })
 

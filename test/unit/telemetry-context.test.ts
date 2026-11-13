@@ -113,10 +113,9 @@ describe('environment（確認用の起動を production にしない）', () =>
     expect(resolveEnvironment(base)).toBe('production')
     expect(resolveEnvironment({ ...base, packaged: false })).toBe('development')
   })
-  it('FERRET_SENTRY_FORCE・ADE_E2E・-verify の版は、配布版でも verification', async () => {
+  it('FERRET_SENTRY_FORCE・-verify の版は、配布版でも verification', async () => {
     const { resolveEnvironment } = await import('../../src/shared/telemetry')
     expect(resolveEnvironment({ ...base, forced: true })).toBe('verification')
-    expect(resolveEnvironment({ ...base, e2e: true })).toBe('verification')
     expect(resolveEnvironment({ ...base, version: '0.1.1-verify.1' })).toBe('verification')
   })
 })

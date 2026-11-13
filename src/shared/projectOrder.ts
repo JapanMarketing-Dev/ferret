@@ -3,20 +3,29 @@
  *
  * - 並び順: 手動（ドラッグの順 = settings の projects の並び）・動いている順・最近使った順・名前順・追加した順
  * - ☆ を付けたプロジェクトは、どの並び順でも上にまとめる（その中の順は並び順に従う）
+ * - オーケストラの並び順はプロジェクトの並び順と別に選ぶ（手動・最近使った順・名前順）。プロジェクトの並び順は各オーケストラの中の子に効く
  * - 並び順と「☆ のみ」はこの端末だけの好みなので、renderer が localStorage に置く
  */
 import type { Project } from './types'
+import { isGlobalOrchestra, isLooseFolder, isOrchestra, orchestraIdOf } from './orchestras'
 
 export type ProjectSort = 'manual' | 'active' | 'recent' | 'name' | 'added'
 export const PROJECT_SORTS: readonly ProjectSort[] = ['manual', 'active', 'recent', 'name', 'added']
 
+/** オーケストラの並び順（手動 = ドラッグの順・最近使った順・名前順） */
+export type OrchestraSort = 'manual' | 'recent' | 'name'
+export const ORCHESTRA_SORTS: readonly OrchestraSort[] = ['manual', 'recent', 'name']
+
 export interface ProjectListView {
+  /** プロジェクト（オーケストラの中の子と、オーケストラに属さないもの）の並び順 */
   sort: ProjectSort
+  /** オーケストラ同士の並び順。既定は手動 */
+  orchestraSort: OrchestraSort
   /** ☆ を付けたプロジェクトだけを出す */
   starredOnly: boolean
 }
 
-export const DEFAULT_PROJECT_VIEW: ProjectListView = { sort: 'manual', starredOnly: false }
+export const DEFAULT_PROJECT_VIEW: ProjectListView = { sort: 'manual', orchestraSort: 'manual', starredOnly: false }
 
 /** 保存した値を読む。知らない値・壊れた形は既定に戻す */
 export function sanitizeProjectView(raw: unknown): ProjectListView {
@@ -24,6 +33,8 @@ export function sanitizeProjectView(raw: unknown): ProjectListView {
   const r = raw as Record<string, unknown>
   return {
     sort: PROJECT_SORTS.includes(r.sort as ProjectSort) ? (r.sort as ProjectSort) : 'manual',
+    // 以前の保存（orchestraSort の無いもの）は手動。オーケストラはずっと手動の順で並んでいた
+    orchestraSort: ORCHESTRA_SORTS.includes(r.orchestraSort as OrchestraSort) ? (r.orchestraSort as OrchestraSort) : 'manual',
     starredOnly: r.starredOnly === true
   }
 }
@@ -75,8 +86,38 @@ export function sortProjects(projects: readonly Project[], sort: ProjectSort, ct
     .map((x) => x.project)
 }
 
+/**
+ * オーケストラ同士の並び。手動は全体の並び（settings の projects の順）のまま。
+ * 最近使った順は、オーケストラ自身とそこに属するプロジェクトのうち一番新しく使った時刻で比べる（中のプロジェクトを使えば、そのオーケストラも上がる）。
+ * 時刻の無いものは後ろで、同じ値どうしは手動の順。名前順は ☆ を上にまとめない（☆ の扱いはプロジェクトの並びだけ）
+ */
+export function sortOrchestras(all: readonly Project[], sort: OrchestraSort, ctx: ProjectSortContext = {}): Project[] {
+  // グローバルのオーケストラは、どの並びでも先頭に固定する（全体に効くものなので、いつも同じ場所にあるほうが探しやすい）
+  const globals = all.filter((p) => isOrchestra(p) && isGlobalOrchestra(p))
+  return [...globals, ...sortGroupOrchestras(all, sort, ctx)]
+}
+
+function sortGroupOrchestras(all: readonly Project[], sort: OrchestraSort, ctx: ProjectSortContext): Project[] {
+  const orchestras = all.filter((p) => isOrchestra(p) && !isGlobalOrchestra(p))
+  if (sort === 'manual') return orchestras
+  const used = new Map(orchestras.map((o) => [o.id, lastUsedAt(o, ctx)]))
+  if (sort === 'recent') {
+    for (const p of all) {
+      // work・リサーチのフォルダ（どのオーケストラにも入れないもの）とアーカイブしたものは数えない
+      if (isOrchestra(p) || isLooseFolder(p) || p.archived) continue
+      const id = orchestraIdOf(all, p)
+      if (id && used.has(id)) used.set(id, Math.max(used.get(id)!, lastUsedAt(p, ctx)))
+    }
+  }
+  const collator = new Intl.Collator(ctx.locale, { numeric: true, sensitivity: 'base' })
+  return orchestras
+    .map((orchestra, index) => ({ orchestra, index }))
+    .sort((a, b) => (sort === 'recent' ? used.get(b.orchestra.id)! - used.get(a.orchestra.id)! : collator.compare(a.orchestra.name, b.orchestra.name)) || a.index - b.index)
+    .map((x) => x.orchestra)
+}
+
 /** 絞り込んだあとの一覧（☆ のみ） */
-export function filterProjects(sorted: readonly Project[], view: ProjectListView): Project[] {
+export function filterProjects(sorted: readonly Project[], view: Pick<ProjectListView, 'starredOnly'> & Partial<ProjectListView>): Project[] {
   return view.starredOnly ? sorted.filter((p) => p.starred) : [...sorted]
 }
 

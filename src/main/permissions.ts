@@ -9,10 +9,7 @@ import { openScreenSettings, screenAccess } from './recording/sources'
  * Orca由来: ~/bench/orca/src/main/browser/browser-media-access.ts の hasSystemMediaAccess と
  *           ~/bench/orca/src/main/ipc/developer-permissions.ts の考え方（MIT）。
  * 許可が要るのは macOS だけ。Windows・Linux は常に granted を返す。
- * 検証起動（ADE_E2E=1）では OS の確認もシステム設定も開かない（手元の Mac にダイアログを出さない）。
  */
-
-const IS_E2E = process.env.ADE_E2E === '1'
 
 function microphoneAccess(): MediaAccessStatus {
   if (process.platform !== 'darwin') return 'granted'
@@ -28,7 +25,7 @@ export function permissionsState(): PermissionsState {
 }
 
 export async function requestPermission(kind: PermissionKind): Promise<PermissionsState> {
-  if (process.platform === 'darwin' && !IS_E2E) {
+  if (process.platform === 'darwin') {
     if (kind === 'microphone') {
       // 未確認なら OS の確認が出る。一度断ったものは出ないので、システム設定を開いて案内する
       if (microphoneAccess() === 'not-determined') await systemPreferences.askForMediaAccess('microphone').catch(() => false)

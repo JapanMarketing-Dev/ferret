@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { chromium } from '@playwright/test'
+import { chromium } from 'playwright-core'
 
 const buildDir = resolve(import.meta.dirname, '..', 'build')
 const svg = readFileSync(join(buildDir, 'icon.svg'), 'utf8')

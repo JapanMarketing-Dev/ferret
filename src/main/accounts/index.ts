@@ -6,6 +6,7 @@ export {
   addAgentAccount,
   buildAccountLoginLaunch,
   claudeChromeAccounts,
+  defaultLoginName,
   listAgentAccounts,
   readSystemDefault,
   reloginAgentAccount,

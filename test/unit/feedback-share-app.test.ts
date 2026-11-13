@@ -164,7 +164,7 @@ describe('共有の設定（ipc.ts）', () => {
     const clipboard: string[] = []
     const handlers = feedbackShareHandlers({
       projectId: () => 'p1', projectDir: () => '/tmp/x', fetch, base: BASE, userAgent: 'Ferret/test', installId: () => null,
-      userDataDir: () => dir, isPackaged: false, isE2E: true, importRecording: vi.fn(), writeClipboard: (text) => clipboard.push(text)
+      userDataDir: () => dir, isPackaged: false, importRecording: vi.fn(), writeClipboard: (text) => clipboard.push(text)
     })
     return { handlers, calls, clipboard, init: async () => { dir = await mkdtemp(join(tmpdir(), 'share-ipc-')); return dir } }
   }

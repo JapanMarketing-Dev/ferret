@@ -270,19 +270,3 @@ export function installUpdateOnQuit(method: InstallMethod, path: string, file: V
   if (destination !== current) rmSync(current, { force: true })
   return true
 }
-
-/**
- * E2E だけ（偽の配信元のとき）: 閉じたときの入れ替えの代わりに、偽のインストーラー（.mjs）を Electron の node で走らせる。
- * 本物と同じ方法・ファイル・引数を渡す（NSIS なら --updated /S）。本物のインストーラーは走らせない
- */
-export function runE2eQuitInstaller(script: string, method: InstallMethod, path: string): boolean {
-  const args = method === 'nsis' ? nsisInstallerArgs('quit') : []
-  const child = spawn(process.execPath, [script, method, path, ...args], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
-  })
-  child.once('error', () => undefined)
-  child.unref()
-  return true
-}

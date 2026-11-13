@@ -44,12 +44,12 @@ describe('組み込みの依頼文', () => {
     for (const word of ['.ferret/reviews', '~/.claude/projects', 'land the first time', 'only for what repeats', 'within 40 lines', 'Do not copy the content']) expect(text).toContain(word)
   })
 
-  it('ダッシュボードの「Agent に書き出してもらう」は組み込みの依頼で、全体から送るとすべてのプロダクトへの添え書きが付く', async () => {
+  it('依頼の雛形（human-checklist）は全体から送るとすべてのプロダクトへの添え書きが付く。ダッシュボードには雛形の欄だけが残る', async () => {
     const { readFile } = await import('node:fs/promises')
     const dashboard = await readFile(new URL('../../src/renderer/components/OrchestraDashboard.tsx', import.meta.url), 'utf8')
-    const id = /'agentRequests:send', \['([a-z-]+)'\]/.exec(dashboard)![1]!
-    expect(id).toBe('human-checklist')
+    const id = 'human-checklist'
     expect(dashboard).toContain('<AgentRequestsSection />')
+    expect(dashboard).not.toMatch(/'orchestra:overview'|formatUsd|ChecklistAnswer/)
     const main = await readFile(new URL('../../src/main/agentRequestSend.ts', import.meta.url), 'utf8')
     expect(main).toContain('composeAgentRequest(picked, lang, !!(project?.orchestrator || project?.editorWorkspace))')
     const text = composeAgentRequest(resolveAgentRequests(undefined, 'en').filter((r) => r.id === id), 'en', true)

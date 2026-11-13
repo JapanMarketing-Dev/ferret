@@ -20,7 +20,7 @@ import type { UpdateCheckResult } from '../../src/shared/appVersion'
 
 vi.mock('electron', () => ({ app: { getVersion: () => '0.0.1' }, net: { fetch: vi.fn() } }))
 const { verifiedUpdateFiles, verifiedReleaseFiles } = await import('../../src/main/releaseSignature')
-const { RELEASE_BASE_URL, checkForUpdate, e2eReleaseOverride, pickVerifiedOfKind, verifiedFileOfKind } = await import('../../src/main/updateCheck')
+const { RELEASE_BASE_URL, checkForUpdate, pickVerifiedOfKind, setReleaseSourceForTests, verifiedFileOfKind } = await import('../../src/main/updateCheck')
 const { downloadVerifiedTo, UpdateDownloadError } = await import('../../src/main/updateDownload')
 const { AutoUpdater } = await import('../../src/main/autoUpdate')
 type AutoUpdateDeps = ConstructorParameters<typeof AutoUpdater>[0]
@@ -92,20 +92,6 @@ describe('自動更新用のファイル（macOS の zip）の署名', () => {
   })
 })
 
-describe('E2E の偽の配信元は、開発版の E2E のときだけ', () => {
-  const env = { ADE_E2E: '1', FERRET_E2E_RELEASE_BASE_URL: 'http://127.0.0.1:43210/', FERRET_E2E_RELEASE_KEY: key.line }
-  it('配布版・E2E でない起動・ループバックでない配信元は、差し替えない', () => {
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_BASE_URL', env, false)).toBe('http://127.0.0.1:43210/')
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_KEY', env, false)).toBe(key.line)
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_BASE_URL', env, true)).toBeNull()
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_KEY', env, true)).toBeNull()
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_BASE_URL', { ...env, ADE_E2E: '' }, false)).toBeNull()
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_BASE_URL', { ...env, FERRET_E2E_RELEASE_BASE_URL: 'https://evil.example/' }, false)).toBeNull()
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_BASE_URL', { ...env, FERRET_E2E_RELEASE_BASE_URL: 'http://127.0.0.1.evil.example:80/' }, false)).toBeNull()
-    expect(e2eReleaseOverride('FERRET_E2E_RELEASE_KEY', { ...env, FERRET_E2E_RELEASE_KEY: 'ssh-rsa AAAA' }, false)).toBeNull()
-  })
-})
-
 describe('確かめたファイルから、入れ替えに使う種類を選ぶ', () => {
   const files = [
     { name: 'Ferret-2.0.0-mac-arm64.dmg', sha256: 'a'.repeat(64), size: 1, os: 'mac' as const, arch: 'arm64' as const, kind: 'dmg' as const, path: 'releases/2.0.0/Ferret-2.0.0-mac-arm64.dmg' },
@@ -150,11 +136,8 @@ describe('checkForUpdate（macOS は自動更新用の zip も確かめる）', 
       return new Response('nope', { status: 404 })
     }) as unknown as typeof fetch
   }
-  beforeEach(() => {
-    vi.stubEnv('ADE_E2E', '1')
-    vi.stubEnv('FERRET_E2E_RELEASE_BASE_URL', base)
-    vi.stubEnv('FERRET_E2E_RELEASE_KEY', key.line)
-  })
+  beforeEach(() => setReleaseSourceForTests({ base, key: key.line }))
+  afterEach(() => setReleaseSourceForTests(null))
 
   it('署名の合う zip があれば、入れ替えに使うファイルとして持つ（インストーラーの案内はそのまま）', async () => {
     const r = await checkForUpdate(server((s) => signSshsig(s, key.pem)), 'darwin')

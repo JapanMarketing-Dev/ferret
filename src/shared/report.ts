@@ -14,7 +14,7 @@ import { perfAnomalyEvent, type PerfAnomaly } from './telemetry'
 
 /** どの機能の失敗か。Sentry のタグ area になる */
 export type ReportArea =
-  | 'terminal' | 'pty' | 'agent-launch' | 'agent-mail' | 'recording' | 'stt' | 'organize' | 'review' | 'files' | 'editor'
+  | 'terminal' | 'pty' | 'agent-launch' | 'recording' | 'stt' | 'organize' | 'review' | 'files' | 'editor'
   | 'browser' | 'github' | 'usage' | 'accounts' | 'update' | 'settings' | 'layout' | 'resources' | 'sessions'
   | 'preview' | 'startup' | 'ui' | 'onboarding' | 'mobile-remote' | 'video'
 

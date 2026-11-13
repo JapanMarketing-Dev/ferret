@@ -1,6 +1,12 @@
 import { app } from 'electron'
-import { resolveLocale, setLocale, type LocalePreference, type SupportedLocale } from '@shared/i18n'
+import { registerLocale, resolveLocale, setLocale, type LocalePreference, type SupportedLocale } from '@shared/i18n'
+import { en } from '@shared/i18n/en'
+import { ja } from '@shared/i18n/ja'
 import { reportHandled } from '@shared/report'
+
+// main は画面と違う言語（録画の言語など）でも文を作るので、両方の辞書を最初から入れておく（renderer は今の言語だけを読む）
+registerLocale('en', en)
+registerLocale('ja', ja)
 
 /**
  * main の画面の言語（メニュー・ダイアログ・エラー・通知）。

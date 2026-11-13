@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileSearch } from 'lucide-react'
-import { rankQuickOpenFiles } from '@shared/quickOpen'
+import { prepareQuickOpenFiles, rankPreparedQuickOpenFiles, QUICK_OPEN_RESULT_LIMIT } from '@shared/quickOpen'
 import { errorMessage } from '../lib/errors'
 import { Modal, Spinner } from '../ui'
 import { useT } from '../lib/i18n'
@@ -11,10 +11,16 @@ import { useT } from '../lib/i18n'
  * Orca由来: ~/bench/orca/src/renderer/src/components/quick-open-file-list.ts（MIT）
  *   - 開いた時点で一覧を1回取り（main は rg --files、.gitignore に従う）、絞り込みは手元で行う
  *   - 打ち切ったときはそれを示す
+ * 一覧は main が覚えている（files.ts の FileIndexCache。変更の監視で古くなったら読み直す）ので、開くたびに歩き直さない。
+ * 一覧が上限で打ち切られているときは、手元の絞り込みをすぐ出しつつ、main の索引（全部）からも探して差し替える
+ * （送られた分の外にあるファイルが、いつまでも出ないことをなくす）。
  * SSH・worktree の入れ子の除外・rg の案内は持ち込まない。
  *
  * 内蔵ブラウザのビューは DOM の上に重なるので、開いている間は呼び出し側でビューを隠すこと。
  */
+/** 打ち切られた一覧のとき、main の索引から探すまでの待ち（打っている途中では探さない） */
+const REMOTE_SEARCH_DELAY_MS = 120
+
 export function QuickOpen({ onOpen, onClose }: { onOpen: (path: string) => void; onClose: () => void }) {
   const t = useT()
   const [files, setFiles] = useState<string[] | null>(null)
@@ -33,7 +39,29 @@ export function QuickOpen({ onOpen, onClose }: { onOpen: (path: string) => void;
     return () => { cancelled = true }
   }, [])
 
-  const results = useMemo(() => (files ? rankQuickOpenFiles(query, files) : []), [files, query])
+  // 下ごしらえは一覧ごとに1回（打鍵のたびに2万件の小文字を作り直さない）
+  const prepared = useMemo(() => (files ? prepareQuickOpenFiles(files) : null), [files])
+  const local = useMemo(() => (prepared ? rankPreparedQuickOpenFiles(query, prepared) : []), [prepared, query])
+
+  // 打ち切られた一覧のときは main の索引全部からも探す。古い問い合わせの答えは捨てる（打ち終わるのを少し待つ）
+  const [remote, setRemote] = useState<{ query: string; paths: string[] } | null>(null)
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!truncated || !trimmed) return
+    let cancelled = false
+    const timer = window.setTimeout(() => {
+      window.ade.invoke('fs:search', trimmed, 'names').then(
+        (result) => { if (!cancelled) setRemote({ query: trimmed, paths: result.files.slice(0, QUICK_OPEN_RESULT_LIMIT) }) },
+        // 全部からの検索に失敗しても、手元の絞り込みは出たまま（想定内。main が報告する）
+        () => undefined
+      )
+    }, REMOTE_SEARCH_DELAY_MS)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [truncated, query])
+  const results = useMemo(
+    () => (remote && remote.query === query.trim() ? remote.paths.map((path) => ({ path })) : local),
+    [remote, local, query]
+  )
   useEffect(() => setSelected(0), [query])
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })

@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TuiAgent } from '@shared/types'
 import { isWellFormedToken } from '@shared/mobileRemote'
-import { MobileRemoteServer, MobileRemoteService, SECURITY_HEADERS, listenErrorKind, type RemoteChecklistItem, type RemoteServerDeps, type RemoteTerminalSource } from '../../src/main/mobileRemote'
+import { MobileRemoteServer, MobileRemoteService, SECURITY_HEADERS, listenErrorKind, type RemoteServerDeps, type RemoteTerminalSource } from '../../src/main/mobileRemote'
 
 const TOKEN = 'T'.repeat(43)
 
@@ -86,7 +86,6 @@ function makeDeps(fake: FakeTerminals, extra: Partial<RemoteServerDeps> = {}): R
     projects: () => [{ name: 'shop', folderPath: '/work/shop' }],
     agentLabel: (agent) => (agent === 'claude' ? 'Claude Code' : String(agent)),
     locale: () => 'ja',
-    checklist: async () => [{ key: 'B1', label: 'shop', url: 'https://example.com', note: 'Check the cart', answer: '1. OK' }],
     limiter: { maxFailures: 3, windowMs: 60_000 },
     ...extra
   }
@@ -306,18 +305,6 @@ describe('MobileRemoteServer', () => {
     await send(port, { path: '/api/terminals', token: 'bad' })
     await send(port, { path: '/api/terminals', token: 'bad' })
     expect((await send(port, { path: '/api/terminals', token: TOKEN })).status).toBe(200)
-  })
-
-  it('human.md の確認の一覧（読むだけ）。読めなければ空で onError', async () => {
-    const res = await send(port, { path: '/api/checklist', token: TOKEN })
-    expect(res.json()).toEqual({ items: [{ key: 'B1', label: 'shop', url: 'https://example.com', note: 'Check the cart', answer: '1. OK' }] })
-    expect((await send(port, { path: '/api/checklist' })).status).toBe(401)
-    await server.stop()
-    const failing = vi.fn()
-    server = new MobileRemoteServer(makeDeps(fake, { onError: failing, checklist: async (): Promise<RemoteChecklistItem[]> => { throw new Error('read fail') } }))
-    await server.start(0, '127.0.0.1')
-    expect((await send(server.port!, { path: '/api/checklist', token: TOKEN })).json()).toEqual({ items: [] })
-    expect(failing).toHaveBeenCalledWith(expect.any(Error), 'read checklist')
   })
 
   it('ターミナルの用意ができる前は 503', async () => {

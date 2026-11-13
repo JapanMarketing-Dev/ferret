@@ -123,14 +123,29 @@ describe('main: 落とされたパスの確かめ（droppedPaths.ts）', () => {
 })
 
 describe('エディタの領域へのドロップの振り分け', () => {
-  it('プロジェクトの中のファイルは開き、外のファイルは取り込みを案内する', () => {
+  it('プロジェクトの中のファイルは開き、外のファイルはプロジェクトへコピーしてから開く', () => {
     expect(planEditorDrop([
       { path: '/p/src/a.ts', kind: 'file', relPath: 'src/a.ts' },
       { path: '/Desktop/b.png', kind: 'file', relPath: null }
-    ])).toEqual({ open: ['src/a.ts'], folder: null, outside: 'b.png', unreadable: false })
+    ])).toEqual({ open: ['src/a.ts'], copy: ['/Desktop/b.png'], folder: null, unreadable: false })
+  })
+  it('外のファイルだけなら全部コピーに回し、落とした順を保つ', () => {
+    expect(planEditorDrop([
+      { path: '/Desktop/z.txt', kind: 'file', relPath: null },
+      { path: '/Desktop/a.csv', kind: 'file', relPath: null }
+    ])).toEqual({ open: [], copy: ['/Desktop/z.txt', '/Desktop/a.csv'], folder: null, unreadable: false })
   })
   it('フォルダだけならプロジェクトとして開く', () => {
-    expect(planEditorDrop([{ path: '/Desktop/other', kind: 'dir', relPath: null }])).toEqual({ open: [], folder: '/Desktop/other', outside: null, unreadable: false })
+    expect(planEditorDrop([{ path: '/Desktop/other', kind: 'dir', relPath: null }])).toEqual({ open: [], copy: [], folder: '/Desktop/other', unreadable: false })
+  })
+  it('ファイルとフォルダが混ざっていれば、フォルダは開かない（外のファイルだけでも同じ）', () => {
+    expect(planEditorDrop([
+      { path: '/Desktop/other', kind: 'dir', relPath: null },
+      { path: '/Desktop/b.txt', kind: 'file', relPath: null }
+    ])).toEqual({ open: [], copy: ['/Desktop/b.txt'], folder: null, unreadable: false })
+  })
+  it('プロジェクトの中のフォルダだけでも、プロジェクトとして開く先にする（ファイルは無い）', () => {
+    expect(planEditorDrop([{ path: '/p/src', kind: 'dir', relPath: 'src' }]).folder).toBe('/p/src')
   })
   it('何も読めなければ知らせる', () => {
     expect(planEditorDrop([]).unreadable).toBe(true)

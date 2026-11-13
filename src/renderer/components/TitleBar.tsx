@@ -4,7 +4,6 @@ import {
   PanelsTopLeft,
   Settings
 } from 'lucide-react'
-import type { ReactNode } from 'react'
 import type { AppMode, ProjectsState, WorkspaceState } from '@shared/types'
 import { SHORTCUTS } from '../lib/shortcut'
 import { Button, IconButton, Logo, RecordButton, Segmented, Tooltip } from '../ui'
@@ -36,8 +35,7 @@ export function TitleBar({
   busy = false,
   noteMode = false,
   noteDisabled = false,
-  onToggleNote,
-  round
+  onToggleNote
 }: {
   workspace: WorkspaceState
   projects: ProjectsState
@@ -55,8 +53,6 @@ export function TitleBar({
   noteMode?: boolean
   noteDisabled?: boolean
   onToggleNote?: () => void
-  /** 巡回の帯（RoundBar）。巡回していなければ無い */
-  round?: ReactNode
 }) {
   const t = useT()
   return (
@@ -92,7 +88,6 @@ export function TitleBar({
             }
           ]}
         />
-        {round}
       </div>
 
       <div className="titlebar__right">

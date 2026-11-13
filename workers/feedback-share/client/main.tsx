@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { setLocale } from '../../../src/shared/i18n'
+import { switchLocale } from '../../../src/shared/i18n'
 import { App } from './App'
 import { pageLocale } from './strings'
 import '../../../src/renderer/styles/tokens.css'
@@ -24,11 +24,11 @@ const shim: Shim = {
 }
 ;(window as unknown as { ade: Shim }).ade = shim
 
-setLocale(pageLocale)
 document.documentElement.lang = pageLocale
 const applyTheme = (dark: boolean) => { document.documentElement.dataset.theme = dark ? 'dark' : 'light' }
 const query = window.matchMedia('(prefers-color-scheme: dark)')
 applyTheme(query.matches)
 query.addEventListener('change', (e) => applyTheme(e.matches))
 
-createRoot(document.getElementById('root')!).render(<App />)
+// アプリの辞書は実行時に読む（src/shared/i18n。このまとめでは1本の JS に入っている）。読んでから描く
+void switchLocale(pageLocale).then(() => createRoot(document.getElementById('root')!).render(<App />))

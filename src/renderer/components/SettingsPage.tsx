@@ -13,6 +13,7 @@ import { useLocale, useT } from '../lib/i18n'
 import { AccountsSection } from './AccountsSection'
 import { OrchestraSection } from './OrchestraSection'
 import { RemoteSection } from './RemoteSection'
+import { ProjectsSetting } from './ProjectsSetting'
 import { AgentIcon } from './AgentIcon'
 import { AgentResourcesSection } from './AgentResourcesSection'
 import { CliToolsSection } from './CliToolsSection'
@@ -154,12 +155,6 @@ function AgentSection({ value, onChange, prompt, onPromptChange }: {
     <div data-testid="agent-skip-permissions">
       <Switch label={t('settings.agents.skipPermissions')} checked={value.skipPermissions} onChange={(skipPermissions) => onChange({ ...value, skipPermissions })} />
       <p className="st-note">{t('settings.agents.skipPermissionsNote', { claude: AGENT_CATALOG.claude.yoloArgs, codex: AGENT_CATALOG.codex.yoloArgs })}</p>
-    </div>
-
-    {/* Agent どうしの依頼（既定は入）。配送と skill は main の agentMail.ts */}
-    <div data-testid="agent-mail">
-      <Switch label={t('settings.agents.agentMail')} checked={value.agentMail} onChange={(agentMail) => onChange({ ...value, agentMail })} />
-      <p className="st-note">{t('settings.agents.agentMailNote')}</p>
     </div>
 
     {/* Agent が終わった・確認を待っているときの OS 通知（既定は切）。出すかは renderer の terminal/agentAttention.ts */}
@@ -418,6 +413,9 @@ export function SettingsPage({
         <Switch label={t('settings.storage.stayFeedback')} checked={v.stayFeedbackOnStop} disabled={recording} onChange={(stayFeedbackOnStop) => onChange({ stayFeedbackOnStop })} />
         <h3 className="st-page__subheading">{t('settings.privacy.title')}</h3>
         <CrashReportsSetting />
+        <h3 className="st-page__subheading">{t('settings.projects.title')}</h3>
+        {/* 作業用のフォルダ「work」とアーカイブ。読み込み・保存は自分で行う（src/renderer/components/ProjectsSetting.tsx） */}
+        <ProjectsSetting />
     </PageSection>,
     appearance: <PageSection key="appearance" id="appearance" title={titleOf('appearance')}>
       {/* 配色の保存と反映は lib/theme.ts が持つ */}

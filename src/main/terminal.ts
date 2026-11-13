@@ -1,6 +1,6 @@
 import { BROWSER_BIN_ENV } from '@shared/browserAutomationEnv'
 import { delay } from '@shared/delay'
-import { shellQuote, sshShellSpec, type SshTarget } from '@shared/sshCommand'
+import { sshShellSpec, type SshTarget } from '@shared/sshCommand'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -23,7 +23,6 @@ import { executionSphere } from './executionSphere'
 import { searchDirs, shellPathIsProvisional } from './agentDetection'
 import { TerminalHistory } from './terminalHistory'
 import { defaultLocaleEnv, prependPathEntry, isHostTerminalEnv, stripAppImagePaths } from './terminalEnv'
-import { AGENT_MAIL_BIN_ENV } from '@shared/agentMail'
 import { windowsTreeKillCommand } from './platform/windowsTreeKill'
 import { applyAgentWorkspaceTrust, registeredProjectIdFor } from './agentWorkspaceTrust'
 import { detectState, parseTitle, stripAnsi } from './agent/state'
@@ -39,19 +38,7 @@ import { UserFacingError } from '@shared/errors'
 import { reportMainError } from './telemetry'
 import { flow, noteSlowOp, reportHandled, timedSync, errorKind } from '@shared/report'
 import { exitWhenDoneCommand } from '@shared/agentInstall'
-import { isKnownCliInstallCommand } from '@shared/cliTools'
 import { DECISION_ENV_PREFIXES } from '@shared/decision'
-
-/**
- * 終わったら閉じる1回きりのコマンド（Agent のインストール）。
- * 検証起動（ADE_E2E=1）では本物のインストーラを動かさない。ADE_E2E_INSTALL_COMMAND があればそれ
- * （例: echo installing && sleep 1 && exit 0）に差し替え、無ければ実行せずに表示だけして成功にする
- */
-function oneShotCommand(command: string): string {
-  if (process.env.ADE_E2E !== '1') return command.trim()
-  const mock = process.env.ADE_E2E_INSTALL_COMMAND?.trim()
-  return mock || `echo ${shellQuote(`[E2E] ${command.trim()}`)}`
-}
 
 /**
  * 内蔵ターミナル（WS-4）。node-pty のPTYをメインプロセスで持ち、
@@ -132,7 +119,7 @@ function ptyEnv(extra: Record<string, string> = {}): Record<string, string> {
     if (isInheritedAgentSessionEnv(key, value)) continue
     // 別の Ferret（親）の判定モデルの中継の URL は古い合言葉なので受け継がない（旧名も）。このアプリの値は extra で渡す
     if (DECISION_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) continue
-    // 別の Ferret（親）の Agent どうしの依頼の合言葉・受け口も受け継がない。このアプリの値は extra で渡す
+    // 前の版の Ferret（親）の Agent どうしの依頼（削除済み）の合言葉・受け口も受け継がない
     if (key.startsWith('FERRET_AGENT_')) continue
     // Ferret を起動した端末・AppImage・Crashpad・開発起動の変数は渡さない（terminalEnv.ts）
     if (isHostTerminalEnv(key)) continue
@@ -144,11 +131,7 @@ function ptyEnv(extra: Record<string, string> = {}): Record<string, string> {
   env.COLORTERM = 'truecolor'
   // Windows の cmd.exe に、素の名前を今のフォルダ（プロジェクト）から探させない（security-4 [1]）
   const merged: Record<string, string> = { ...env, ...extra, ...windowsSearchPathEnv() }
-  // Agent どうしの依頼の CLI（タブごとのフォルダ）を PATH の先頭に置く（src/main/agentMail.ts）
-  const agentBin = merged[AGENT_MAIL_BIN_ENV]
-  delete merged[AGENT_MAIL_BIN_ENV]
-  if (agentBin) prependPathEntry(merged, agentBin)
-  // 内蔵ブラウザを browser-use の Agent（API）で動かす ferret-browser のフォルダも（src/main/browserAutomation.ts）
+  // 内蔵ブラウザを browser-use の Agent（API）で動かす ferret-browser のフォルダを PATH の先頭に置く（src/main/browserAutomation.ts）
   const browserBin = merged[BROWSER_BIN_ENV]
   delete merged[BROWSER_BIN_ENV]
   if (browserBin) prependPathEntry(merged, browserBin)
@@ -356,9 +339,6 @@ export class TerminalManager {
    * 起動に失敗したときも呼ぶ
    */
   onSessionClosed: ((sessionId: string) => void) | null = null
-
-  /** タブを作った（Agent どうしの依頼で開いたタブを、待っている配送へ渡す。src/main/agentMail.ts） */
-  onCreated: ((id: string, options: TerminalCreateOptions) => void) | null = null
 
   /**
    * 上限での自動切り替え（src/main/failover/service.ts）。入力・出力・送った指示と、開いた Agent のタブを渡す
@@ -596,8 +576,7 @@ export class TerminalManager {
       }
       deliver(launchLine, accountEnv)
     } else if (options.command?.trim()) {
-      // CLI のインストール（設定の「CLI」の一覧から）は E2E では本物を走らせない（oneShotCommand が差し替える）
-      const line = options.exitWhenDone || isKnownCliInstallCommand(options.command) ? oneShotCommand(options.command) : options.command.trim()
+      const line = options.command.trim()
       deliver(options.exitWhenDone ? exitWhenDoneCommand(line, shell.file) : line, {})
     }
     const id = `t${++this.seq}`
@@ -640,7 +619,6 @@ export class TerminalManager {
       info: { id, pid: pty.pid, cwd, title, agent: launched }, history: new TerminalHistory(), unacked: 0, paused: false }
     this.sessions.set(id, session)
     if (agent) this.failover?.launched(id, agent, options.failoverToken ?? null, accountId)
-    this.onCreated?.(id, options)
     this.wirePty(session, pendingWrite, launched)
     flow('terminal create', { kind: launched ? 'agent' : 'shell' })
     // 次に開く素のシェルを裏で先に起動しておく（Agent のタブを開いたあとも）

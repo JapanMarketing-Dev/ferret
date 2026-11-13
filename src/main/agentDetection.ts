@@ -86,6 +86,8 @@ export function shellPathIsProvisional(): boolean {
 }
 
 function loginShell(): string {
+  // 単体テストだけ、利用者の rc を読む本物のシェルを起動しない（test/setup/isolateEnv.ts）
+  if (process.env.VITEST && process.env.FERRET_TEST_LOGIN_SHELL) return process.env.FERRET_TEST_LOGIN_SHELL
   return process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash')
 }
 

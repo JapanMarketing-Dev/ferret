@@ -15,21 +15,49 @@ export function orchestraList(projects: readonly Project[]): Project[] {
   return projects.filter(isOrchestra)
 }
 
-/** そのプロジェクトが属するオーケストラの id。オーケストラ自身・オーケストラが1つも無いときは null */
+/**
+ * Ferret が既定で用意する「グローバル」のオーケストラ（src/main/globalOrchestra.ts）。登録したプロジェクトの全部が対象で、
+ * どのプロジェクトもここには「属さない」（所属は今までどおりグループのオーケストラ）。サイドバーではオーケストラの先頭に、子を持たない行として並ぶ
+ */
+export function isGlobalOrchestra(p: Pick<Project, 'editorWorkspace' | 'global'>): boolean {
+  return p.editorWorkspace === true && p.global === true
+}
+
+/** プロジェクトが属せるオーケストラ（グローバルを除いたもの）。並びは settings.projects の順 */
+export function groupOrchestras(projects: readonly Project[]): Project[] {
+  return projects.filter((p) => isOrchestra(p) && !isGlobalOrchestra(p))
+}
+
+/**
+ * オーケストラに入れず、サイドバーの最後に普通のフォルダとして並べるもの。
+ * 以前の版のビジネスリサーチのフォルダと、Ferret が既定で用意する作業用のフォルダ「work」（src/main/workProject.ts）
+ */
+export function isLooseFolder(p: Pick<Project, 'research' | 'work'>): boolean {
+  return p.research === true || p.work === true
+}
+
+/** そのプロジェクトが属するオーケストラの id。オーケストラ自身・オーケストラが1つも無いときは null。グローバルには属さない（指していても先頭のグループへ） */
 export function orchestraIdOf(projects: readonly Project[], project: Pick<Project, 'orchestraId' | 'editorWorkspace'>): string | null {
   if (isOrchestra(project)) return null
-  const list = orchestraList(projects)
+  const list = groupOrchestras(projects)
   if (project.orchestraId && list.some((o) => o.id === project.orchestraId)) return project.orchestraId
   return list[0]?.id ?? null
 }
 
 /**
- * オーケストラの subagent・巡回・全体への依頼の対象。SSH・旧オーケストレーター・対象から外したもの（orchestraExcluded）は入れない。
- * includeExcluded なら外したものも入れる（ダッシュボードの表）
+ * オーケストラの subagent・巡回・全体への依頼の対象。SSH・旧オーケストレーター・対象から外したもの（orchestraExcluded）・
+ * アーカイブしたもの（外したものも含めて、ダッシュボードにも出さない）・work は入れない。
+ * includeExcluded なら外したものも入れる（ダッシュボードの表）。
+ * グローバルのオーケストラは、どのグループに属するかを問わず全部（アーカイブしたグループの中のものは除く。グループごと隠したため）
  */
 export function orchestraMembers(projects: readonly Project[], orchestraId: string, options: { includeExcluded?: boolean } = {}): Project[] {
-  return projects.filter((p) =>
-    !isOrchestra(p) && !p.research && !p.orchestrator && p.source !== 'ssh' && (options.includeExcluded || !p.orchestraExcluded) && orchestraIdOf(projects, p) === orchestraId)
+  const global = projects.some((p) => p.id === orchestraId && isGlobalOrchestra(p))
+  const archivedGroups = new Set(groupOrchestras(projects).filter((o) => o.archived).map((o) => o.id))
+  return projects.filter((p) => {
+    if (isOrchestra(p) || isLooseFolder(p) || p.archived || p.orchestrator || p.source === 'ssh' || (!options.includeExcluded && p.orchestraExcluded)) return false
+    const group = orchestraIdOf(projects, p)
+    return global ? !(group && archivedGroups.has(group)) : group === orchestraId
+  })
 }
 
 /** 開いているプロジェクトのオーケストラ。オーケストラならそれ、プロダクトならその所属、無ければ先頭のオーケストラ */
@@ -37,7 +65,8 @@ export function currentOrchestra(projects: readonly Project[], currentProjectId:
   const current = projects.find((p) => p.id === currentProjectId)
   if (current && isOrchestra(current)) return current
   const id = current ? orchestraIdOf(projects, current) : null
-  return projects.find((p) => p.id === id) ?? orchestraList(projects)[0] ?? null
+  // 先頭のオーケストラへ落とすときは、アーカイブしていないグループを選ぶ（グローバルは最後の手段）
+  return projects.find((p) => p.id === id) ?? groupOrchestras(projects).find((o) => !o.archived) ?? groupOrchestras(projects)[0] ?? orchestraList(projects)[0] ?? null
 }
 
 export interface OrchestraGroup {
@@ -50,9 +79,10 @@ export interface OrchestraGroup {
  * サイドバーの木。オーケストラは全体の並び（all）の順、子は shown の順（並び替え・絞り込みを済ませたもの）。
  * shown に子が1つも無く、オーケストラ自身も shown に無いグループは出さない（絞り込みで消えたもの）
  */
-export function orchestraTree(all: readonly Project[], shown: readonly Project[]): OrchestraGroup[] {
+export function orchestraTree(all: readonly Project[], shown: readonly Project[], orchestraOrder?: readonly Project[]): OrchestraGroup[] {
   const shownIds = new Set(shown.map((p) => p.id))
-  return orchestraList(all).flatMap((orchestra) => {
+  // オーケストラの並びはプロジェクトの並びと別に決められる（@shared/projectOrder の sortOrchestras）。無ければ全体の並び（手動）の順
+  return (orchestraOrder ?? orchestraList(all)).filter(isOrchestra).flatMap((orchestra) => {
     const children = shown.filter((p) => !isOrchestra(p) && orchestraIdOf(all, p) === orchestra.id)
     return children.length || shownIds.has(orchestra.id) ? [{ orchestra, children }] : []
   })
@@ -70,7 +100,8 @@ export function moveInTree(projects: readonly Project[], id: string, toOrchestra
     const at = beforeId ? rest.findIndex((p) => p.id === beforeId && isOrchestra(p)) : -1
     return at >= 0 ? [...rest.slice(0, at), moving, ...rest.slice(at)] : [...rest, moving]
   }
-  if (!toOrchestraId || !projects.some((p) => p.id === toOrchestraId && isOrchestra(p))) return [...projects]
+  // グローバルには入れられない（全部が対象なので、属させる意味が無い）
+  if (!toOrchestraId || !projects.some((p) => p.id === toOrchestraId && isOrchestra(p) && !isGlobalOrchestra(p))) return [...projects]
   const moved: Project = { ...moving, orchestraId: toOrchestraId }
   const before = beforeId ? rest.findIndex((p) => p.id === beforeId && !isOrchestra(p) && orchestraIdOf(projects, p) === toOrchestraId) : -1
   if (before >= 0) return [...rest.slice(0, before), moved, ...rest.slice(before)]
@@ -80,10 +111,16 @@ export function moveInTree(projects: readonly Project[], id: string, toOrchestra
   return last >= 0 ? [...rest.slice(0, last + 1), moved, ...rest.slice(last + 1)] : [...rest, moved]
 }
 
-/** オーケストラを消すとき、その子を残りの先頭のオーケストラへ移す。最後の1つは消せない（null） */
+/**
+ * オーケストラを消すとき、その子を残りの先頭のグループへ移す。最後のグループは消せない（null。グローバルは子を持てないので数えない）。
+ * グローバルは子が無いのでそのまま消せる（次の起動で Ferret が足し直す）
+ */
 export function removeOrchestra(projects: readonly Project[], orchestraId: string): Project[] | null {
-  const others = orchestraList(projects).filter((o) => o.id !== orchestraId)
-  if (!others.length || !projects.some((p) => p.id === orchestraId && isOrchestra(p))) return null
+  const target = projects.find((p) => p.id === orchestraId && isOrchestra(p))
+  if (!target) return null
+  if (isGlobalOrchestra(target)) return projects.filter((p) => p.id !== orchestraId)
+  const others = groupOrchestras(projects).filter((o) => o.id !== orchestraId)
+  if (!others.length) return null
   const to = others[0]!.id
   return projects
     .filter((p) => p.id !== orchestraId)
@@ -101,13 +138,13 @@ export interface TreeRow {
 }
 
 /**
- * サイドバーに並べる行。オーケストラ → その子（shown の順）を字下げして続ける。畳んだオーケストラの子は出さない。
+ * サイドバーに並べる行。オーケストラ（orchestraOrder の順。無ければ全体の並び）→ その子（shown の順）を字下げして続ける。畳んだオーケストラの子は出さない。
  * オーケストラに属さないもの（オーケストラが1つも無いとき）は最後に depth 0 で並べる。
- * ビジネスリサーチのフォルダは、どのオーケストラにも入れず、いちばん最後に depth 0 で並べる（以前の版で登録したもの。普通のフォルダとして開く）
+ * ビジネスリサーチのフォルダと work は、どのオーケストラにも入れず、いちばん最後に depth 0 で並べる（以前の版で登録したもの。普通のフォルダとして開く）
  */
-export function treeRows(all: readonly Project[], shownAll: readonly Project[], collapsed: ReadonlySet<string>): TreeRow[] {
-  const shown = shownAll.filter((p) => !p.research)
-  const groups = orchestraTree(all, shown)
+export function treeRows(all: readonly Project[], shownAll: readonly Project[], collapsed: ReadonlySet<string>, orchestraOrder?: readonly Project[]): TreeRow[] {
+  const shown = shownAll.filter((p) => !isLooseFolder(p))
+  const groups = orchestraTree(all, shown, orchestraOrder)
   const placed = new Set(groups.flatMap((g) => [g.orchestra.id, ...g.children.map((c) => c.id)]))
   return [
     ...groups.flatMap((g): TreeRow[] => [
@@ -115,7 +152,7 @@ export function treeRows(all: readonly Project[], shownAll: readonly Project[], 
       ...(collapsed.has(g.orchestra.id) ? [] : g.children.map((c): TreeRow => ({ project: c, depth: 1 })))
     ]),
     ...shown.filter((p) => !placed.has(p.id)).map((p): TreeRow => ({ project: p, depth: 0 })),
-    ...shownAll.filter((p) => p.research).map((p): TreeRow => ({ project: p, depth: 0 }))
+    ...shownAll.filter(isLooseFolder).map((p): TreeRow => ({ project: p, depth: 0 }))
   ]
 }
 
@@ -130,11 +167,11 @@ export function treeDrop(all: readonly Project[], rows: readonly TreeRow[], drag
   const dragging = all.find((p) => p.id === draggingId)
   const target = all.find((p) => p.id === targetId)
   if (!dragging || !target || draggingId === targetId) return null
-  // ビジネスリサーチのフォルダはオーケストラに入れない（動かさず、ほかのものの落とし先にもしない）
-  if (dragging.research || target.research) return null
+  // ビジネスリサーチのフォルダはオーケストラに入れない（動かさず、ほかのものの落とし先にもしない）。グローバルは先頭に固定（動かさず、落とし先にもしない）
+  if (isLooseFolder(dragging) || isLooseFolder(target) || isGlobalOrchestra(dragging) || isGlobalOrchestra(target)) return null
   if (isOrchestra(dragging)) {
     if (!isOrchestra(target)) return null
-    const list = orchestraList(all).filter((o) => o.id !== draggingId)
+    const list = groupOrchestras(all).filter((o) => o.id !== draggingId)
     const at = list.findIndex((o) => o.id === targetId)
     const before = position === 'before' ? targetId : list[at + 1]?.id ?? null
     return { id: draggingId, to: null, before }

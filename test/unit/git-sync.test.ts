@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
-  AUTO_FETCH_INTERVAL_MS, AUTO_FETCH_MAX_BACKOFF_MS, autoFetchAllowedByEnv, autoFetchDelayMs, classifyGitError, elapsedLabel, emptyFetchState,
+  AUTO_FETCH_INTERVAL_MS, AUTO_FETCH_MAX_BACKOFF_MS, autoFetchDelayMs, classifyGitError, elapsedLabel, emptyFetchState,
   gitActionAvailability, parseGitStatus, pushPrecondition, recordFetch, shouldFetch, type GitFetchState
 } from '@shared/gitSync'
 
@@ -118,18 +118,6 @@ describe('裏の fetch の予定', () => {
     expect(shouldFetch('interval', emptyFetchState(), now, true)).toBe(true)
   })
 
-  it('E2E の裏の fetch のスイッチ：ADE_E2E が無ければ何も変えず、E2E では ADE_E2E_GIT_FETCH=1 のときだけ走らせる', () => {
-    // 製品（ADE_E2E でない）は常に走らせる。ADE_E2E_GIT_FETCH を付けても外しても変わらない
-    expect(autoFetchAllowedByEnv({})).toBe(true)
-    expect(autoFetchAllowedByEnv({ ADE_E2E_GIT_FETCH: '1' })).toBe(true)
-    expect(autoFetchAllowedByEnv({ ADE_E2E_GIT_FETCH: '0' })).toBe(true)
-    expect(autoFetchAllowedByEnv({ ADE_E2E: '0', ADE_E2E_GIT_FETCH: '1' })).toBe(true)
-    // E2E は既定で止め、ADE_E2E_GIT_FETCH=1 のときだけ走らせる
-    expect(autoFetchAllowedByEnv({ ADE_E2E: '1' })).toBe(false)
-    expect(autoFetchAllowedByEnv({ ADE_E2E: '1', ADE_E2E_GIT_FETCH: 'true' })).toBe(false)
-    expect(autoFetchAllowedByEnv({ ADE_E2E: '1', ADE_E2E_GIT_FETCH: '1' })).toBe(true)
-  })
-
   it('失敗が続けば間隔を延ばす（最大 1 時間）', () => {
     expect(autoFetchDelayMs(0)).toBe(AUTO_FETCH_INTERVAL_MS)
     expect(autoFetchDelayMs(1)).toBe(2 * AUTO_FETCH_INTERVAL_MS)
@@ -171,7 +159,7 @@ describe('git の子プロセスは問い合わせを出さない', () => {
 describe('本物の git：fetch・最新の取得（fast-forward）・push', { timeout: 60_000 }, () => {
   let root = ''
   const saved: Record<string, string | undefined> = {}
-  const ENV_KEYS = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'ADE_E2E']
+  const ENV_KEYS = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']
   let seq = 0
 
   beforeAll(() => {
@@ -183,7 +171,6 @@ describe('本物の git：fetch・最新の取得（fast-forward）・push', { t
     process.env.GIT_CONFIG_NOSYSTEM = '1'
     process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = 'Taro'
     process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = 'taro@example.test'
-    delete process.env.ADE_E2E
   })
 
   afterAll(() => {
@@ -197,9 +184,23 @@ describe('本物の git：fetch・最新の取得（fast-forward）・push', { t
 
   const git = (cwd: string, ...args: string[]): string => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
-  /** bare のリモートと、それを clone した2つ（project が開いているフォルダ、other は別の人） */
+  /**
+   * bare のリモートと、それを clone した2つ（project が開いているフォルダ、other は別の人）。
+   * git を毎回8回起動して作ると遅いので、最初の1組を雛形にして写し、リモートの場所だけ書き換える
+   */
+  let template = ''
   function setup(): { remote: string; project: string; other: string } {
+    template ||= build(join(root, 'template'))
     const dir = join(root, `case-${++seq}`)
+    cpSync(template, dir, { recursive: true, verbatimSymlinks: true })
+    for (const clone of ['project', 'other']) {
+      const config = join(dir, clone, '.git', 'config')
+      writeFileSync(config, readFileSync(config, 'utf8').split(join(template, 'remote.git')).join(join(dir, 'remote.git')))
+    }
+    return { remote: join(dir, 'remote.git'), project: join(dir, 'project'), other: join(dir, 'other') }
+  }
+
+  function build(dir: string): string {
     const remote = join(dir, 'remote.git')
     execFileSync('git', ['init', '--quiet', '--bare', remote])
     const project = join(dir, 'project')
@@ -210,7 +211,7 @@ describe('本物の git：fetch・最新の取得（fast-forward）・push', { t
     git(project, 'commit', '--quiet', '-m', 'first')
     git(project, 'push', '--quiet', '-u', 'origin', 'main')
     execFileSync('git', ['clone', '--quiet', remote, other], { stdio: 'ignore' })
-    return { remote, project, other }
+    return dir
   }
 
   function commitIn(repo: string, file: string, content: string, push: boolean): void {
@@ -264,6 +265,35 @@ describe('本物の git：fetch・最新の取得（fast-forward）・push', { t
     git(project, 'remote', 'set-url', 'origin', 'https://127.0.0.1:9/other/repo.git')
     expect((await readGitStatus(project)).fetch.autoFetch).toBe('unknown')
     expect(await autoFetch(project, 'open', true)).toBeNull()
+  })
+
+  it('認めていないリモートで裏の fetch を頼んでも、同時に読んだ状態は「取得中」にならない（フッターの回る印が消えない不具合）', async () => {
+    await withConsentStore()
+    const { autoFetch, readGitStatus } = await sync()
+    const { project } = setup()
+    git(project, 'remote', 'set-url', 'origin', UNREACHABLE)
+    // フッターは 30 秒ごと・前に出すたびに、読み直しと裏の fetch を同時に頼む
+    for (const trigger of ['open', 'interval', 'focus'] as const) {
+      const [status, fetched] = await Promise.all([readGitStatus(project), autoFetch(project, trigger, true)])
+      expect(fetched).toBeNull()
+      expect(status.fetch.fetching).toBe(false)
+    }
+    // 同時に2つ頼まれても、重ねず、どちらも null（印も残らない）
+    const both = await Promise.all([autoFetch(project, 'open', true), autoFetch(project, 'open', true)])
+    expect(both).toEqual([null, null])
+    expect((await readGitStatus(project)).fetch.fetching).toBe(false)
+  })
+
+  it('認めたリモートの裏の fetch が終われば、取得中の印は消えている（届かないリモートでも時間内に終わる）', async () => {
+    await withConsentStore()
+    const { autoFetch, readGitStatus, decideAutoFetch } = await sync()
+    const { project } = setup()
+    git(project, 'remote', 'set-url', 'origin', UNREACHABLE)
+    await decideAutoFetch(project, true)
+    const fetched = await autoFetch(project, 'open', true)
+    expect(fetched?.fetch.fetching).toBe(false)
+    expect(fetched?.fetch.lastError).not.toBeNull()
+    expect((await readGitStatus(project)).fetch.fetching).toBe(false)
   })
 
   it('最新を取得：fast-forward で取り込み、ファイルが変わる', async () => {

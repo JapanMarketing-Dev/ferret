@@ -33,27 +33,6 @@
    * 並べているほかのものが映せなければ、その枠だけ暗いままにする（録画は続く）
    */
   function start(sourceId, target, main) {
-    // 検証用（E2E の偽の画面・ウインドウ。main の recording/fakeCapture.ts）。OS の画面収録に触れず、ID ごとに色の違う canvas を映す
-    if (params.get('synthetic') === '1') {
-      var canvas = document.createElement('canvas')
-      canvas.width = 640
-      canvas.height = 400
-      var ctx = canvas.getContext('2d')
-      var hue = 0
-      for (var i = 0; i < sourceId.length; i++) hue = (hue * 31 + sourceId.charCodeAt(i)) % 360
-      var n = 0
-      var draw = function () {
-        ctx.fillStyle = 'hsl(' + hue + ', 70%, 45%)'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-        ctx.fillStyle = '#ffffff'
-        ctx.fillRect((n * 8) % canvas.width, 180, 40, 40)
-        n++
-      }
-      draw()
-      setInterval(draw, 100)
-      target.srcObject = canvas.captureStream(10)
-      return
-    }
     navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxFrameRate: 30 } }

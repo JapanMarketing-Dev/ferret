@@ -5,6 +5,7 @@ import { app } from 'electron'
 import {
   EMPTY_AGENT_ACCOUNTS,
   accountDisplayName,
+  defaultLoginLabel,
   duplicateAccountIds,
   type AccountLoginRequest,
   type AgentAccount,
@@ -75,8 +76,18 @@ async function readIdentity(agent: AccountAgent, dir: string): Promise<AccountId
   return agent === 'codex' ? readCodexIdentity(dir) : readClaudeIdentity(dir)
 }
 
+/** 最後に読んだ「いつものログイン」。通知など、その場で読み直せないところで名前（メール）を出すために覚えておく */
+const lastDefaultLogin = new Map<AccountAgent, AccountIdentity>()
+
 export async function readSystemDefault(agent: AccountAgent): Promise<AccountIdentity> {
-  return agent === 'codex' ? readCodexIdentity(systemConfigDir('codex')) : readClaudeSystemIdentity()
+  const identity = await (agent === 'codex' ? readCodexIdentity(systemConfigDir('codex')) : readClaudeSystemIdentity())
+  lastDefaultLogin.set(agent, identity)
+  return identity
+}
+
+/** いつものログイン（保存値の null）の表示名。最後に読んだメール、まだ読んでいなければ「いつもの … のログイン」 */
+export function defaultLoginName(agent: AccountAgent): string {
+  return defaultLoginLabel(agent, lastDefaultLogin.get(agent))
 }
 
 /** 追加してからこの間にログインが済んだものだけを「追加したばかり」とみなす（重なったときに外す対象） */
@@ -134,7 +145,7 @@ async function refreshAgent(agent: AccountAgent): Promise<AgentAccountsView> {
       .map((s) => ({ ...s.account, signedIn: s.signedIn, problem: s.problem }))
       .sort((a, b) => a.createdAt - b.createdAt),
     activeAccountId,
-    systemDefault: { signedIn: systemDefault.signedIn, email: systemDefault.email },
+    systemDefault: { signedIn: systemDefault.signedIn, email: systemDefault.email, workspaceLabel: systemDefault.workspaceLabel },
     ...(removed.size > 0 ? { removedDuplicates: summaries.filter((s) => removed.has(s.account.id)).map((s) => accountDisplayName(s.account)) } : {})
   }
 }
@@ -255,7 +266,7 @@ export async function claudeChromeAccounts(): Promise<Set<string | null>> {
   return found
 }
 
-/** null を選ぶとシステムの既定アカウントへ戻す。ログインが済んでいないアカウントは選べない */
+/** null はいつものログイン（~/.claude・~/.codex のアカウント）。ログインが済んでいないアカウントは選べない */
 export async function selectAgentAccount(agent: AccountAgent, accountId: string | null): Promise<AgentAccountsState> {
   await serialize(async () => {
     const list = accountsSettings()[agent]

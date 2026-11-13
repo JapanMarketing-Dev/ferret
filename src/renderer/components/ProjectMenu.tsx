@@ -5,6 +5,7 @@ import { SHORTCUTS } from '../lib/shortcut'
 import { errorMessage } from '../lib/errors'
 import { Tooltip, useToast } from '../ui'
 import { useT } from '../lib/i18n'
+import { activeProjects } from '@shared/projectArchive'
 
 /**
  * タイトルバーのプロジェクト切替（簡易版）。
@@ -57,6 +58,8 @@ export function ProjectMenu({
 
   const switchTo = (project: Project) => run(() => window.ade.invoke('project:switch', project.id))
   const activeId = workspace.projectId ?? projects.activeProjectId
+  // アーカイブしたものは並べない（元に戻すのはサイドバーの「アーカイブ済み」。@shared/projectArchive）
+  const listed = activeProjects(projects.projects)
 
   return (
     <div className="project-menu" ref={rootRef}>
@@ -84,9 +87,9 @@ export function ProjectMenu({
 
       {open && (
         <div className="project-menu__panel" role="menu" aria-label={t('projectMenu.label')} data-testid="project-menu">
-          {projects.projects.length > 0 && (
+          {listed.length > 0 && (
             <ul className="project-menu__list">
-              {projects.projects.map((project) => {
+              {listed.map((project) => {
                 const active = project.id === activeId
                 return (
                   <li key={project.id} className={`project-menu__item${active ? ' is-active' : ''}`}>

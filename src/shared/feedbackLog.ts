@@ -40,7 +40,7 @@ const MAX_FRAMES = 20
 /** 1つの指摘の経過（直した・反応した）の数。古いものから捨てる */
 const MAX_TIMELINE = 100
 
-/** どの経路で送ったか。review: レビューの指摘、text: 文で送ったもの、request: 依頼の雛形、answers: human.md の答え */
+/** どの経路で送ったか。review: レビューの指摘、text: 文で送ったもの、request: 依頼の雛形、answers: human.md の答え（今は送らない。以前の記録を読むために残す） */
 export type FeedbackChannel = 'review' | 'text' | 'request' | 'answers'
 export const FEEDBACK_CHANNELS: readonly FeedbackChannel[] = ['review', 'text', 'request', 'answers']
 
@@ -564,14 +564,6 @@ export function feedbackTarget(projects: readonly Project[], projectId: string |
   if (!orchestra || orchestra.source === 'ssh') return null
   if (!orchestraMembers(projects, orchestra.id).some((p) => p.id === project.id)) return null
   return { orchestra, product: project.name }
-}
-
-/** human.md の答えを記録に書く形（答えた項目だけ。番号・プロダクト・見てほしいこと → 答え） */
-export function answersFeedbackText(items: ReadonlyArray<{ key: string; label: string; note: string; answer?: string }>): string {
-  return items
-    .filter((it) => it.answer?.trim())
-    .map((it) => `- ${it.key}${it.label ? ` [${oneLine(it.label, 80)}]` : ''}${it.note ? ` ${oneLine(it.note, 300)}` : ''} → ${it.answer!.trim()}`)
-    .join('\n')
 }
 
 /** 依頼の雛形を記録に書く形。組み込みのままのものは名前だけ（文面は Ferret の既定）、変えたもの・自作のものは文面も */

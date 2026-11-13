@@ -153,20 +153,24 @@ export function sanitizeUnsavedRefs(value: unknown, max = 1000): UnsavedFileRef[
   return out
 }
 
-/** 「保存して終了」で renderer が返す、ファイルの中身 */
-export interface QuitSaveEntry extends UnsavedFileRef {
-  content: string
-}
+/**
+ * 「保存して終了」で renderer が返す、ファイルの中身。
+ * saved は renderer が自分で書き終えたもの（Office の文書は fs:writeOffice で書く）。中身は送らず、書けた扱いにだけする
+ */
+export type QuitSaveContent = UnsavedFileRef & { content: string }
+export type QuitSaveEntry = QuitSaveContent | (UnsavedFileRef & { saved: true })
 
 export type QuitSaveRejection = 'unexpected' | 'tooLarge'
 
 export interface ScreenedQuitSave {
   /** 書いてよいもの（確認で示した未保存のファイルで、上限の内） */
-  accepted: QuitSaveEntry[]
+  accepted: QuitSaveContent[]
   /** 書かないもの。unexpected は確認で示していないファイル（renderer が勝手に足したもの） */
   rejected: Array<UnsavedFileRef & { reason: QuitSaveRejection }>
   /** 確認で示したのに中身が届かなかったもの（保存できていない＝終了しない） */
   missing: UnsavedFileRef[]
+  /** renderer が書き終えたと返したもの（確認で示したものだけ） */
+  saved?: UnsavedFileRef[]
 }
 
 /**
@@ -181,14 +185,24 @@ export function screenQuitSaveEntries(
 ): ScreenedQuitSave {
   const wanted = new Map(expected.map((file) => [unsavedKey(file), file]))
   const seen = new Set<string>()
-  const accepted: QuitSaveEntry[] = []
+  const accepted: QuitSaveContent[] = []
   const rejected: ScreenedQuitSave['rejected'] = []
+  const saved: UnsavedFileRef[] = []
   let total = 0
   const list = Array.isArray(value) ? value.slice(0, Math.max(expected.length, 1) * 2) : []
   for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue
-    const { root, path, content } = entry as { root?: unknown; path?: unknown; content?: unknown }
-    if (typeof root !== 'string' || typeof path !== 'string' || typeof content !== 'string') continue
+    const { root, path, content, saved: done } = entry as { root?: unknown; path?: unknown; content?: unknown; saved?: unknown }
+    if (typeof root !== 'string' || typeof path !== 'string') continue
+    if (done === true && content === undefined) {
+      const key = unsavedKey({ root, path })
+      const file = wanted.get(key)
+      if (seen.has(key) || !file) continue
+      seen.add(key)
+      saved.push(file)
+      continue
+    }
+    if (typeof content !== 'string') continue
     const key = unsavedKey({ root, path })
     if (seen.has(key)) continue
     seen.add(key)
@@ -200,5 +214,5 @@ export function screenQuitSaveEntries(
     accepted.push({ ...file, content })
   }
   const missing = expected.filter((file) => !seen.has(unsavedKey(file)))
-  return { accepted, rejected, missing }
+  return saved.length > 0 ? { accepted, rejected, missing, saved } : { accepted, rejected, missing }
 }

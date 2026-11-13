@@ -105,7 +105,10 @@ describe('security-4 [5][9] project file I/O is bound to the opened file and bou
     const list = files.slice(files.indexOf('export async function listDirectory'), files.indexOf('// ─── 読み書き'))
     // 読むのは dirEntries.ts の readDirEntries だけ（上限で切る）。macOS・Linux は opendir で少しずつ読む。
     // Windows は opendir の DirHandle の生成でアプリごと落ちたので readdir で読み、返す数は同じ上限で切る（FERRET-1Q）
-    expect(list).toMatch(/readDirEntries\(listed\.path, MAX_DIRECTORY_ENTRIES\)/)
+    // 上限は既定で MAX_DIRECTORY_ENTRIES（引数はテストが小さくするためだけ。IPC の fs:list は渡さない）
+    expect(list).toMatch(/limit = MAX_DIRECTORY_ENTRIES\): Promise<FsEntry\[\]>/)
+    expect(list).toMatch(/readDirEntries\(listed\.path, limit\)/)
+    expect(read('src/main/index.ts')).toMatch(/'fs:list': \(relDir\) => listDirectory\(projectRoot\(\), relDir\)/)
     expect(list).not.toMatch(/readdir\(|opendir\(/)
     const dirEntries = read('src/main/dirEntries.ts')
     expect(dirEntries).toMatch(/if \(platform === 'win32'\) \{\n\s+const all = await readdir\(path, \{ withFileTypes: true \}\)\n\s+return \{ entries: all\.slice\(0, max\)/)

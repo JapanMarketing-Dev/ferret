@@ -21,11 +21,12 @@ document.documentElement.classList.remove('platform-unknown')
 document.documentElement.classList.add(`platform-${window.ade.platform}`)
 // 配色（data-theme）は最初の描画より前に決める。ちらつかせないため
 initTheme()
-// 画面の言語も最初の描画より前に決める
-initLocale()
 // クラッシュレポート。配布版で設定が ON のときだけ（main が判断する）
 void initRendererCrashReporting()
 
-// StrictMode は使わない。effect が2回走るとPTYとWebContentsViewを
-// 二重に作ってしまい、開発時だけ挙動が変わるため。
-createRoot(document.getElementById('root') as HTMLElement).render(<App />)
+// 画面の言語も最初の描画より前に決める（今の言語の辞書だけを読み込んでから描く）
+void initLocale().then(() => {
+  // StrictMode は使わない。effect が2回走るとPTYとWebContentsViewを
+  // 二重に作ってしまい、開発時だけ挙動が変わるため。
+  createRoot(document.getElementById('root') as HTMLElement).render(<App />)
+})

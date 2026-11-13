@@ -6,7 +6,7 @@ import { BROWSER_SKILL_NAME, isBrowserSkill, renderBrowserSkill } from '@shared/
 
 /**
  * skill「ferret-browser」を、使っている Agent（設定のフォルダがあるもの）に入れて今の版に合わせる。
- * 同じ名前で Ferret のものでない skill（印の無いもの）・リンクは触らない（agentMail の skill と同じ）
+ * 同じ名前で Ferret のものでない skill（印の無いもの）・リンクは触らない
  */
 export async function syncBrowserSkill(version: string, home: string = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const { writeSkill } = await import('./agentSkill')

@@ -1,5 +1,4 @@
-import { en, type MessageKey, type Messages } from './en'
-import { ja } from './ja'
+import type { MessageKey, Messages } from './en'
 
 /**
  * 画面の言語（UI の文言）。日本語と英語だけ（ほかの言語は保守の手間に見合わないので 0.6.14 でやめた）。
@@ -10,28 +9,63 @@ import { ja } from './ja'
  *   1. このフォルダに <code>.ts を置き、`export const xx: LocaleMessages = { ... }` を書く
  *      （en.ts のキーが正本。欠け・余分・{{変数}} の不一致は test/unit/i18n.test.ts が落とす。
  *       ja だけは型でも欠けを検査する）
- *   2. 下の LOCALES・LOCALE_LABELS・INTL_TAG に1行ずつ足す
+ *   2. 下の LOCALE_CODES・LOADERS・LOCALE_LABELS・INTL_TAG に1行ずつ足す（main は src/main/locale.ts、テストは test/setup/i18n.ts にも）
  * 欠けたキーは実行時に英語で出る。
  *
  * 大きなライブラリ（i18next）は持ち込まず、小さな自前の t() にしている。
- * 使うのは「キー → 文」「{{name}} の置き換え」「数による単数・複数」「英語への後退」だけで、
- * 辞書は数千キーの文字列なので、遅延読み込みや名前空間は要らないため。
+ * 使うのは「キー → 文」「{{name}} の置き換え」「数による単数・複数」「英語への後退」だけ。
+ *
+ * 辞書（en.ts・ja.ts。それぞれ 200KB 超）はここでは読まない（このファイルを読むだけの preload に入れないため）。
+ *   - renderer … 今の言語の辞書だけを loadLocale() で動的 import する（描画の前と、言語を変えたとき）
+ *   - main …… 録画の言語など画面と違う言語でも文を作るので、src/main/locale.ts が両方を registerLocale() する
+ *   - テスト … test/setup/i18n.ts が両方を registerLocale() する
+ * 読み込んでいない言語の文は英語へ、英語も無ければキーそのものを返す（t() の前に読み込んでおくこと）。
  */
 
 export type { MessageKey, Messages } from './en'
 
-export const LOCALES = {
-  en,
-  ja
-} satisfies Record<string, Readonly<Record<string, string>>>
-export type SupportedLocale = keyof typeof LOCALES
+/** 対応する言語の一覧（辞書を読まずに判定できるよう、ここに並べる） */
+const LOCALE_CODES = ['en', 'ja'] as const
+export type SupportedLocale = (typeof LOCALE_CODES)[number]
+
+/** 読み込み済みの辞書。en はキーの正本で、欠けたキーの後退先 */
+export const LOCALES: Partial<Record<SupportedLocale, Partial<Messages>>> = {}
+
+const LOADERS: Record<SupportedLocale, () => Promise<Partial<Messages>>> = {
+  en: () => import('./en').then((m) => m.en),
+  ja: () => import('./ja').then((m) => m.ja)
+}
+
+/** 手元で読み込んだ辞書を登録する（main とテストは静的に import して両方を入れる） */
+export function registerLocale(locale: SupportedLocale, messages: Partial<Messages>): void {
+  LOCALES[locale] = messages
+}
+
+export function isLocaleLoaded(locale: SupportedLocale): boolean {
+  return LOCALES[locale] !== undefined
+}
+
+const loading = new Map<SupportedLocale, Promise<void>>()
+
+/** その言語の辞書を読み込む（済んでいれば何もしない）。読めなければ英語で出る */
+export function loadLocale(locale: SupportedLocale): Promise<void> {
+  if (isLocaleLoaded(locale)) return Promise.resolve()
+  let pending = loading.get(locale)
+  if (!pending) {
+    pending = LOADERS[locale]()
+      .then((messages) => registerLocale(locale, messages))
+      .finally(() => loading.delete(locale))
+    loading.set(locale, pending)
+  }
+  return pending
+}
 export type LocalePreference = 'system' | SupportedLocale
 
 export const DEFAULT_LOCALE: SupportedLocale = 'en'
 
 /** 画面に出す製品名。どの言語でも同じ表記（辞書の文中の名前もこれにそろえる） */
 export const PRODUCT_NAME = 'Ferret'
-export const SUPPORTED_LOCALES = Object.keys(LOCALES) as SupportedLocale[]
+export const SUPPORTED_LOCALES: SupportedLocale[] = [...LOCALE_CODES]
 export const LOCALE_PREFERENCES: readonly LocalePreference[] = ['system', ...SUPPORTED_LOCALES]
 
 /** 言語の名前は、どの言語の画面でもその言語自身の表記で出す（Orca と同じ） */
@@ -41,7 +75,7 @@ export const LOCALE_LABELS: Record<SupportedLocale, string> = {
 }
 
 export function isSupportedLocale(value: unknown): value is SupportedLocale {
-  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(LOCALES, value)
+  return typeof value === 'string' && (LOCALE_CODES as readonly string[]).includes(value)
 }
 
 /** 保存値の検査。未設定は system、知らない言語は英語にする（設定の sanitize が使う） */
@@ -95,6 +129,17 @@ export function setLocale(locale: SupportedLocale): void {
   for (const listener of listeners) listener(locale)
 }
 
+/** 辞書を読み込んでから言語を切り替える（renderer の言語の変更はこちらを使う） */
+export async function switchLocale(locale: SupportedLocale): Promise<void> {
+  if (!isSupportedLocale(locale)) return
+  try {
+    await loadLocale(locale)
+  } catch {
+    // 辞書が読めなくても切り替える（英語へ後退して出る）
+  }
+  setLocale(locale)
+}
+
 export function onLocaleChange(listener: (locale: SupportedLocale) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
@@ -132,6 +177,7 @@ function lookup(dict: Partial<Messages>, key: string): string | undefined {
  *   （Orca の fallbackLng: 'en' と同じ。画面が空になるより、英語やキーが見えるほうが気づける）
  */
 export function translate(locale: SupportedLocale, key: TranslationKey, params?: MessageParams): string {
+  const en: Partial<Messages> = LOCALES.en ?? {}
   const dict: Partial<Messages> = LOCALES[locale] ?? en
   let text: string | undefined
   if (typeof params?.count === 'number') {

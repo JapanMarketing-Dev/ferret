@@ -42,10 +42,6 @@ export function remotePageHtml(locale: RemotePageLocale): string {
     <div id="notice" class="notice" hidden></div>
     <ul id="terminals" class="cards"></ul>
     <p id="empty" class="muted center" hidden></p>
-    <details id="checklist" class="checklist" hidden>
-      <summary id="checklist-title"></summary>
-      <ul id="checklist-items"></ul>
-    </details>
   </section>
   <section id="view-term" class="view term" hidden>
     <div class="screen-wrap">
@@ -134,12 +130,6 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .muted { color: var(--muted); }
 .center { text-align: center; padding: 32px 8px; }
 .notice { padding: 14px; border-radius: 12px; border: 1px solid var(--danger); color: var(--danger); margin-bottom: 12px; }
-.checklist { margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 10px 14px; }
-.checklist summary { font-weight: 600; cursor: pointer; }
-.checklist ul { padding-left: 18px; margin: 8px 0 0; }
-.checklist li { margin: 6px 0; overflow-wrap: anywhere; }
-.checklist .key { font-weight: 600; margin-right: 6px; }
-.checklist .answer { color: var(--idle); font-size: 13px; }
 .term { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .screen-wrap { position: relative; flex: 1; min-height: 0; }
 .screen {
@@ -195,7 +185,7 @@ export const REMOTE_PAGE_JS = `(function () {
     working: '作業中', blocked2: '確認待ち', idle: '待機中', unknown: '—',
     shell: 'シェル', send: '送信', placeholder: 'Agent への指示…', wrap: '折り返し',
     sent: '送りました', ctrlc: 'Ctrl+C を送って、実行中の処理を止めますか？', gone: 'このターミナルは閉じられました。',
-    checklist: '人が確認すること', failed: '送れませんでした'
+    failed: '送れませんでした'
   } : {
     noToken: 'Open this page from the QR code or link in Ferret Settings > Phone remote.',
     badToken: 'This link is no longer valid. Scan the new QR code in Ferret Settings.',
@@ -205,7 +195,7 @@ export const REMOTE_PAGE_JS = `(function () {
     working: 'Working', blocked2: 'Waiting for you', idle: 'Idle', unknown: '—',
     shell: 'Shell', send: 'Send', placeholder: 'Message to the agent…', wrap: 'Wrap',
     sent: 'Sent', ctrlc: 'Send Ctrl+C and stop what is running?', gone: 'This terminal was closed.',
-    checklist: 'For you to check', failed: 'Could not send'
+    failed: 'Could not send'
   };
   var STATE_LABEL = { working: S.working, blocked: S.blocked2, idle: S.idle, unknown: S.unknown };
 
@@ -238,7 +228,7 @@ export const REMOTE_PAGE_JS = `(function () {
     stopped = true; clearTimeout(timer);
     showList();
     var n = $('notice'); n.textContent = message; n.hidden = false;
-    $('terminals').innerHTML = ''; $('empty').hidden = true; $('checklist').hidden = true;
+    $('terminals').innerHTML = ''; $('empty').hidden = true;
   }
   var toastTimer = null;
   function toast(message, bad) {
@@ -269,21 +259,6 @@ export const REMOTE_PAGE_JS = `(function () {
       terminals = (r.data && r.data.terminals) || [];
       if (!current) renderList();
     });
-  }
-  function loadChecklist() {
-    return api('GET', '/api/checklist').then(function (r) {
-      var items = (r.data && r.data.items) || [];
-      var box = $('checklist'); box.hidden = items.length === 0;
-      $('checklist-title').textContent = S.checklist + ' (' + items.length + ')';
-      var ul = $('checklist-items'); ul.innerHTML = '';
-      items.forEach(function (it) {
-        var li = document.createElement('li');
-        var k = document.createElement('span'); k.className = 'key'; k.textContent = it.key; li.appendChild(k);
-        li.appendChild(document.createTextNode([it.label, it.note].filter(Boolean).join(' — ')));
-        if (it.answer) { var a = document.createElement('div'); a.className = 'answer'; a.textContent = '✓ ' + it.answer; li.appendChild(a); }
-        ul.appendChild(li);
-      });
-    }).catch(function () {});
   }
 
   function nearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 48; }
@@ -363,7 +338,6 @@ export const REMOTE_PAGE_JS = `(function () {
   document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
 
   if (!token) { stop(S.noToken); return; }
-  loadChecklist();
   tick();
 })();
 `

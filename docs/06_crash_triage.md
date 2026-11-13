@@ -74,6 +74,7 @@ tags と添付で分かること（どれも利用者の内容は含まない）
   - `block.ipc` / contexts.block の inflight は「止まった間に待たされていた IPC」で、原因とは限らない（非同期の `fs:gitStatus` などが巻き添えで長く見える）
 - main では子プロセスを同期で起動しない（`execFileSync`・`execSync`・`spawnSync`）・同期のダイアログを使わない。`test/unit/main-blocking-policy.test.ts` が落とす。どうしても要るときはそのテストの ALLOWED に理由と一緒に足す
 - `opendir` は直接使わない（Windows で落ちる。FERRET-1Q）。`src/main/dirEntries.ts` の `readDirEntries` を使う（`test/unit/dir-entries.test.ts` が落とす）
+- マシン全体が詰まっている間（macOS の熱の状態が serious・critical、または 1分の load average ÷ CPU の数が 2 以上）の止まりは送らない（`isMachineOverloaded`）。0.7.13 の macOS の 1.1s・2.2s は、何本もの Agent とビルドで load average が約30、thermal-state-change が続く中で起き、止まりの手がかり（IPC・重い処理）は無かった。送る止まりにはタグ `block.thermal`・`block.load` を付ける
 - OS が CPU の速度に上限を掛けている間（`block.cpulimit`）は、遅れを上限で割り戻してから閾値と比べる（下限 25%）。0.7.8 の Windows の上限 50% 未満のときの 1.1〜1.5s は送らない（`shouldReportEventLoopBlock` の cpuSpeedLimit）
 - ターミナルを開くときの同期の処理は `pty:load`（node-pty のネイティブモジュールの読み込み）と `pty:spawn`（Windows の ConPTY の起動）の重い処理として出る。
   0.7.8 の Windows で更新後の最初のシェルのタブが 10.4s 止まった（FERRET-M）ので、更新後の初回起動では操作可能になった後に node-pty の `.node` を裏で読んで OS の検査を先に済ませる（`prereadNodePtyBinaries`）。
@@ -92,7 +93,7 @@ tags と添付で分かること（どれも利用者の内容は含まない）
 
 ## 6. 確認用の起動
 
-画面にダイアログを出さないよう、必ず `ADE_E2E=1 ADE_SYNTHETIC_MIC=1 FERRET_SENTRY_FORCE=1` を付け、一時の `--user-data-dir` で起動する（動いている dev は使わない）。
+マイクの許可を求めないよう `ADE_SYNTHETIC_MIC=1 FERRET_SENTRY_FORCE=1` を付け、一時の `--user-data-dir` で起動する（動いている dev は使わない）。
 
 ```
 FERRET_SENTRY_TEST=main,renderer,boundary,ipc,handled   # 1 / all でも同じ（以前の MOVIE_ADE_SENTRY_TEST も可）

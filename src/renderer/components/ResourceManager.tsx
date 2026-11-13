@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Globe, MemoryStick, RotateCw, SquareTerminal, Trash2, X } from 'lucide-react'
+import { resourcePollMs } from '../lib/idlePolling'
 import {
   formatCpu,
   formatMemory,
@@ -23,21 +24,25 @@ import { useT } from '../lib/i18n'
  * 「Space（ディスク使用量）」と「Clean up workspaces」は持ち込んでいない。
  */
 
-/** 開いている間は細かく、閉じている間はフッターの数字を保つだけの軽い間隔で取る */
-const OPEN_POLL_MS = 1500
-const CLOSED_POLL_MS = 10_000
+/**
+ * 開いている間は細かく、閉じている間はフッターの数字を保つだけの軽い間隔で取る。
+ * フッターの数字も見えていない（「…」に隠れている）間は取らない（取るたびに ps / PowerShell を起動する）
+ */
 
-function useResourceSnapshot(open: boolean): { snapshot: ResourceSnapshot | null; refresh: () => void } {
+
+function useResourceSnapshot(open: boolean, numberVisible: boolean): { snapshot: ResourceSnapshot | null; refresh: () => void } {
   const [snapshot, setSnapshot] = useState<ResourceSnapshot | null>(null)
   const refresh = useCallback(() => {
     // 最小化・裏のあいだは取らない（Windows は取るたびに PowerShell を起動する）
     if (document.hidden) return
     void window.ade.invoke('resources:snapshot').then(setSnapshot).catch(() => undefined) // 失敗は main の IPC が Sentry へ送る（ここは既定のまま続ける）
   }, [])
+  const pollMs = resourcePollMs(open, numberVisible)
   useEffect(() => {
+    if (pollMs === null) return
     // 開いたときはすぐ取る。閉じたまま（フッターの数字だけ）なら、起動の直後は少し待ってから
     const first = window.setTimeout(refresh, open ? 0 : firstSnapshotDelay(performance.now()))
-    const timer = window.setInterval(refresh, open ? OPEN_POLL_MS : CLOSED_POLL_MS)
+    const timer = window.setInterval(refresh, pollMs)
     // 表に戻ったらすぐ取り直す
     document.addEventListener('visibilitychange', refresh)
     return () => {
@@ -45,7 +50,7 @@ function useResourceSnapshot(open: boolean): { snapshot: ResourceSnapshot | null
       window.clearInterval(timer)
       document.removeEventListener('visibilitychange', refresh)
     }
-  }, [open, refresh])
+  }, [open, pollMs, refresh])
   return { snapshot, refresh }
 }
 
@@ -82,9 +87,12 @@ export function ResourceManager({
   onClose,
   onOpenTerminal,
   onOpenPage,
-  fallbackAnchor = null
+  fallbackAnchor = null,
+  numberVisible = true
 }: {
   open: boolean
+  /** フッターの数字が見えているか（「…」に隠れていれば false。閉じている間は取らない） */
+  numberVisible?: boolean
   onToggle: () => void
   onClose: () => void
   /** 行からそのターミナルへ移る（別のプロジェクトなら切り替えてから） */
@@ -95,7 +103,7 @@ export function ResourceManager({
   fallbackAnchor?: HTMLElement | null
 }) {
   const t = useT()
-  const { snapshot, refresh } = useResourceSnapshot(open)
+  const { snapshot, refresh } = useResourceSnapshot(open, numberVisible)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const [busy, setBusy] = useState(false)

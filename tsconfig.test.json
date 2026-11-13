@@ -3,19 +3,12 @@
     "target": "ES2022",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": [
-        "src/shared/*"
-      ]
+      "@shared/*": ["src/shared/*"]
     },
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": [
-      "ES2023",
-      "DOM"
-    ],
-    "types": [
-      "node"
-    ],
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"],
     "strict": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,

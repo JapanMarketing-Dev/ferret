@@ -8,6 +8,11 @@ import {
   PRODUCT_NAME,
   getLocale,
   interpolate,
+  isLocaleLoaded,
+  isSupportedLocale,
+  loadLocale,
+  registerLocale,
+  switchLocale,
   normalizeLocalePreference,
   normalizeSystemLocale,
   onLocaleChange,
@@ -34,7 +39,7 @@ describe('辞書', () => {
   const OPTIONAL_VARS: Record<string, string[]> = { 'menu.hide': ['app'], 'menu.quit': ['app'] }
 
   it.each(Object.keys(LOCALES).filter((l) => l !== 'en'))('%s: en と同じキーを持つ（欠けも余分も無い）', (locale) => {
-    const keys = Object.keys(LOCALES[locale as keyof typeof LOCALES])
+    const keys = Object.keys(LOCALES[locale as keyof typeof LOCALES] ?? {})
     expect({ missing: enKeys.filter((k) => !keys.includes(k)), extra: keys.filter((k) => !(k in en)) }).toEqual({ missing: [], extra: [] })
   })
 
@@ -202,5 +207,64 @@ describe('Agent に渡す feedback.md', () => {
     expect(jaMd).toContain('- 発話（原文）: ')
     // 明示した言語は今の言語より優先する
     expect(renderFeedbackMarkdown(document, { locale: 'en' })).toBe(enMd)
+  })
+})
+
+describe('辞書の読み込み（renderer は今の言語の分だけを読む）', () => {
+  const saved = { ...LOCALES }
+  afterEach(() => {
+    for (const key of Object.keys(LOCALES) as Array<keyof typeof LOCALES>) delete LOCALES[key]
+    Object.assign(LOCALES, saved)
+  })
+
+  it('辞書を読まなくても、対応する言語かどうかは判定できる', () => {
+    delete LOCALES.en
+    delete LOCALES.ja
+    expect(isSupportedLocale('ja')).toBe(true)
+    expect(isSupportedLocale('en')).toBe(true)
+    expect(isSupportedLocale('fr')).toBe(false)
+    expect(isSupportedLocale('toString')).toBe(false)
+    expect(normalizeSystemLocale('ja-JP')).toBe('ja')
+  })
+
+  it('読み込む前はキーをそのまま返し、loadLocale で読んだ後は訳が出る', async () => {
+    delete LOCALES.ja
+    delete LOCALES.en
+    expect(isLocaleLoaded('ja')).toBe(false)
+    expect(translate('ja', 'menu.file')).toBe('menu.file')
+    await loadLocale('ja')
+    expect(isLocaleLoaded('ja')).toBe(true)
+    expect(isLocaleLoaded('en')).toBe(false)
+    expect(translate('ja', 'menu.file')).toBe(saved.ja!['menu.file'])
+    // 読み込み済みなら同じ辞書のまま（2度読まない）
+    const dict = LOCALES.ja
+    await loadLocale('ja')
+    expect(LOCALES.ja).toBe(dict)
+  })
+
+  it('今の言語の辞書が無いときは英語へ後退する', () => {
+    delete LOCALES.ja
+    expect(translate('ja', 'menu.edit')).toBe('Edit')
+  })
+
+  it('switchLocale は辞書を読んでから切り替える（切り替えの通知の時点で訳が出る）', async () => {
+    delete LOCALES.ja
+    const seen: string[] = []
+    const off = onLocaleChange(() => seen.push(t('menu.file')))
+    await switchLocale('ja')
+    off()
+    expect(getLocale()).toBe('ja')
+    expect(seen).toEqual([saved.ja!['menu.file']])
+  })
+
+  it('知らない言語への switchLocale は何もしない', async () => {
+    await switchLocale('fr' as never)
+    expect(getLocale()).toBe('en')
+  })
+
+  it('registerLocale で入れた辞書を使う', () => {
+    registerLocale('ja', { 'menu.file': 'ふぁいる' })
+    expect(translate('ja', 'menu.file')).toBe('ふぁいる')
+    expect(translate('ja', 'menu.edit')).toBe('Edit')
   })
 })

@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { app, net, type BrowserWindow } from 'electron'
-import { accountDisplayName, dedupeAccountRows, EMPTY_AGENT_ACCOUNTS } from '@shared/accounts'
+import { accountDisplayName, dedupeAccountRows, defaultLoginLabel, EMPTY_AGENT_ACCOUNTS } from '@shared/accounts'
 import type { AccountUsage, ProviderRateLimits, UsageState } from '@shared/usage'
 import type { AccountAgent } from '@shared/types'
 import { currentSettings } from '../settings'
@@ -64,7 +63,7 @@ function activeAccountId(agent: AccountAgent): string | null {
 }
 
 /**
- * 見本データ（ADE_DEMO=1。E2E・撮影用で、通常起動では使わない）。
+ * 見本データ（ADE_DEMO=1。撮影用で、通常起動では使わない）。
  * Keychain やネットワークに触れずに、フッターの幅の確認ができるようにする。
  */
 function demoUsage(agent: AccountAgent): ProviderRateLimits {
@@ -75,26 +74,8 @@ function demoUsage(agent: AccountAgent): ProviderRateLimits {
     : { provider: 'codex', session: null, weekly: window(1, 10080, 10020), planType: 'plus', updatedAt: now, error: null, status: 'ok' }
 }
 
-/**
- * E2E 用の偽の使用量（ADE_E2E=1 と ADE_E2E_FAKE_USAGE のときだけ）。ファイルの JSON は { "codex:system": 99, "codex:<id>": 10 } の形で、
- * 書かれていないアカウントは「取れない」にする。取得先（Anthropic・OpenAI）にもキーチェーンにも触れない
- */
-function fakeUsage(agent: AccountAgent, target: Target | null): ProviderRateLimits {
-  const now = Date.now()
-  let table: Record<string, unknown> = {}
-  try {
-    table = JSON.parse(readFileSync(process.env.ADE_E2E_FAKE_USAGE!, 'utf8')) as Record<string, unknown>
-  } catch {
-    // 無い・壊れたファイルは「どれも取れない」（想定内）
-  }
-  const used = table[`${agent}:${target?.key ?? 'broken'}`]
-  if (typeof used !== 'number') return { provider: agent, session: null, weekly: null, updatedAt: now, error: null, status: 'unavailable' }
-  return { provider: agent, session: { usedPercent: used, windowMinutes: 300, resetsAt: now + 60 * 60_000 }, weekly: null, updatedAt: now, error: null, status: 'ok' }
-}
-
 function fetchFor(agent: AccountAgent, target: Target | null, force = false): Promise<ProviderRateLimits> {
   if (process.env.ADE_DEMO === '1') return Promise.resolve(demoUsage(agent))
-  if (process.env.ADE_E2E === '1' && process.env.ADE_E2E_FAKE_USAGE) return Promise.resolve(fakeUsage(agent, target))
   if (!target) {
     return Promise.resolve({
       provider: agent,
@@ -219,14 +200,14 @@ export async function refreshUsage(force: boolean): Promise<UsageState> {
   return state
 }
 
-/** アカウント別の内訳（既定アカウント＋追加したアカウント）。開いたときだけ呼ぶ */
-export async function getAccountUsage(agent: AccountAgent, force = false): Promise<AccountUsage[]> {
+/** アカウント別の内訳（いつものログイン＋追加したアカウント）。開いたときだけ呼ぶ。いつものログインもメールの名前で並べる */
+export async function getAccountUsage(agent: AccountAgent, force = false, inactiveMaxAgeMs = INACTIVE_FETCH_DEBOUNCE_MS): Promise<AccountUsage[]> {
   const list = accounts()[agent]
   const active = activeAccountId(agent)
   // システムの既定が登録したアカウントと同じログインなら1行にする（同じアカウントを2回追加したときも）
   const system = await (await import('../accounts')).readSystemDefault(agent).catch(() => null)
   const rows = dedupeAccountRows([
-    { accountId: null, label: t('accounts.systemDefault'), email: system?.signedIn ? system.email : null, workspaceLabel: system?.workspaceLabel ?? null },
+    { accountId: null, label: defaultLoginLabel(agent, system), email: system?.signedIn ? system.email : null, workspaceLabel: system?.workspaceLabel ?? null },
     ...list.accounts.filter((a) => a.lastAuthenticatedAt !== null).map((a) => ({ accountId: a.id, label: accountDisplayName(a), email: a.email, workspaceLabel: a.workspaceLabel }))
   ], active)
   return Promise.all(
@@ -238,7 +219,7 @@ export async function getAccountUsage(agent: AccountAgent, force = false): Promi
       if (isActive && state[agent]) rateLimits = state[agent]
       else {
         const cached = inactiveCache.get(cacheKey) ?? null
-        if (cached && !force && Date.now() - cached.updatedAt < INACTIVE_FETCH_DEBOUNCE_MS) rateLimits = cached
+        if (cached && !force && Date.now() - cached.updatedAt < inactiveMaxAgeMs) rateLimits = cached
         else {
           rateLimits = applyStalePolicy(await fetchFor(agent, target, force), cached)
           if (rateLimits.status === 'ok') inactiveCache.set(cacheKey, rateLimits)

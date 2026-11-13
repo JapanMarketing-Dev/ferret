@@ -7,12 +7,15 @@ import { useT, type TFunction } from '../lib/i18n'
 import { errorMessage } from '../lib/errors'
 import { subscribeIpc } from '../lib/ipcEvents'
 import { StatusPopover } from './StatusPopover'
+import { FOCUS_RELOAD_MIN_GAP_MS, FS_RELOAD_DEBOUNCE_MS, FS_RELOAD_MIN_GAP_MS, GIT_STATUS_POLL_MS as POLL_MS, reloadDelay } from '../lib/idlePolling'
 import '../styles/github.css'
 
 /**
  * フッターの「どの GitHub / GitLab（またはほかのリモート）の、どのブランチか」。例: [GitHub] JapanMarketing-Dev/ferret · develop •3 ↑1 ↓2
  *
- * 読み直すのは、プロジェクトの切り替え・ウインドウを前に出したとき・30 秒ごと・.git/HEAD と index の変化（main が知らせる）。
+ * 読み直すのは、プロジェクトの切り替え・.git/HEAD と index の変化（main が知らせる）・ファイルの変更（fs:changed。まとめて、前回から
+ * FS_RELOAD_MIN_GAP_MS は空ける）・ウインドウを前に出したとき（前回から FOCUS_RELOAD_MIN_GAP_MS 以上たっていれば）・5 分ごとの予備。
+ * 何も変わらない間は git を走らせない（以前は 30 秒ごとと前に出すたびに git を3回ずつ走らせていた）。
  * 遅れ（↓）が古くならないよう、裏で fetch する：プロジェクトを開いたとき（起動時・切り替えを含む）はすぐ、
  * あとはウインドウが見えている間 5 分ごとと前に出したとき（間隔・失敗の間の延ばし方は main と src/shared/gitSync.ts が決める）。
  * 失敗はトーストにせず、吹き出しに最後に確認した時刻と一緒に静かに出す。
@@ -22,7 +25,6 @@ import '../styles/github.css'
  * git でないフォルダでは何も出さない（後ろの区切り線も含めて。線だけが残らないよう、区切り線はこの部品が出す）。
  */
 
-const POLL_MS = 30_000
 
 /** GitHub のマーク（単色）。Octicons の mark-github（MIT） */
 function GitHubMark({ size = 12 }: { size?: number }) {
@@ -89,11 +91,13 @@ export function GitHubStatusItem() {
   const [now, setNow] = useState(() => Date.now())
   const anchor = useRef<HTMLButtonElement>(null)
   const loading = useRef(false)
+  const lastLoadAt = useRef<number | null>(null)
 
   const load = useCallback(async () => {
     // 前の読み取りが終わっていなければ重ねない
     if (loading.current) return
     loading.current = true
+    lastLoadAt.current = Date.now()
     try {
       setStatus(await window.ade.invoke('github:repoStatus'))
     } catch { // 失敗は main の IPC が Sentry へ送る（ここは既定のまま続ける）
@@ -121,8 +125,20 @@ export function GitHubStatusItem() {
       void load()
       void autoFetch('interval')
     }, POLL_MS)
-    const onFocus = () => { void load(); void autoFetch('focus') }
+    const onFocus = () => {
+      const last = lastLoadAt.current
+      if (last === null || Date.now() - last >= FOCUS_RELOAD_MIN_GAP_MS) void load()
+      // 裏の fetch は main が間隔を見て決める（5 分おき）
+      void autoFetch('focus')
+    }
     window.addEventListener('focus', onFocus)
+    // ファイルの変更（保存・Agent の書き換え）で未コミットの数が変わる。続けて届いたものは1回にまとめる
+    let fsTimer: number | undefined
+    const offFs = subscribeIpc('fs:changed', () => {
+      if (fsTimer !== undefined) return
+      fsTimer = window.setTimeout(() => { fsTimer = undefined; void load() },
+        reloadDelay(Date.now(), lastLoadAt.current, FS_RELOAD_DEBOUNCE_MS, FS_RELOAD_MIN_GAP_MS))
+    }, 'github')
     const offWorkspace = subscribeIpc('workspace:changed', () => {
       setMessage(null)
       setConfirmPush(null)
@@ -133,21 +149,26 @@ export function GitHubStatusItem() {
     return () => {
       window.clearInterval(timer)
       window.removeEventListener('focus', onFocus)
+      window.clearTimeout(fsTimer)
+      offFs()
       offWorkspace()
       offHead()
     }
   }, [load, autoFetch])
 
-  // 吹き出しを開いている間は「何分前」を進め、取得中なら様子を読み直す
+  // 吹き出しを開いている間は「何分前」を進める。取得中（回る印が出ている）なら、吹き出しを閉じていても 2 秒ごとに読み直し、
+  // 終わったらすぐ印を消す（30 秒ごとの読み直しまで回り続けない）
+  // main で別の操作（取り込み・push）が走っている（status.busy）ときも同じ
+  const inFlight = status?.fetch.fetching === true || (status?.busy ?? null) !== null
   useEffect(() => {
-    if (!open) return
+    if (!open && !inFlight) return
     setNow(Date.now())
     const timer = window.setInterval(() => {
       setNow(Date.now())
-      if (status?.fetch.fetching) void load()
-    }, status?.fetch.fetching ? 2_000 : 30_000)
+      if (inFlight) void load()
+    }, inFlight ? 2_000 : 30_000)
     return () => window.clearInterval(timer)
-  }, [open, status?.fetch.fetching, load])
+  }, [open, inFlight, load])
 
   const run = useCallback(async (action: UiAction) => {
     if (working) return

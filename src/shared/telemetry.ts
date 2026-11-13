@@ -55,13 +55,6 @@ export function crashReportsEnabled(settings: { crashReports?: boolean }): boole
 }
 
 interface CrashReportConditions {
-  /** E2E（ADE_E2E=1） */
-  e2e: boolean
-  /**
-   * 送信の確認用（FERRET_SENTRY_FORCE=1。以前の MOVIE_ADE_SENTRY_FORCE も可）。E2E の起動（ウインドウを出さず、OS の許可のダイアログも出さない）でも送る。
-   * 単体テストと設定 OFF には勝たない
-   */
-  forced?: boolean
   /** 単体テスト（VITEST） */
   unitTest: boolean
   /** 設定の「クラッシュレポートを送る」 */
@@ -71,10 +64,10 @@ interface CrashReportConditions {
 
 /**
  * 配布版と dev 起動の両方で送る（dev のエラーも集めて直すため）。
- * E2E・単体テスト・設定 OFF・DSN が空なら送らない。
+ * 単体テスト・設定 OFF・DSN が空なら送らない。
  */
 export function shouldSendCrashReports(c: CrashReportConditions): boolean {
-  return Boolean(c.dsn) && c.enabled && (!c.e2e || c.forced === true) && !c.unitTest
+  return Boolean(c.dsn) && c.enabled && !c.unitTest
 }
 
 interface TelemetryProfile {
@@ -499,9 +492,12 @@ export function shouldReportEventLoopBlock(s: {
   msSinceQuitRequest?: number | null
   msSinceSuspend?: number | null
   cpuSpeedLimit?: number | null
+  thermalState?: string | null
+  loadPerCpu?: number | null
 }): boolean {
   if (s.lagMs * cpuLimitScale(s.cpuSpeedLimit) <= s.thresholdMs) return false
   if (s.quitting || !s.appActive) return false
+  if (isMachineOverloaded(s.thermalState, s.loadPerCpu)) return false
   if (s.msSinceQuitRequest != null && s.msSinceQuitRequest < QUIT_GRACE_MS + s.lagMs) return false
   if (s.msSinceResume !== null && s.msSinceResume < RESUME_GRACE_MS + s.lagMs) return false
   if (s.msSinceSuspend != null && s.msSinceSuspend < RESUME_GRACE_MS + s.lagMs) return false
@@ -522,6 +518,33 @@ export function sleepNearBlock(s: { blockEndAt: number; lagMs: number; sleepAt: 
   const from = s.blockEndAt - s.lagMs - RESUME_GRACE_MS
   const to = s.blockEndAt + SLEEP_AFTER_BLOCK_MS
   return s.sleepAt.some((at) => at != null && Number.isFinite(at) && at >= from && at <= to)
+}
+
+/**
+ * 送らない、マシン全体が詰まっている状態（アプリの処理ではない遅れ。FERRET-M の 0.7.13 の macOS：
+ * 何本もの Agent・ビルドで load average が約30、thermal-state-change が続く中で 1.1s・2.2s。止まりの手がかりは無し）。
+ *   thermalState … macOS の熱の状態（powerMonitor の thermal-state-change）。serious・critical は OS が CPU を絞っている
+ *   loadPerCpu … 1分の load average を CPU の数で割った値。OVERLOADED_LOAD_PER_CPU 以上は CPU の取り合い
+ */
+export const OVERLOADED_LOAD_PER_CPU = 2
+
+export function isMachineOverloaded(thermalState: string | null | undefined, loadPerCpu: number | null | undefined): boolean {
+  if (thermalState === 'serious' || thermalState === 'critical') return true
+  return loadPerCpu != null && Number.isFinite(loadPerCpu) && loadPerCpu >= OVERLOADED_LOAD_PER_CPU
+}
+
+/** 熱の状態のタグ（知らない値は unknown） */
+export function thermalBucket(state: string | null | undefined): string {
+  return state === 'nominal' || state === 'fair' || state === 'serious' || state === 'critical' ? state : 'unknown'
+}
+
+/** CPU あたりの負荷の区分（タグにする） */
+export function loadBucket(loadPerCpu: number | null | undefined): string {
+  if (loadPerCpu == null || !Number.isFinite(loadPerCpu)) return 'unknown'
+  if (loadPerCpu < 0.5) return '<0.5'
+  if (loadPerCpu < 1) return '0.5-1'
+  if (loadPerCpu < 2) return '1-2'
+  return '2+'
 }
 
 /** CPU の速度の上限で割り戻すときの下限（%） */
@@ -626,11 +649,11 @@ export function uiTabTag(tab: string): string {
 }
 
 /**
- * 送る environment。確認用の起動（FERRET_SENTRY_FORCE・ADE_E2E）と、版に -verify が付いたビルドは verification
+ * 送る environment。確認用の起動（FERRET_SENTRY_FORCE）と、版に -verify が付いたビルドは verification
  * （production のアラートとクラッシュしなかった割合を汚さない）。それ以外は配布版が production、dev が development
  */
-export function resolveEnvironment(c: { packaged: boolean; version: string; forced: boolean; e2e: boolean }): 'production' | 'development' | 'verification' {
-  if (c.forced || c.e2e || /-verify\b/i.test(c.version)) return 'verification'
+export function resolveEnvironment(c: { packaged: boolean; version: string; forced: boolean }): 'production' | 'development' | 'verification' {
+  if (c.forced || /-verify\b/i.test(c.version)) return 'verification'
   return c.packaged ? 'production' : 'development'
 }
 
@@ -907,6 +930,10 @@ interface BlockEnvironment {
    * 省電力・熱で絞られている間は、アプリの処理でなくてもタイマーが遅れる（FERRET-M の 0.6.30 の Windows で続けて来ていた）
    */
   cpuSpeedLimit?: number | null
+  /** macOS の熱の状態（thermal-state-change。まだ来ていなければ null） */
+  thermalState?: string | null
+  /** 1分の load average ÷ CPU の数 */
+  loadPerCpu?: number | null
 }
 
 /** CPU の速度の上限のおおまかな区分（タグにする） */
@@ -969,6 +996,11 @@ export function eventLoopBlockContext(
     if (env.cpuSpeedLimit !== undefined) {
       tags['block.cpulimit'] = cpuLimitBucket(env.cpuSpeedLimit)
       context.cpu_speed_limit = env.cpuSpeedLimit === null ? 'unknown' : `${Math.round(env.cpuSpeedLimit)}%`
+    }
+    if (env.thermalState !== undefined) tags['block.thermal'] = thermalBucket(env.thermalState)
+    if (env.loadPerCpu !== undefined) {
+      tags['block.load'] = loadBucket(env.loadPerCpu)
+      context.load_per_cpu = env.loadPerCpu === null || !Number.isFinite(env.loadPerCpu) ? 'unknown' : env.loadPerCpu.toFixed(2)
     }
   }
   return { tags, context }

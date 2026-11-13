@@ -13,9 +13,13 @@ describe('ターミナルは右下に小さく（全プロジェクト）', () =
   it('どのプロジェクトでも、押すまでターミナルを隠す。プロジェクトを切り替えても開いた状態を戻さない', async () => {
     const app = await read('src/renderer/App.tsx')
     expect(app).toMatch(/const layout = !terminalPeek \?/)
-    expect(app).toContain("{mode === 'editor' && <button type=\"button\" className={`orchestra-peek")
+    expect(app).toContain("{mode === 'editor' && !terminalPeek && <button type=\"button\" className={`orchestra-peek")
+    // 開いたあとの「ターミナルを閉じる」ボタンは出さない（右のファイルの欄と重なる）
+    expect(app).not.toContain('orchestra.hideTerminal')
     expect(app).toContain("{mode === 'feedback' && <div className=\"orchestra-peeks\">")
-    expect(app).not.toMatch(/setTerminalPeek\(false\)/)
+    // 隠すのは人の操作（ターミナルの見出しのボタン）だけ。プロジェクトの切り替えなどでは戻さない
+    expect(app.match(/setTerminalPeek\(false\)/g)).toEqual(['setTerminalPeek(false)'])
+    expect(app).toContain('const hideTerminalPane = useCallback(() => setTerminalPeek(false), [])')
   })
 })
 

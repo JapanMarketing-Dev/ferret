@@ -48,19 +48,6 @@ import { sanitizeMobileRemotePrefs } from '@shared/mobileRemote'
  * 依存を増やさないため electron-store は使わず、小さなJSONを自前で読み書きする。
  */
 
-/**
- * E2E（ADE_E2E=1）ではAgentタブを自動で開かない。CLI の有無に左右されず、
- * 最初のタブがいつも素のシェルになるようにする（ターミナルのE2Eはプロンプトを待つ）
- */
-// 通し確認（tools/qa/flow-check.mjs）は偽の claude / codex で起動時のタブを確かめるので ADE_E2E_STARTUP_AGENTS=1 で残す
-const SKIP_STARTUP_AGENTS = process.env.ADE_E2E === '1' && process.env.ADE_E2E_STARTUP_AGENTS !== '1'
-
-/**
- * E2E では初回起動のセットアップを出さない（全面を覆って既存の操作が通らなくなる）。
- * セットアップ自体を撮るときだけ ADE_E2E_ONBOARDING=1 で出す
- */
-const SKIP_ONBOARDING = process.env.ADE_E2E === '1' && process.env.ADE_E2E_ONBOARDING !== '1'
-
 const DEFAULTS: Settings = {
   folderPath: null,
   url: DEFAULT_URL,
@@ -71,7 +58,7 @@ const DEFAULTS: Settings = {
   viewport: 'desktop',
   projects: [],
   activeProjectId: null,
-  agents: SKIP_STARTUP_AGENTS ? { ...DEFAULT_AGENT_PREFERENCES, startupAgents: [] } : DEFAULT_AGENT_PREFERENCES
+  agents: DEFAULT_AGENT_PREFERENCES
 }
 
 const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0
@@ -95,13 +82,13 @@ function sanitizeProjects(raw: unknown): Project[] {
     const addedAt = stamp(r.addedAt)
     const lastOpenedAt = stamp(r.lastOpenedAt)
     return [{ id: r.id, name: str(r.name) ? r.name : r.folderPath.split(/[\\/]/).pop() ?? r.folderPath, folderPath: r.folderPath, kind, ...origin, urls, ...(session ? { session } : {}),
-      ...(r.starred === true ? { starred: true as const } : {}), ...(r.orchestrator === true ? { orchestrator: true as const } : {}), ...(r.editorWorkspace === true ? { editorWorkspace: true as const } : {}), ...(r.orchestraExcluded === true ? { orchestraExcluded: true as const } : {}), ...(r.research === true && r.editorWorkspace !== true ? { research: true as const } : {}), ...(str(r.orchestraId) && r.editorWorkspace !== true ? { orchestraId: r.orchestraId } : {}), ...(sanitizeBrowserProfile(r.browserProfile) ? { browserProfile: sanitizeBrowserProfile(r.browserProfile) } : {}), ...(Array.isArray(r.members) && r.members.some(str) ? { members: [...new Set(r.members.filter(str))] } : {}), ...(addedAt ? { addedAt } : {}), ...(lastOpenedAt ? { lastOpenedAt } : {}) }]
+      ...(r.starred === true ? { starred: true as const } : {}), ...(r.orchestrator === true ? { orchestrator: true as const } : {}), ...(r.editorWorkspace === true ? { editorWorkspace: true as const } : {}), ...(r.orchestraExcluded === true ? { orchestraExcluded: true as const } : {}), ...(r.research === true && r.editorWorkspace !== true ? { research: true as const } : {}), ...(r.archived === true ? { archived: true as const } : {}), ...(r.work === true && r.editorWorkspace !== true ? { work: true as const } : {}), ...(r.global === true && r.editorWorkspace === true ? { global: true as const } : {}), ...(str(r.orchestraId) && r.editorWorkspace !== true ? { orchestraId: r.orchestraId } : {}), ...(sanitizeBrowserProfile(r.browserProfile) ? { browserProfile: sanitizeBrowserProfile(r.browserProfile) } : {}), ...(Array.isArray(r.members) && r.members.some(str) ? { members: [...new Set(r.members.filter(str))] } : {}), ...(addedAt ? { addedAt } : {}), ...(lastOpenedAt ? { lastOpenedAt } : {}) }]
   })
 }
 
 function sanitizeAgents(raw: unknown): AgentPreferences {
   const agents = sanitizeAgentPreferences(raw)
-  return SKIP_STARTUP_AGENTS ? { ...agents, startupAgents: [] } : agents
+  return agents
 }
 
 let cache: Settings | null = null
@@ -232,7 +219,7 @@ export function sanitize(raw: unknown): Settings {
 }
 
 /**
- * 設定フォルダ。E2E・--user-data-dir の起動は userData の下にして、本物の ~/.ferret に触れない。
+ * 設定フォルダ。--user-data-dir の起動は userData の下にして、本物の ~/.ferret に触れない。
  * dev 起動は ~/.ferret/dev（配布版の設定を開発中の変更で書き換えない）。
  * 最初に呼ばれたときに、改名前の ~/.movie-ade からの引っ越しを1度だけ行う（読む人より先に）。
  */
@@ -247,7 +234,7 @@ export function configDir(): string {
 
 let configDirPrepared = false
 
-/** 改名前の ~/.movie-ade（dev は ~/.movie-ade/dev）を写す。上書きの指定・E2E のときはしない。旧フォルダは残す */
+/** 改名前の ~/.movie-ade（dev は ~/.movie-ade/dev）を写す。上書きの指定・--user-data-dir のときはしない。旧フォルダは残す */
 function migrateFromLegacyConfigDirOnce(dir: string): void {
   if (isolatedUserData() || configDirOverride(process.env)) return
   const legacy = legacyConfigDir({ isPackaged: packagedBuild() })
@@ -266,10 +253,10 @@ function packagedBuild(): boolean {
 }
 
 function isolatedUserData(): string | null {
-  return process.env.ADE_E2E === '1' || app.commandLine?.hasSwitch?.('user-data-dir') ? app.getPath('userData') : null
+  return app.commandLine?.hasSwitch?.('user-data-dir') ? app.getPath('userData') : null
 }
 
-/** bd1d49b の dev 起動が ~/.movie-ade 直下に書いた設定を、1度だけ dev/ へ移す（改名の引っ越しの前。上書きの指定・E2E のときはしない） */
+/** bd1d49b の dev 起動が ~/.movie-ade 直下に書いた設定を、1度だけ dev/ へ移す（改名の引っ越しの前。上書きの指定・--user-data-dir のときはしない） */
 function relocateDevConfigOnce(dir: string): void {
   if (packagedBuild() || isolatedUserData() || configDirOverride(process.env)) return
   try {
@@ -286,14 +273,31 @@ let errorListener: ((error: SettingsFileError | null) => void) | null = null
 
 /** 読み込んだ直後の後処理（旧設定の folderPath → プロジェクト、セットアップを出すか） */
 function finishLoad(settings: Settings): Settings {
-  return migrateOnboarding(migrateLegacySettings(settings), { skip: SKIP_ONBOARDING })
+  return migrateOnboarding(migrateLegacySettings(settings))
 }
 
 /** 取り込んだ settings.json に、今の作業の状態（開いているフォルダ・タブ）を重ねる */
 function applyConfig(config: Record<string, unknown>): Settings {
   const { state } = splitSettings(currentSettings())
-  cache = migrateOnboarding(sanitize(mergeSettings(config, state)), { skip: SKIP_ONBOARDING })
+  cache = migrateOnboarding(sanitize(mergeSettings(config, state)))
+  notifySettingsChanged()
   return cache
+}
+
+/** 設定（cache）が変わったときに呼ぶもの。定期に読み直さず、変わったときだけ動くために使う（telemetry の送る・送らないなど） */
+const changeListeners = new Set<() => void>()
+export function onSettingsChanged(listener: () => void): () => void {
+  changeListeners.add(listener)
+  return () => changeListeners.delete(listener)
+}
+function notifySettingsChanged(): void {
+  for (const listener of changeListeners) {
+    try {
+      listener()
+    } catch (err) {
+      reportHandled(err, { area: 'settings', op: 'settings listener' })
+    }
+  }
 }
 
 function fileStore(): SettingsFileStore {
@@ -324,6 +328,7 @@ export async function loadSettings(): Promise<Settings> {
     reportHandled(errorKind(err), { area: 'settings', op: 'read settings' })
     cache = finishLoad({ ...DEFAULTS })
   }
+  notifySettingsChanged()
   return cache
 }
 
@@ -379,6 +384,7 @@ export function currentSettings(): Settings {
 /** 書き込みは起動後の操作でしか起きないため、まとめて遅延保存する */
 export function updateSettings(patch: Partial<Settings>): void {
   cache = sanitize({ ...currentSettings(), ...patch })
+  notifySettingsChanged()
   if (writeTimer) clearTimeout(writeTimer)
   writeTimer = setTimeout(() => {
     writeTimer = null

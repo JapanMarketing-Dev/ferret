@@ -6,22 +6,21 @@ import { CAPTURE_INDICATOR, UserGestures, ViewInputGrant, appMediaAllowed, captu
 import { programCopyText } from './terminalClipboard'
 import { showAgentNotification } from './agentNotify'
 import { failoverPrefs, initFailover, onUsageChanged, setFailoverPrefs, switchRunningAgents } from './failover/service'
-import { agentMailEnv, agentMailTerminalCreated, initAgentMail, revokeAgentMailSession, stopAgentMail, syncAgentMailSkill } from './agentMail'
 import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
-import { existsSync, realpathSync } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { existsSync, realpathSync, watch } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { SessionPaths } from './sessions/paths'
 import type { IncrementalTranscriber } from './pipeline/stt/engine'
 import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
-import { captureTargetLabel, resolveCaptureTarget, sanitizeCaptureTarget, targetSourceIds } from '@shared/captureTarget'
+import { captureTargetLabel, resolveCaptureTarget, sanitizeCaptureTarget, targetFromSource, targetSourceIds } from '@shared/captureTarget'
 import { mirrorSourceParam } from '@shared/captureComposite'
 import { AGENT_SKILL_AGENTS, type AgentSkillAgent, type SkillContext } from '@shared/agentSkill'
-import { BrowserWindow, Menu, Notification, app, clipboard, dialog, ipcMain, nativeImage, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { BrowserWindow, Menu, Notification, app, clipboard, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
+import { basename, dirname, join } from 'node:path'
 import type { IpcEventChannel, IpcEvents, IpcRequests } from '@shared/ipc'
 import type { AiVendor, LlmApiProvider, SttRemoteProvider } from '@shared/aiProviders'
 import {
@@ -42,24 +41,22 @@ import {
   type SttProvider,
   type WorkspaceState
 } from '@shared/types'
-import { isRecordableUrl, recordableTabs, sessionTabs, withProjectSession } from '@shared/projectSession'
+import { isRecordableUrl, recordableTabs, sessionTabs, startupBrowserTabs, withProjectSession } from '@shared/projectSession'
 import { THEME_BACKGROUND } from '@shared/theme'
 import { normalizeAnnotationColor } from '@shared/annotation'
 import { extensionPopupGetsReviewPreload, shouldCloseExtensionPopup, type AnnotationActivity, type PopupDismissCause } from '@shared/popupAnnotation'
 import { findProjectByFolder, markProjectOpened, newProject, reorderProjects, upsertProjectFolder } from './projects'
-import { currentOrchestra, moveInTree, orchestraList, orchestraMembers, removeOrchestra } from '@shared/orchestras'
+import { ensureWorkFolder, withWorkProject, workFolderPath } from './workProject'
+import { ensureGlobalFolder, globalFolderPath, withGlobalOrchestra } from './globalOrchestra'
+import { GLOBAL_PROJECTS_FILE, GLOBAL_RULES_FILE } from '@shared/globalOrchestra'
+import { archiveFallback, canArchive, isArchived } from '@shared/projectArchive'
+import { currentOrchestra, isGlobalOrchestra, moveInTree, orchestraList, orchestraMembers, removeOrchestra } from '@shared/orchestras'
 import { checkSshTarget, remoteWorkspaceDirName, sshDefaultName, type SshTarget } from '@shared/sshCommand'
 import { EmbeddedBrowser, browserSession, browserSessions, onBrowserSessionReady, type ProjectTabs, type TabsSnapshot } from './browser'
 import { browserPartition, sanitizeBrowserProfile } from '@shared/browserProfile'
 import { BrowserExtensions } from './browserExtensions'
 import { browserImportHandlers } from './browserImport/ipc'
 import { feedbackShareHandlers } from './feedbackShare/ipc'
-import { publishHandlers } from './publish/ipc'
-import { PublishStore } from './publish/store'
-import { PublishBackground } from './publish/background'
-import { PublishConnections } from './publish/connections'
-import { chooseKeyCipher } from './pipeline/stt/keys'
-import { waitForCallback } from './publish/xAuthServer'
 import { MAX_BROWSER_EXTENSIONS, relativeRect, sanitizeBrowserExtensions, type BrowserExtensionEntry, type BrowserExtensionInfo } from '@shared/browserExtensions'
 import { APP_ALLOWED_PERMISSIONS, installPermissionPolicy, isAllowedExternalUrl, isAppPageUrl, isBrowserPageExternalUrl, isSnapshotableBrowserUrl, type PermissionSessionLike } from './webPolicy'
 import { pathToFileURL } from 'node:url'
@@ -84,30 +81,32 @@ import {
   removeAgentAccount,
   renameAgentAccount,
   requireTuiAgent,
-  resolveAgentEnv,
   selectAgentAccount
 } from './accounts'
 import { attachUsageWindow, getAccountUsage, getUsageState, refreshUsage } from './usage/service'
 import { listAgentResources } from './agentResources'
-import { appVersion, checkForUpdate, isSuspendedNetworkError, usingE2eReleaseServer, verifiedDownload, verifiedFileOfKind } from './updateCheck'
+import { appVersion, checkForUpdate, isSuspendedNetworkError, verifiedDownload, verifiedFileOfKind } from './updateCheck'
 import { AutoUpdater } from './autoUpdate'
 import { installMethodFor } from '@shared/appUpdate'
 import { sanitizeLayout } from '@shared/layout'
 import { ResourceCollector } from './resources'
-import { ProjectWatcher, listDirectory, listFiles, readTextFile, resolveInside, searchFiles, writeTextFile } from './files'
-import { copyEntries, createEntry, importEntries, importMediaForMarkdown, moveEntries, pathsForClipboard, renameEntry, terminalDirFor, trashEntries, trashFor } from './fileOps'
+import { ProjectWatcher, invalidateFileIndex, listDirectory, listFiles, readTextFile, resolveInside, searchFiles, writeTextFile } from './files'
+import { copyEntries, createEntry, importEntries, importMediaForMarkdown, moveEntries, pathsForClipboard, renameEntry, terminalDirFor, trashEntries } from './fileOps'
 import { inspectProjectFile, projectMediaResponse, readOfficeFile } from './projectMedia'
 import { isRiskyToOpenExternally } from '@shared/fileViewer'
 import { refreshPreviewIn, registerPreviewProtocol, renderPreviewSource } from './preview'
 import { PREVIEW_SCHEME, stripPreviewGrant } from '@shared/preview'
 import { PROJECT_PAGE_SCHEME } from '@shared/htmlPreview'
+import { canRespond, isValidPlanId, responseMessage, sanitizeReply } from '@shared/visualReview'
+import { isInsideDir } from '@shared/sendTarget'
+import type { ScreenCache } from './screenCache'
 import { crashReportsActive, initCrashReporting, maybeSendTestEvent, reportMainError, sentryTestKinds, setTelemetryContext, noteQuitRequested, telemetryInstallId, trackIpc } from './telemetry'
 import { wrapIpcHandler } from '@shared/telemetry'
 import { errorKind, flow, reportHandled } from '@shared/report'
 import { isValidPort } from '@shared/mobileRemote'
 import { delay } from '@shared/delay'
 import { TerminalRestoreStore } from './terminalRestore'
-import { syntheticSystemAudio, systemAudioFeatures } from '@shared/systemAudio'
+import { systemAudioFeatures } from '@shared/systemAudio'
 import { acceptsDuringShutdown, replyAfterShutdown } from './ipcShutdown'
 
 /*
@@ -123,7 +122,7 @@ protocol.registerSchemesAsPrivileged([
 /*
  * userData は製品名（Ferret）ではなく、これまでと同じ「ade-movie」フォルダに固定する。
  * 名前で決まるままにすると、改名で既存の設定・プロジェクト・保存したキーが見えなくなる。
- * E2E などが --user-data-dir を渡したときはそちらに従う。Crashpad も userData に書くので、その前に決める。
+ * --user-data-dir を渡したときはそちらに従う。Crashpad も userData に書くので、その前に決める。
  */
 if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), 'ade-movie'))
 /*
@@ -295,7 +294,7 @@ async function showQuitMessageBox(options: Electron.MessageBoxOptions): Promise<
  * @returns 終了してよいなら true
  */
 async function resolveUnsavedBeforeQuit(): Promise<boolean> {
-  if (unsavedFiles.length === 0 || discardUnsavedConfirmed || IS_E2E) return true
+  if (unsavedFiles.length === 0 || discardUnsavedConfirmed) return true
   const snapshot = unsavedFiles
   const plan = planUnsavedQuit(snapshot, currentSettings().projects)
   const labels: Record<QuitAction, string> = {
@@ -394,6 +393,8 @@ async function receiveQuitSave(requestId: unknown, entries: unknown): Promise<Qu
     if (r.reason === 'tooLarge') outcomes.push({ root: r.root, path: r.path, ok: false, error: t('dialog.unsaved.tooLarge', { limit: QUIT_SAVE_MAX_BYTES / 1024 / 1024 }) })
   }
   for (const m of screened.missing) outcomes.push({ ...m, ok: false, error: t('dialog.unsaved.noReply') })
+  // Office の文書は renderer が fs:writeOffice で書き終えている
+  for (const done of screened.saved ?? []) outcomes.push({ ...done, ok: true })
   pending.resolve(outcomes)
   return outcomes
 }
@@ -406,7 +407,7 @@ function revealUnsavedFile(target: UnsavedQuitItem): void {
   const window = mainWindow
   if (window && !window.isDestroyed()) {
     if (window.isMinimized()) window.restore()
-    if (!window.isVisible() && !HIDE_WINDOW) window.show()
+    if (!window.isVisible()) window.show()
     window.focus()
   }
   try {
@@ -442,7 +443,7 @@ let activeOptions = { captureSystemAudio: false, captureMic: true, transcription
  * 文字起こし・整理のAPIキー（pipeline/stt/keys.ts）。配布版は OS の鍵で暗号化して userData/stt-keys.bin に保存する。
  * - 起動時・画面の表示では復号しない（has / source は保存した提供元の名前の一覧で答える）。
  *   復号（macOS では Keychain に触れる）は、実際に送る直前・接続の確認・キーの保存のときだけ（read / set）
- * - dev 起動・E2E では safeStorage を使わず、その起動中だけ持つ（Keychain の確認を出さない）
+ * - dev 起動では safeStorage を使わず、その起動中だけ持つ（Keychain の確認を出さない）
  */
 let sttKeys: SttKeyStore | null = null
 async function sttKeyStore(): Promise<SttKeyStore> {
@@ -450,7 +451,7 @@ async function sttKeyStore(): Promise<SttKeyStore> {
     const { SttKeyStore: Store, chooseKeyCipher, devKeyEnv } = await import('./pipeline/stt/keys')
     // 環境変数のキー（.env の OPENAI_API_KEY）は dev 起動のときだけ使う
     sttKeys = new Store(join(app.getPath('userData'), 'stt-keys.bin'),
-      chooseKeyCipher({ isPackaged: IS_PACKAGED, isE2E: IS_E2E, safeStorage }), devKeyEnv(IS_PACKAGED))
+      chooseKeyCipher({ isPackaged: IS_PACKAGED, safeStorage }), devKeyEnv(IS_PACKAGED))
   }
   return sttKeys
 }
@@ -475,11 +476,10 @@ let credentialOrigins: Promise<import('./credentialOrigin').CredentialOrigins> |
 
 /**
  * ターミナルのタブと画面の文字を、終了・閉じたあとに戻すために覚える（userData/terminal-restore.json。terminalRestore.ts）。
- * 設定の agents.restoreTerminals が切なら覚えない。E2E では ADE_E2E_TERMINAL_RESTORE=1 のときだけ（既存の E2E の起動の形を変えない）
+ * 設定の agents.restoreTerminals が切なら覚えない
  */
 let terminalRestoreStore: TerminalRestoreStore | null = null
 function terminalRestoreEnabled(): boolean {
-  if (process.env.ADE_E2E === '1' && process.env.ADE_E2E_TERMINAL_RESTORE !== '1') return false
   return currentSettings().agents.restoreTerminals
 }
 function terminalRestore(): TerminalRestoreStore {
@@ -627,8 +627,8 @@ async function sttEngineFor(transcription: import('@shared/types').SttProvider, 
     const gate = await gateCredentials(`stt:${provider}`, resolveEndpoint(preset, resolveEndpointRefs(capture?.sttEndpoints?.[provider], keyLookup())).baseUrl,
       capture?.sttEndpoints?.[provider], preset.vendor, [preset.baseUrl], false).then(() => null, (err: unknown) => err instanceof UserFacingError ? err.message : t('errors.endpointMissingWarning'))
     const apiKey = gate ? undefined : await providerKey(capture?.sttEndpoints?.[provider], preset.vendor)
-    // 上限は設定の値（null は上限なし）。検証起動では実API保護のため $0.05 に固定する
-    const maxCostUsd = IS_E2E ? 0.05 : capture?.costLimitUsd
+    // 上限は設定の値（null は上限なし）
+    const maxCostUsd = capture?.costLimitUsd
     if (gate) return { engine: null, kind: 'openai', warning: gate }
     if (preset.keyRequired && !apiKey) return { engine: null, kind: 'openai', warning: t('stt.errors.keyMissing', { label: providerLabel(preset, t) }) }
     try {
@@ -675,11 +675,15 @@ function send<C extends IpcEventChannel>(channel: C, ...args: Parameters<IpcEven
   const wc = window.webContents
   if (wc.isDestroyed()) return
   wc.send(channel, ...args)
+  // 登録したプロジェクトの一覧が変わったら、ferret-projects の skill の一覧（projects.md）も合わせる
+  if (channel === 'projects:changed') scheduleProjectsSkillSync()
 }
 
 /** 登録済みプロジェクトとして開くときは project を渡す。表示名はプロジェクト名を優先する */
 /** 開いているプロジェクトの外部の変更（Agent の書き換えなど）をエディタへ知らせる */
 const fileWatcher = new ProjectWatcher((event) => {
+  // ⌘P・名前の検索の索引は、次に使うときに読み直す（ファイルが増えた・消えたかは通知から分からないので、変わったら古いことにする）
+  invalidateFileIndex()
   send('fs:changed', event)
   // 内蔵ブラウザで開いているプレビューは、読み直さずに中身だけ差し替える（録画中の書き込みを残す）
   for (const tab of browser?.allContents() ?? []) refreshPreviewIn(tab, event.paths)
@@ -687,7 +691,19 @@ const fileWatcher = new ProjectWatcher((event) => {
   send('review:progressChanged', ids)
   // Agent が直した（human_review にした）ことを、オーケストラのフィードバックの記録に足す
   recordProgressFromDisk(ids)
-})
+}, () => send('visualReview:changed'))
+
+/** Office の文書の形式を変える LibreOffice（1つを使い回す。作業フォルダは利用者のデータの下） */
+let officeConverterInstance: import('./officeConvert').OfficeConverter | null = null
+async function officeConverter(): Promise<import('./officeConvert').OfficeConverter> {
+  if (officeConverterInstance) return officeConverterInstance
+  const { OfficeConverter, findSoffice } = await import('./officeConvert')
+  officeConverterInstance ??= new OfficeConverter({
+    workDir: join(app.getPath('userData'), 'office-convert'),
+    locate: () => findSoffice({ root: workspace.folderPath ?? undefined })
+  })
+  return officeConverterInstance
+}
 
 /** ファイルエディタの IPC が触ってよい根。未選択なら断る */
 function projectRoot(): string {
@@ -795,7 +811,6 @@ function applyExternalSettings(settings: Settings): void {
   void listAgentOptions(settings.agents).then((options) => send('agents:changed', options))
     .catch((err: unknown) => reportHandled(err, { area: 'settings', op: 'reload agents' }))
   syncTerminalRestore()
-  syncAgentMailSkillNow()
   send('projects:changed', projectsState())
   // 内蔵ブラウザの拡張機能（足す・外す・有効の切り替え）
   void extensions?.sync(settings.browserExtensions)
@@ -817,11 +832,6 @@ async function mobileRemoteService(): Promise<import('./mobileRemote').MobileRem
       projects: () => currentSettings().projects,
       agentLabel: (agent) => agentLabel(agent, currentSettings().agents),
       locale: () => (getLocale() === 'ja' ? 'ja' : 'en'),
-      // 開いているオーケストラの human.md（読むだけ）
-      checklist: async () => {
-        const editor = openOrchestra()
-        return editor ? (await (await import('./orchestraOverview')).readChecklist(editor.folderPath)).items : []
-      },
       // URL・合言葉・本文は渡さない（種類だけ）
       onError: (err, op) => reportHandled(errorKind(err), { area: 'mobile-remote', op })
     },
@@ -858,10 +868,30 @@ function assertNotRecording(): void {
  */
 function syncOrchestratorOnOpen(project: Project | null | undefined): void {
   if (!project?.orchestrator || project.source === 'ssh') return
-  void import('./orchestrator')
-    .then(({ syncOrchestrator }) => syncOrchestrator(project.folderPath, currentSettings().projects, true, membersOf(project), guideLanguage(), currentSettings().orchestra, project.name))
+  void Promise.all([import('./orchestrator'), orchestraRulesWithGlobal()])
+    .then(async ([{ syncOrchestrator }, rules]) => {
+      // グローバルのオーケストラは、rules.md・projects.md を足し、全部への適用の仕方を欄に書く（src/main/globalOrchestra.ts）
+      const global = isGlobalOrchestra(project) ? await prepareGlobalFolder(project) : undefined
+      return syncOrchestrator(project.folderPath, currentSettings().projects, true, membersOf(project), guideLanguage(), rules, project.name, global)
+    })
     // .claude がリンクなのは利用者の置き方（書かないのが正しい）。Sentry へは送らない
     .catch((err: unknown) => { if ((err as Error)?.name !== 'SubagentLinkError') reportHandled(err, { area: 'agent-launch', op: 'sync orchestrator subagents' }) })
+}
+
+/** 全体のルール（グローバルの rules.md）を足したオーケストラのルール。グローバルが無い・隠した・読めないときは設定のルールだけ */
+async function orchestraRulesWithGlobal(): Promise<import('@shared/orchestrator').OrchestraRules | undefined> {
+  const rules = currentSettings().orchestra
+  const global = currentSettings().projects.find(isGlobalOrchestra)
+  if (!global || global.archived) return rules
+  const body = await (await import('./globalOrchestra')).readGlobalRules(global.folderPath).catch(() => '')
+  return body ? { ...rules, global: body } : rules
+}
+
+/** グローバルのフォルダの rules.md（無ければ雛形）と projects.md を書き、欄に書く場所を返す */
+async function prepareGlobalFolder(project: Project): Promise<import('@shared/globalOrchestra').GlobalGuide> {
+  const { syncGlobalFiles } = await import('./globalOrchestra')
+  await syncGlobalFiles(project.folderPath, currentSettings().projects, guideLanguage())
+  return { rulesPath: join(project.folderPath, GLOBAL_RULES_FILE), projectsPath: join(project.folderPath, GLOBAL_PROJECTS_FILE) }
 }
 
 /** オーケストレーターの子にするプロジェクト。オーケストラはそこに属するプロジェクト（SSH・外したものを除く。@shared/orchestras） */
@@ -878,7 +908,8 @@ function openOrchestra(): Project | null {
 /** 足したプロジェクトを、開いているオーケストラに入れる */
 function assignToOpenOrchestra(projects: Project[], id: string): Project[] {
   const orchestra = currentOrchestra(projects, workspace.projectId)
-  return orchestra ? projects.map((p) => (p.id === id && !p.editorWorkspace ? { ...p, orchestraId: orchestra.id } : p)) : projects
+  // グローバルを開いているときは、どのグループにも入れない（先頭のグループに属するとみなされる）
+  return orchestra && !isGlobalOrchestra(orchestra) ? projects.map((p) => (p.id === id && !p.editorWorkspace ? { ...p, orchestraId: orchestra.id } : p)) : projects
 }
 
 /** 新しいオーケストラを作って開く。Ferret のデータの下に専用のフォルダを作り、そこに所属するプロジェクトがリンクで入る */
@@ -912,7 +943,8 @@ function moveProjectInTree(id: string, toOrchestraId: string | null, beforeId: s
  */
 async function ensureEditorWorkspace(): Promise<void> {
   const settings = currentSettings()
-  const existing = settings.projects.find((p) => p.editorWorkspace)
+  // グローバルのオーケストラは数えない（プロジェクトが属せるグループが1つは要る）
+  const existing = settings.projects.find((p) => p.editorWorkspace && !p.global)
   if (existing) {
     // 0.4.26 の既定の名前（すべてのプロジェクト）は今の名前（すべてのプロダクト）に揃える。利用者が付けた名前は変えない
     if (['すべてのプロジェクト', 'All projects'].includes(existing.name) && existing.name !== t('editorWorkspace.name')) {
@@ -929,33 +961,111 @@ async function ensureEditorWorkspace(): Promise<void> {
   updateSettings({ projects: [editor, ...projects.filter((p) => p.id !== editor.id)] })
 }
 
-/** オーケストラの中身（リンク・subagent）を、今の登録に合わせる（プロジェクトを足した・消した・移した・開いたとき）。全部のオーケストラ */
+/** グローバルのオーケストラの置き場（src/main/globalOrchestra.ts）。work と同じく、配布版は ~/Ferret/global、開発版・E2E は設定フォルダの下 */
+function globalFolder(): string {
+  return globalFolderPath({ home: homedir(), configDir: configDir(), shared: IS_PACKAGED && !app.commandLine.hasSwitch('user-data-dir') })
+}
+
+/** グローバルのオーケストラを用意する（起動時）。一覧に無ければ足し（以前の版からの更新でも1回）、隠して（アーカイブして）いなければフォルダを作り直す */
+function ensureGlobalOrchestra(): void {
+  const { projects } = currentSettings()
+  const next = withGlobalOrchestra(projects, globalFolder(), t('globalOrchestra.name'))
+  if (next !== projects) updateSettings({ projects: next })
+  const global = next.find(isGlobalOrchestra)
+  if (global && !global.archived) ensureGlobalFolder(global.folderPath)
+}
+
+let globalRulesTimer: NodeJS.Timeout | null = null
+let globalRulesWatcher: { folder: string; close(): void } | null = null
+
+/**
+ * 全体のルール（グローバルの rules.md）を写す。続けて変わったときは1回にまとめる。
+ * - すべてのオーケストラの欄・subagent（syncEditorWorkspace が rules.md を読み直す）
+ * - Claude Code・Codex の全体の指示（配布版だけ。開発版・E2E は、ふだん使う Agent の設定に触らない）
+ */
+function scheduleGlobalRulesSync(delayMs = 1000): void {
+  if (globalRulesTimer) clearTimeout(globalRulesTimer)
+  globalRulesTimer = setTimeout(() => {
+    globalRulesTimer = null
+    syncEditorWorkspace()
+    if (!IS_PACKAGED) return
+    const global = currentSettings().projects.find(isGlobalOrchestra)
+    void import('./globalOrchestra')
+      .then(async ({ readGlobalRules, syncAgentGlobalRules }) => {
+        // 隠した・消したときは空として、Ferret が写したものを外す
+        const body = global && !global.archived ? await readGlobalRules(global.folderPath) : ''
+        return syncAgentGlobalRules(body, global ? join(global.folderPath, GLOBAL_RULES_FILE) : GLOBAL_RULES_FILE)
+      })
+      .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync global rules' }))
+  }, delayMs)
+  globalRulesTimer.unref?.()
+}
+
+/** グローバルのフォルダの rules.md の変更を見張る（Agent・人が書き換えたらすぐ写す）。フォルダが変わった・隠したら付け直す */
+function watchGlobalRules(): void {
+  const global = currentSettings().projects.find(isGlobalOrchestra)
+  const folder = global && !global.archived ? global.folderPath : null
+  if (globalRulesWatcher?.folder === folder) return
+  globalRulesWatcher?.close()
+  globalRulesWatcher = null
+  // 隠した・戻した・置き場が変わったら、Agent の全体の指示も合わせる（隠したら外す）
+  scheduleGlobalRulesSync()
+  if (!folder) return
+  try {
+    const watcher = watch(folder, { persistent: false }, (_event, file) => {
+      if (!file || String(file) === GLOBAL_RULES_FILE) scheduleGlobalRulesSync()
+    })
+    watcher.on('error', () => { watcher.close(); if (globalRulesWatcher?.folder === folder) globalRulesWatcher = null })
+    globalRulesWatcher = { folder, close: () => watcher.close() }
+  } catch {
+    // 見張れない（フォルダが無い・上限）ときは、起動・プロジェクトの変更・開いたときの同期だけで写す
+  }
+}
+
+/** オーケストラの中身（リンク・subagent）を、今の登録に合わせる（プロジェクトを足した・消した・移した・開いたとき）。アーカイブしたものを除く全部のオーケストラ */
 function syncEditorWorkspace(): void {
-  for (const orchestra of orchestraList(currentSettings().projects)) syncOrchestratorOnOpen(orchestra)
+  for (const orchestra of orchestraList(currentSettings().projects)) if (!orchestra.archived) syncOrchestratorOnOpen(orchestra)
+}
+
+/** 作業用のフォルダ「work」の置き場（src/main/workProject.ts）。配布版は ~/Ferret/work、開発版は設定フォルダの下 */
+function workFolder(): string {
+  return workFolderPath({ home: homedir(), configDir: configDir(), shared: IS_PACKAGED && !app.commandLine.hasSwitch('user-data-dir') })
+}
+
+/**
+ * 既定のプロジェクト「work」を用意する（起動時）。一覧に無ければ足し（以前の版からの更新でも1回）、隠して（アーカイブして）いなければフォルダを作り直す
+ */
+function ensureWorkProject(): void {
+  const { projects } = currentSettings()
+  const next = withWorkProject(projects, workFolder())
+  if (next !== projects) updateSettings({ projects: next })
+  const work = next.find((p) => p.work)
+  if (work && !work.archived) ensureWorkFolder(work.folderPath)
+}
+
+let projectsSkillTimer: NodeJS.Timeout | null = null
+
+/**
+ * skill「ferret-projects」と、その一覧（projects.md）を今の登録に合わせる。続けて変わったときは1回にまとめる。
+ * 配布版だけ（開発版は、ふだん使う Agent の skill に触らない）
+ */
+function scheduleProjectsSkillSync(delayMs = 1000): void {
+  // グローバルのオーケストラの見張り（隠した・戻した・置き場が変わった）を合わせる
+  watchGlobalRules()
+  if (!IS_PACKAGED) return
+  if (projectsSkillTimer) clearTimeout(projectsSkillTimer)
+  projectsSkillTimer = setTimeout(() => {
+    projectsSkillTimer = null
+    void import('./projectsSkill')
+      .then(({ syncProjectsSkill }) => syncProjectsSkill(app.getVersion(), currentSettings().projects))
+      .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync projects skill' }))
+  }, delayMs)
+  projectsSkillTimer.unref?.()
 }
 
 /** オーケストレーターの README・CLAUDE.md の人が書く部分の雛形の言語（画面の言語が日本語なら日本語） */
 function guideLanguage(): 'ja' | 'en' {
   return getLocale() === 'ja' ? 'ja' : 'en'
-}
-
-/**
- * 決まった起動（@shared/codexAudit）の引数。Codex のセキュリティ監査は、依頼文を開くフォルダの .ferret/requests/ に書き、
- * モデル・考える深さ・そのファイルを読む短い依頼を引数にする。preset が無い・Codex でないときは何も足さない
- */
-async function terminalPresetArgs(options: import('@shared/types').TerminalCreateOptions): Promise<string[]> {
-  const { isTerminalPreset, codexAuditArgs, CODEX_AUDIT_FILE } = await import('@shared/codexAudit')
-  if (!isTerminalPreset(options.preset)) return []
-  if (options.agent !== 'codex') return []
-  const folder = typeof options.cwd === 'string' && options.cwd ? options.cwd : workspace.folderPath
-  if (!folder || !currentSettings().projects.some((p) => p.folderPath === folder)) throw new UserFacingError(t('errors.openProjectFolder'))
-  const { composeAgentRequest, resolveAgentRequests } = await import('@shared/agentRequests')
-  const lang = guideLanguage()
-  const request = resolveAgentRequests(currentSettings().agentRequests, lang).filter((r) => r.id === 'security-codex')
-  const file = join(folder, ...CODEX_AUDIT_FILE.split('/'))
-  await mkdir(dirname(file), { recursive: true })
-  await (await import('./sessions/containment')).writeFileNoFollow(file, composeAgentRequest(request, lang, false) + '\n')
-  return codexAuditArgs(lang)
 }
 
 /** オーケストレーターにする・やめる。子の subagent を書く・消す */
@@ -966,7 +1076,7 @@ async function setProjectOrchestrator(id: unknown, enabled: unknown): Promise<{ 
   if (current.source === 'ssh') throw new UserFacingError(t('errors.folderNotRegistered'))
   const on = enabled === true
   const { SubagentLinkError, syncOrchestrator } = await import('./orchestrator')
-  const result = await syncOrchestrator(current.folderPath, settings.projects, on, membersOf(current), guideLanguage(), currentSettings().orchestra, current.name).catch((err: unknown) => {
+  const result = await syncOrchestrator(current.folderPath, settings.projects, on, membersOf(current), guideLanguage(), await orchestraRulesWithGlobal(), current.name).catch((err: unknown) => {
     if (err instanceof SubagentLinkError) throw new UserFacingError(t('orchestrator.linkRefused'))
     throw err
   })
@@ -983,6 +1093,8 @@ async function setProjectOrchestrator(id: unknown, enabled: unknown): Promise<{ 
  * 内蔵ブラウザが空か、前のプロジェクトのURLを表示しているなら、このプロジェクトの先頭URLへ移る。
  */
 function openProject(project: Project): WorkspaceState {
+  // work のフォルダを消されていたら作り直してから開く
+  if (project.work) ensureWorkFolder(project.folderPath)
   const previousId = workspace.projectId
   // 前のプロジェクトのタブ（戻る・進むの履歴ごと）は、このプロジェクトに切り替える前に写しておく
   const previousTabs = browser && previousId && previousId !== project.id ? browser.snapshotTabs() : null
@@ -1004,6 +1116,7 @@ function openProject(project: Project): WorkspaceState {
     // ログインの組（既定は全プロジェクトで共有。設定で分けたプロジェクトはその組の session）
     browser.setPartition(browserPartition(saved.browserProfile))
     browser.replaceTabs(parked, sessionTabs(saved))
+    browserTabsOwner = project.id
   }
   // 録画の対象の画面・ウインドウは前のプロジェクトで選んだもの。別のアプリを映したり録ったりしないよう、内蔵ブラウザに戻す
   if (captureConsent.target.kind !== 'browser') setCaptureTargetFromMain({ kind: 'browser' })
@@ -1016,7 +1129,8 @@ function openProject(project: Project): WorkspaceState {
  */
 function recordProjectUrl(state: BrowserState): void {
   const id = workspace.projectId
-  if (!id || state.loading || !isRecordableUrl(state.url)) return
+  // 開いているタブが別のプロジェクトのもの（入れ替える前・起動直後の全体の URL）なら覚えない
+  if (!id || id !== browserTabsOwner || state.loading || !isRecordableUrl(state.url)) return
   // 読み込み途中のタブがあれば、その URL が決まってから覚える（切り替え直後の空のタブで前の値を消さない）
   if (state.tabs?.some((tab) => tab.loading)) return
   const { projects } = currentSettings()
@@ -1033,6 +1147,8 @@ function recordProjectUrl(state: BrowserState): void {
 
 /** 切り替えて離れたプロジェクトの内蔵ブラウザのタブ（戻る・進むの履歴ごと）。アプリを開いている間だけ持つ */
 const parkedBrowserTabs = new Map<string, TabsSnapshot>()
+/** 内蔵ブラウザに開いているタブが属するプロジェクト（起動時と、プロジェクトの切り替えで入れ替えたときに決まる） */
+let browserTabsOwner: string | null = null
 
 /** フォルダを登録して開く。同じフォルダが登録済みならそれを開く */
 function openFolderAsProject(folderPath: string): WorkspaceState {
@@ -1127,6 +1243,19 @@ function removeProject(id: string): ProjectsState {
   return projectsState()
 }
 
+/** 開いているプロジェクトがアーカイブで隠れたら、隠していない先頭（オーケストラ優先）へ移る。無ければ何も開いていない状態 */
+function leaveArchivedWorkspace(): void {
+  const { projects } = currentSettings()
+  const open = projects.find((p) => p.id === workspace.projectId)
+  if (!open || !isArchived(projects, open)) return
+  const fallback = archiveFallback(projects)
+  if (fallback) openProject(fallback)
+  else {
+    updateSettings({ activeProjectId: null, folderPath: null })
+    send('workspace:changed', setWorkspace(null))
+  }
+}
+
 /** 名前・URLの変更。フォルダは変えられない（別フォルダは別プロジェクトとして足す） */
 function updateProject(next: ProjectUpdate): ProjectsState {
   const settings = currentSettings()
@@ -1145,6 +1274,17 @@ function updateProject(next: ProjectUpdate): ProjectsState {
   const orchestraChanged = typeof next.orchestraExcluded === 'boolean' && next.orchestraExcluded !== !!current.orchestraExcluded
   if (next.orchestraExcluded === true) merged.orchestraExcluded = true
   else if (next.orchestraExcluded === false) delete merged.orchestraExcluded
+  // アーカイブ・元に戻す（@shared/projectArchive）。消さずに一覧・オーケストラから隠すだけ。最後のオーケストラはアーカイブできない
+  const archiveChanged = typeof next.archived === 'boolean' && next.archived !== !!current.archived
+  if (archiveChanged && next.archived && !canArchive(settings.projects, current.id)) throw new UserFacingError(t('archive.lastOrchestra'))
+  if (next.archived === true) merged.archived = true
+  else if (next.archived === false) delete merged.archived
+  if (archiveChanged && next.archived) {
+    // 開いているものが隠れるなら、録画中は切り替えない
+    const after = settings.projects.map((p) => (p.id === next.id ? merged : p))
+    const open = after.find((p) => p.id === workspace.projectId)
+    if (open && isArchived(after, open)) assertNotRecording()
+  }
   // ブラウザのログインの組（空で共有に戻す）。開いているプロジェクトなら、タブを新しい組で開き直す
   if (typeof next.browserProfile === 'string') {
     const profile = sanitizeBrowserProfile(next.browserProfile)
@@ -1158,7 +1298,9 @@ function updateProject(next: ProjectUpdate): ProjectsState {
     const saved = currentSettings().projects.find((p) => p.id === next.id) ?? merged
     send('workspace:changed', setWorkspace(saved.folderPath, saved))
   }
-  if (orchestraChanged) syncEditorWorkspace()
+  if (orchestraChanged || archiveChanged) syncEditorWorkspace()
+  // 開いているもの（オーケストラごと隠したときはその子も）を隠したら、隠していないものへ移る
+  if (archiveChanged && next.archived) leaveArchivedWorkspace()
   if (partitionChanged) {
     // 切り替えて戻ったときに前の組のタブを開かないよう、覚えた写しを捨てる
     parkedBrowserTabs.delete(next.id)
@@ -1170,32 +1312,6 @@ function updateProject(next: ProjectUpdate): ProjectsState {
   }
   send('projects:changed', projectsState())
   return projectsState()
-}
-
-/*
- * E2E 実行中は、使っている人の画面にウィンドウを出さない。
- *
- * E2Eは1回で十数回アプリを起動するため、そのたびにウィンドウが開いては閉じ、
- * フォーカスとDockを奪う。これが「アプリが落ち続けている」ように見えていた。
- *
- *   ADE_E2E=1      … 画面に出さずに動かす（既定のE2E動作）
- *   ADE_E2E_SHOW=1 … E2E中でも従来どおり表示する（目視デバッグ用）
- *
- * 製品の通常起動では、どちらの環境変数も無いので挙動は変わらない。
- */
-const IS_E2E = process.env.ADE_E2E === '1'
-const SHOW_IN_E2E = process.env.ADE_E2E_SHOW === '1'
-const HIDE_WINDOW = IS_E2E && !SHOW_IN_E2E
-
-/*
- * 検証起動では既定のブラウザを開かない（作った Issue・GitHub / GitLab のページ・フィードバックの「新しい Issue」が
- * 本物のブラウザに出ないように）。開こうとした URL は ADE_E2E_OPEN_LOG のファイルに1行ずつ書き、E2E が確かめる
- */
-if (IS_E2E) {
-  shell.openExternal = async (url: string) => {
-    const log = process.env.ADE_E2E_OPEN_LOG
-    if (log) await import('node:fs/promises').then((fs) => fs.appendFile(log, `${url}\n`, 'utf8'))
-  }
 }
 
 /** 解決済みの配色に合わせた地の色（tokens.css の --color-bg-app と同値） */
@@ -1260,20 +1376,18 @@ function createWindow(): BrowserWindow {
       sandbox: true,
       spellcheck: false,
       /*
-       * 非表示・背面でも描画を止めない。
-       * useViewBounds は requestAnimationFrame で内蔵ブラウザの位置を実測し、
-       * E2Eは capturePage で画面を撮るため、止まると両方が狂う。
+       * 非表示・背面でもタイマーを間引かせない。
+       * xterm は出力を 12ms ずつ setTimeout で区切って処理し、描き終えた分を main へ知らせる（terminal:ack）。
+       * 間引かれると、最小化・裏の間に Agent の出力が溜まり、main が PTY を止めてしまう（FLOW_HIGH_WATER）。
+       * 画面の定期の読み直しは、それぞれ document.hidden の間は止めている
        */
       backgroundThrottling: false
     }
   })
 
   const showOnce = () => {
-    // 画面に出さない指定のときは show() を呼ばない（フォーカスも奪わない）
-    if (HIDE_WINDOW || window.isDestroyed() || window.isVisible()) return
-    // E2Eで表示する場合も、前面に出して作業を邪魔しない
-    if (IS_E2E) window.showInactive()
-    else window.show()
+    if (window.isDestroyed() || window.isVisible()) return
+    window.show()
   }
   window.once('ready-to-show', () => {
     mark('window:readyToShow')
@@ -1397,29 +1511,75 @@ function agentSkillContext(): SkillContext {
 
 /**
  * 入れてある設定の skill を、この版の設定の項目に合わせて書き直す（起動時）。
- * 配布版だけ。開発版・E2E が、ふだん使う Agent の skill を開発用の設定ファイルへ向け直さないように
+ * 配布版だけ。開発版が、ふだん使う Agent の skill を開発用の設定ファイルへ向け直さないように
  */
 function syncAgentSkillOnStart(): void {
-  if (!IS_PACKAGED || IS_E2E) return
+  if (!IS_PACKAGED) return
   void import('./agentSkill').then(({ syncAgentSkill }) => syncAgentSkill(agentSkillContext()))
     .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync agent skill' }))
 }
 
 /**
- * Agent どうしの依頼の skill を、設定（agents.agentMail）に合わせて入れる・外す（起動時と設定の変更時）。
- * 配布版だけ（開発版・E2E は、ふだん使う Agent の skill に触らない）
+ * 削除した「Agent どうしの依頼」で前の版が入れた skill（ferret-agent-mail）と一時フォルダの受け口を消す（src/main/agentMailCleanup.ts）。
+ * 配布版だけ（開発版は、ふだん使う Agent の skill に触らない）
  */
-function syncAgentMailSkillNow(): void {
-  if (!IS_PACKAGED || IS_E2E) return
-  void syncAgentMailSkill(app.getVersion()).catch((err: unknown) => reportHandled(err, { area: 'agent-mail', op: 'sync skill' }))
+function removeLegacyAgentMail(): void {
+  if (!IS_PACKAGED) return
+  void import('./agentMailCleanup').then(({ removeLegacyAgentMailSkill, removeLegacyAgentMailDirs }) => Promise.all([removeLegacyAgentMailSkill(), removeLegacyAgentMailDirs()]))
+    .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'remove legacy agent mail' }))
+}
+
+/** 削除した「発信」が userData に残した下書きと接続先（X のトークンなど）を消す。配布版・開発版とも（src/main/publishCleanup.ts） */
+function removeLegacyPublish(): void {
+  void import('./publishCleanup').then(({ removeLegacyPublishData }) => removeLegacyPublishData(app.getPath('userData')))
+    .catch((err: unknown) => reportHandled(err, { area: 'settings', op: 'remove legacy publish data' }))
 }
 
 /** 内蔵ブラウザを browser-use で動かす skill（ferret-browser）を Claude Code・Codex に入れる。配布版だけ */
 function syncBrowserSkillNow(): void {
-  if (!IS_PACKAGED || IS_E2E) return
+  if (!IS_PACKAGED) return
   void import('./browserSkill')
     .then(({ syncBrowserSkill }) => syncBrowserSkill(app.getVersion()))
     .catch((err: unknown) => reportHandled(err, { area: 'browser', op: 'sync skill' }))
+}
+
+/** 画面・動きの変更を作る前に計画を見せる skill（ferret-visual-review）を Claude Code・Codex に入れる。配布版だけ */
+function syncVisualReviewSkillNow(): void {
+  if (!IS_PACKAGED) return
+  void import('./visualReviewSkill')
+    .then(({ syncVisualReviewSkill }) => syncVisualReviewSkill(app.getVersion()))
+    .catch((err: unknown) => reportHandled(err, { area: 'review', op: 'sync visual review skill' }))
+}
+
+/** 内蔵ブラウザの最新の画面の控え（プロジェクトの .ferret/screens/。src/main/screenCache.ts）。E2E では書かない */
+let screenCache: ScreenCache | null = null
+function startScreenCache(): void {
+  if (screenCache) return
+  void import('./screenCache').then(({ ScreenCache }) => {
+    screenCache = new ScreenCache({
+      target: () => {
+        const folder = workspace.folderPath
+        const projectId = workspace.projectId
+        const window = mainWindow
+        if (!folder || !projectId || projectId !== browserTabsOwner || !browser) return null
+        // 窓が隠れている・最小化しているときは撮らない（見えていない画面は撮れず、撮っても古い）
+        if (!window || window.isDestroyed() || !window.isVisible() || window.isMinimized()) return null
+        const project = currentSettings().projects.find((p) => p.id === projectId)
+        const state = browser.state()
+        if (!project || state.loading || state.loadError || !state.url) return null
+        const embedded = browser
+        return {
+          folder,
+          registeredUrls: project.urls.flatMap((target) => (target.url ? [target.url] : [])),
+          url: state.url,
+          capture: () => embedded.captureVisibleTab()
+        }
+      },
+      ensureExcluded: async (folder) => (await import('./sessions')).ensureGitExclude(folder),
+      onError: (err) => reportHandled(err, { area: 'browser', op: 'screen cache' })
+    })
+    screenCache.start()
+  }).catch((err: unknown) => reportHandled(err, { area: 'browser', op: 'start screen cache' }))
 }
 
 /** main が録画の対象を変える（内蔵ブラウザへ戻すときだけ）。設定に残し、画面へ知らせる */
@@ -1429,6 +1589,48 @@ function setCaptureTargetFromMain(target: CaptureTarget): void {
   if (capture) updateSettings({ capture: { ...capture, captureTarget: target } })
   void syncMirror()
   send('capture:targetChanged', target)
+}
+
+/** ワンクリック録画（フィードバックを押したらすぐ画面全体）の前の録画の対象。録画が終わったら戻す（設定には残さない） */
+let quickRestoreTarget: CaptureTarget | null = null
+
+/** 録画の対象を変えて画面へ知らせる（設定には残さない。ワンクリック録画の間だけの対象） */
+function applyTransientTarget(target: CaptureTarget): void {
+  captureConsent = { ...captureConsent, target }
+  void syncMirror()
+  send('capture:targetChanged', target)
+}
+
+/**
+ * ワンクリック録画の対象（Ferret の窓がある画面の全体）。選択画面・確認は出さない。
+ * macOS の画面収録の許可が無いときだけ、最初は OS の確認、断られていればシステム設定を開いて案内する（@shared/quickCapture）
+ */
+async function quickScreenTarget(): Promise<CaptureTarget> {
+  const { listCaptureSources, openScreenSettings, screenAccess, screenSourceOfWindow } = await import('./recording/sources')
+  const { quickScreenStep } = await import('@shared/quickCapture')
+  const step = quickScreenStep(screenAccess())
+  if (step === 'ask') {
+    // desktopCapturer を呼ぶと macOS が確認を出す（最初の1回だけ）
+    await listCaptureSources({ width: 0, height: 0 }).catch((err: unknown) => reportHandled(err, { area: 'recording', op: 'ask screen access' }))
+    if (screenAccess() !== 'granted') throw new UserFacingError(t('recording.errors.quickScreenAsk'))
+  } else if (step === 'settings') {
+    await openScreenSettings().catch((err: unknown) => reportHandled(err, { area: 'recording', op: 'open screen settings' }))
+    throw new UserFacingError(t('recording.errors.quickScreenSettings'))
+  }
+  const source = await screenSourceOfWindow(mainWindow)
+  if (!source) throw new UserFacingError(t('recording.errors.noScreen'))
+  const target = targetFromSource(source)
+  if (quickRestoreTarget === null) quickRestoreTarget = captureConsent.target
+  applyTransientTarget(target)
+  return target
+}
+
+/** ワンクリック録画が終わった（・始められなかった）。録る前の対象へ戻す */
+function restoreQuickTarget(): void {
+  const previous = quickRestoreTarget
+  if (!previous) return
+  quickRestoreTarget = null
+  applyTransientTarget(previous)
 }
 
 /** 録画中の画面・ウインドウ（録画が映させているもの）。録画していなければ null、録画中に内蔵ブラウザを見せているなら false */
@@ -1649,7 +1851,11 @@ async function stopReview(): Promise<RecordingStatus> {
             (activeOptions.captureMic === false && !activeOptions.captureSystemAudio) || (!!stt && stt.errors.length === 0))
         }
         return recording.status
-      } finally { recordingBusy = false }
+      } finally {
+        recordingBusy = false
+        // ワンクリック録画で画面全体にしていたら、録る前の対象へ戻す
+        restoreQuickTarget()
+      }
 }
 
 /** 直前の更新確認で見つかった新しい版のページ（app:openUpdate で開く） */
@@ -1658,23 +1864,20 @@ let latestReleaseUrl: string | null = null
 /**
  * 裏での更新（src/main/autoUpdate.ts）。起動時・6時間ごと・［更新を確認］で確かめ、新しい版を裏でダウンロードして、
  * 署名した SHA256SUMS で確かめてから「再起動して更新」を出す。
- * 配布版だけで動かす。E2E は偽の配信元（FERRET_E2E_RELEASE_BASE_URL。updateCheck.ts）のときだけ流れを通し、本物の入れ替えはしない
+ * 配布版だけで動かす
  */
 let autoUpdates: AutoUpdater | null = null
 /** ウインドウに戻ったとき、前の確認からこれ以上たっていれば確かめ直す */
 const UPDATE_RECHECK_ON_FOCUS_MS = 60 * 60 * 1000
 function autoUpdater(): AutoUpdater {
   if (autoUpdates) return autoUpdates
-  const e2eServer = IS_E2E && usingE2eReleaseServer()
-  // E2E だけ: 閉じたときの入れ替えの代わりに呼ぶ偽のインストーラー（絶対パスの .mjs）
-  const e2eInstaller = e2eServer ? process.env.FERRET_E2E_UPDATE_INSTALLER?.trim() : undefined
   const install = () => import('./autoUpdateInstall')
   // 閉じるときは import を待てないので、準備ができた時点で読んでおく
   let installSync: typeof import('./autoUpdateInstall') | null = null
   autoUpdates = new AutoUpdater({
     method: installMethodFor(process.platform, process.env),
-    enabled: (IS_PACKAGED && !IS_E2E) || e2eServer,
-    canInstall: IS_PACKAGED && !IS_E2E,
+    enabled: IS_PACKAGED,
+    canInstall: IS_PACKAGED,
     check: async () => {
       const result = await checkForUpdate()
       // 開くURLは main が覚えておく。renderer から任意のURLを開かせない
@@ -1695,11 +1898,10 @@ function autoUpdater(): AutoUpdater {
     prepareDir: async (keep) => (await install()).prepareUpdateDir(app.getPath('userData'), keep),
     stage: async (method, path, file) => (await install()).stageUpdate(method, path, file),
     install: async (method, path, file) => (await install()).installUpdate(method, path, file),
-    runPendingInstall: () => (IS_PACKAGED && !IS_E2E ? installSync?.runPendingInstall() ?? false : false),
+    runPendingInstall: () => (IS_PACKAGED ? installSync?.runPendingInstall() ?? false : false),
     installOnQuit: (method, path, file) => {
       if (!installSync) return false
-      if (e2eInstaller && isAbsolute(e2eInstaller) && e2eInstaller.endsWith('.mjs')) return installSync.runE2eQuitInstaller(e2eInstaller, method, path)
-      return IS_PACKAGED && !IS_E2E ? installSync.installUpdateOnQuit(method, path, file) : false
+      return IS_PACKAGED ? installSync.installUpdateOnQuit(method, path, file) : false
     },
     getAutoDownload: () => currentSettings().autoUpdate !== false,
     setAutoDownload: (on) => updateSettings({ autoUpdate: on ? undefined : false }),
@@ -1716,11 +1918,10 @@ function autoUpdater(): AutoUpdater {
 
 /**
  * 「再起動して更新」の前に、作業中の Agent（処理中・確認待ち）と録画を数えて、あれば確かめる。
- * 未保存のファイルは、その後に同じ確認（resolveUnsavedBeforeQuit）で聞く（update:install）。E2E では聞かない
+ * 未保存のファイルは、その後に同じ確認（resolveUnsavedBeforeQuit）で聞く（update:install）
  * Orca由来: ~/bench/orca/src/main/updater/updater-install-execution.ts の「終了の前の後始末」（Orca は確認を出さずに PTY を閉じる）
  */
 async function confirmRestartForUpdate(): Promise<boolean> {
-  if (IS_E2E) return true
   const states = await Promise.all((terminals?.list() ?? []).map((info) => terminals!.agentState(info.id).catch(() => null)))
   const busy = states.filter((s) => s && (s.state === 'working' || s.state === 'blocked')).length
   const recordingNow = !!recording && recording.status.state !== 'idle'
@@ -1848,17 +2049,6 @@ async function orchestraNote(productFolder: string | null): Promise<string> {
 }
 
 /** 全プロダクトの確認待ち（before / after の確認）。確認の巡回に使う */
-async function pendingAcross(): Promise<Array<{ projectId: string; reviewId: string; count: number }>> {
-  const { listSessions } = await import('./sessions')
-  const out: Array<{ projectId: string; reviewId: string; count: number }> = []
-  const orchestra = openOrchestra()
-  for (const project of orchestra ? orchestraMembers(currentSettings().projects, orchestra.id) : []) {
-    const sessions = await listSessions(project.folderPath).catch(() => [])
-    for (const s of sessions) if ((s.humanReviewCount ?? 0) > 0) out.push({ projectId: project.id, reviewId: s.id, count: s.humanReviewCount ?? 0 })
-  }
-  return out
-}
-
 // ───────────── オーケストラのフィードバックの記録（<オーケストラ>/feedback/。@shared/feedbackLog・src/main/feedbackLog.ts） ─────────────
 
 /**
@@ -1982,67 +2172,6 @@ function flowOf(channel: string): { name: string; data?: Record<string, string> 
   return null
 }
 
-/*
- * 発信（X への投稿の下書き。src/main/publish/）。下書きの控えと AI の生成の順番待ちは1つだけ持つ（2つ作ると書き込みが互いを上書きする）。
- * AI は「整理」と同じ実行方法（settings.json の organizer.runner。CLI は各自の契約、api: は保存したキー）を使う
- */
-const publishStore = new PublishStore(app.getPath('userData'))
-const publishBackground = new PublishBackground({
-  project: () => (workspace.projectId && workspace.folderPath && !isRemoteWorkspace() ? { id: workspace.projectId, dir: workspace.folderPath } : null),
-  store: publishStore,
-  makeRunner: () => publishRunner(),
-  workDir: () => join(app.getPath('userData'), 'publish', 'work'),
-  language: () => guideLanguage(),
-  onChanged: () => send('publish:changed')
-})
-
-/** 発信の接続先（X のトークン・ブログの秘密）。文字起こしのキーと同じく、配布版は OS の鍵で暗号化して保存する */
-let publishConnectionStore: PublishConnections | null = null
-function publishConnections(): PublishConnections {
-  publishConnectionStore ??= new PublishConnections(join(app.getPath('userData'), 'publish-connections.bin'),
-    chooseKeyCipher({ isPackaged: IS_PACKAGED, isE2E: IS_E2E, safeStorage }))
-  return publishConnectionStore
-}
-
-/** 発信の下書きを書く AI。使えなければ null */
-async function publishRunner(): Promise<import('./pipeline/organize/runner').LlmRunner | null> {
-  const organizer = currentSettings().organizer
-  const runnerId = organizer?.runner ?? 'codex'
-  const project = workspace.folderPath
-  if (!project) return null
-  const { CodexRunner, ClaudeCodeRunner } = await import('./pipeline/organize')
-  if (runnerId.startsWith('api:')) {
-    const [{ ApiLlmRunner }, { LLM_PROVIDER_PRESETS, resolveEndpoint }] = await Promise.all([import('./pipeline/organize/runners/api'), import('@shared/aiProviders')])
-    const provider = runnerId.slice(4) as keyof typeof LLM_PROVIDER_PRESETS
-    const endpoint = organizer?.endpoints?.[provider]
-    const vendor = LLM_PROVIDER_PRESETS[provider].vendor
-    const resolved = resolveEndpointRefs(endpoint, keyLookup())
-    // 認証情報は認めた接続元にだけ送る（security-5 [6]。整理と同じ確かめ方）
-    await gateCredentials(`organize:${provider}`, resolveEndpoint(LLM_PROVIDER_PRESETS[provider], resolved).baseUrl, endpoint, vendor, [LLM_PROVIDER_PRESETS[provider].baseUrl], false)
-    const runner = new ApiLlmRunner({ provider, endpoint: resolved, apiKey: await providerKey(endpoint, vendor) })
-    return await runner.available() ? runner : null
-  }
-  const cliModels = organizer?.cliModels
-  const runner = runnerId === 'claude-code'
-    ? new ClaudeCodeRunner({ project, accountEnv: () => resolveAgentEnv('claude'), ...(cliModels?.['claude-code'] ? { model: cliModels['claude-code'] } : {}) })
-    : new CodexRunner({ project, accountEnv: () => resolveAgentEnv('codex'), ...(cliModels?.codex ? { model: cliModels.codex } : {}) })
-  return await runner.available() ? runner : null
-}
-
-/** 下書きに付けた画像・動画の小さな見本（動画は OS のサムネイル。作れなければ無し） */
-async function publishThumbnail(path: string, kind: 'image' | 'video'): Promise<string | undefined> {
-  const size = { width: 176, height: 176 }
-  try {
-    const image = await nativeImage.createThumbnailFromPath(path, size)
-    if (!image.isEmpty()) return image.toDataURL()
-  } catch {
-    // Linux などで OS のサムネイルが無い（画像は読み込んで縮める。動画は名前だけ出す）
-  }
-  if (kind !== 'image') return undefined
-  const image = nativeImage.createFromPath(path)
-  return image.isEmpty() ? undefined : image.resize({ width: size.width }).toDataURL()
-}
-
 function registerIpc(): void {
   const handlers: { [C in keyof IpcRequests]: (...args: Parameters<IpcRequests[C]>) => unknown } = {
     'app:ready': (paintedAt) => {
@@ -2140,6 +2269,38 @@ function registerIpc(): void {
       }
       return { ok, message }
     },
+    'visualReview:list': async () => {
+      const root = workspace.folderPath
+      if (!root) return { plans: [], invalid: [] }
+      return (await import('./visualReview')).listVisualPlans(root)
+    },
+    'visualReview:image': async (rel) => {
+      const root = workspace.folderPath
+      if (!root || typeof rel !== 'string') return null
+      return (await import('./visualReview')).readPlanImage(root, rel)
+    },
+    'visualReview:respond': async (id, reply) => {
+      const root = workspace.folderPath
+      const clean = sanitizeReply(reply)
+      if (!root || !isValidPlanId(id) || !clean) throw new UserFacingError(t('visualReview.errors.invalid'))
+      const vr = await import('./visualReview')
+      const current = await vr.readVisualPlan(root, id)
+      if (!current) throw new UserFacingError(t('visualReview.errors.notFound'))
+      if (!canRespond(current.plan)) throw new UserFacingError(t('visualReview.errors.notPending'))
+      // 先に計画の JSON に書く（Agent がファイルを読み直しても、人の返事が分かる）
+      const plan = await vr.writeVisualPlanResponse(root, id, { at: new Date().toISOString(), ...clean })
+      if (!plan) throw new UserFacingError(t('visualReview.errors.notPending'))
+      const text = responseMessage(current.plan, clean, getLocale() === 'ja' ? 'ja' : 'en')
+      // 送り先は計画を書いたターミナル（$FERRET_TERMINAL_ID）。同じプロジェクトで開いたものでなければ（番号は起動ごとに振り直す）使わず、
+      // 「Agent へ送信」と同じ選び方（同じプロジェクトの Agent）にする
+      const authored = current.plan.terminalId ? terminals?.list().find((session) => session.id === current.plan.terminalId) : undefined
+      const preferred = authored && isInsideDir(authored.cwd, root) ? authored.id : null
+      const target = terminals ? await terminals.resolveSendTarget(preferred, root) : null
+      if (!target) return { ok: true, sent: false, message: t('visualReview.noAgent'), copyText: text, plan }
+      const result = await terminals!.sendReview(target, text)
+      if (!result.ok) return { ok: true, sent: false, message: result.message, copyText: text, plan }
+      return { ok: true, sent: true, message: t(clean.action === 'approve' ? 'visualReview.sentApprove' : 'visualReview.sentFeedback'), plan }
+    },
     'app:openUpdate': async () => {
       // 署名を確かめたこの OS・CPU 向けのファイルは、アプリが落として sha256 を確かめてから置く（security-4 [7]）
       const file = verifiedDownload()
@@ -2234,7 +2395,6 @@ function registerIpc(): void {
     'settings:agents': (preferences) => {
       updateSettings({ agents: preferences })
       syncTerminalRestore()
-      syncAgentMailSkillNow()
       // 「＋」メニューと設定画面に、保存した結果（sanitize 後）と検出を配る
       void listAgentOptions(currentSettings().agents).then((options) => send('agents:changed', options))
     },
@@ -2247,48 +2407,6 @@ function registerIpc(): void {
       updateSettings({ agentRequests: sanitizeAgentRequestPrefs(prefs) })
     },
     'agentRequests:send': (ids) => sendAgentRequests(ids),
-    'review:pendingAcross': () => pendingAcross(),
-    'orchestra:overview': async () => {
-      const [{ orchestraOverview }, { listSessions }] = await Promise.all([import('./orchestraOverview'), import('./sessions')])
-      return orchestraOverview(currentSettings().projects, openOrchestra(), listSessions)
-    },
-    'orchestra:checklist': async () => {
-      const editor = openOrchestra()
-      return editor ? (await (await import('./orchestraOverview')).readChecklist(editor.folderPath)).items : []
-    },
-    'orchestra:answer': async (entries) => {
-      const editor = openOrchestra()
-      if (!editor) return []
-      const list = Array.isArray(entries) ? entries.slice(0, 500).filter((e): e is { key: string; answer: string } => !!e && typeof e === 'object' && typeof e.key === 'string' && typeof e.answer === 'string') : []
-      return (await import('./orchestraOverview')).writeAnswers(editor.folderPath, list, guideLanguage())
-    },
-    'orchestra:feedbackFile': async (which) => {
-      const editor = openOrchestra()
-      if (!editor || editor.source === 'ssh') throw new UserFacingError(t('errors.openProjectFolder'))
-      return (await import('./feedbackLog')).ensureFeedbackFile(editor.folderPath, editor.name, which === 'playbook' ? 'playbook' : 'log')
-    },
-    'orchestra:sendAnswers': async () => {
-      const editor = openOrchestra()
-      if (!editor) return { ok: false, message: t('orchestra.answersNone') }
-      const [{ readChecklist }, { composeAnswersMessage }] = await Promise.all([import('./orchestraOverview'), import('@shared/humanChecklist')])
-      const { items } = await readChecklist(editor.folderPath)
-      if (!items.some((it) => it.answer)) return { ok: false, message: t('orchestra.answersNone') }
-      // 宛先は全体（すべてのプロダクト）のフォルダの Agent
-      const target = terminals ? await terminals.resolveSendTarget(null, editor.folderPath) : null
-      if (!target) return { ok: false, message: t('terminal.send.noAgent'), noAgent: true }
-      const { ok, message } = await terminals!.sendReview(target, composeAnswersMessage(items, guideLanguage(), currentSettings().orchestra?.allowed))
-      if (ok) {
-        recordFeedback(editor.id, async (m, at) => m.recordFeedbackMessage(at.orchestra.folderPath, at.orchestra.name, {
-          product: at.product, channel: 'answers', text: (await import('@shared/feedbackLog')).answersFeedbackText(items)
-        }))
-      }
-      return { ok, message: ok ? t('orchestra.answersSent', { count: items.filter((it) => it.answer).length }) : message }
-    },
-    'settings:orchestraAllowed': async (allowed) => {
-      const { sanitizeOrchestraRules } = await import('@shared/orchestrator')
-      updateSettings({ orchestra: sanitizeOrchestraRules({ ...currentSettings().orchestra, allowed: typeof allowed === 'string' ? allowed : '' }) })
-      syncEditorWorkspace()
-    },
     'settings:orchestra': async (rules) => {
       const { sanitizeOrchestraRules } = await import('@shared/orchestrator')
       updateSettings({ orchestra: sanitizeOrchestraRules(rules) })
@@ -2323,7 +2441,7 @@ function registerIpc(): void {
         const window = mainWindow
         if (window && !window.isDestroyed()) {
           if (window.isMinimized()) window.restore()
-          if (!window.isVisible() && !HIDE_WINDOW) window.show()
+          if (!window.isVisible()) window.show()
           window.focus()
         }
         send('agentNotify:open', target)
@@ -2479,27 +2597,7 @@ function registerIpc(): void {
       pageContents: () => browser?.contents ?? null,
       userDataDir: () => app.getPath('userData'),
       isPackaged: IS_PACKAGED,
-      isE2E: IS_E2E,
       notifyChanged: () => send('passwords:changed')
-    }),
-    // 発信（X とブログへの投稿。AI が書き、X API・WordPress・EmDash の API で投稿する。src/main/publish/ipc.ts）
-    ...publishHandlers({
-      projectId: () => workspace.projectId ?? null,
-      projectDir: () => workspace.folderPath ?? null,
-      store: publishStore,
-      background: publishBackground,
-      thumbnail: publishThumbnail,
-      pickFiles: async () => {
-        const { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } = await import('@shared/publish')
-        const options: Electron.OpenDialogOptions = { title: t('publish.pickMediaTitle'), properties: ['openFile', 'multiSelections'], filters: [{ name: t('publish.media'), extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS] }] }
-        const chosen = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
-        return chosen.canceled ? [] : chosen.filePaths
-      },
-      connections: publishConnections(),
-      fetcher: (url, init) => import('./netFetch').then(({ mainFetch }) => mainFetch(url, init)),
-      openExternal: (url) => shell.openExternal(url),
-      waitForCallback: (options) => waitForCallback(options),
-      notifyChanged: () => send('publish:changed')
     }),
     // ログイン無しで誰でも指摘を送れる共有リンク（作る・届いた録画を取り込む。src/main/feedbackShare/ipc.ts）
     ...feedbackShareHandlers({
@@ -2512,7 +2610,6 @@ function registerIpc(): void {
       installId: () => telemetryInstallId(),
       userDataDir: () => app.getPath('userData'),
       isPackaged: IS_PACKAGED,
-      isE2E: IS_E2E,
       // 届いた録画は mtg と同じ流れ（文字起こし・コマ・書き込み）で指摘の候補にする（meeting/import.ts）
       importRecording: async ({ projectDir, recording, events, download }) => {
         const [{ importShareRecording }, r] = await Promise.all([import('./meeting/import'), import('./review')])
@@ -2537,8 +2634,7 @@ function registerIpc(): void {
 
     'terminal:create': async (options) => {
       if (!terminals) throw new UserFacingError(t('errors.terminalNotReady'))
-      const extraArgs = await terminalPresetArgs(options)
-      return terminals.create(options, { extraArgs }).then((info) => { resources.noteTerminalCreated(info.id); return info })
+      return terminals.create(options).then((info) => { resources.noteTerminalCreated(info.id); return info })
     },
     'terminal:write': (id, data) => terminals?.write(id, data),
     'terminal:resize': (id, size) => terminals?.resize(id, size),
@@ -2868,9 +2964,9 @@ function registerIpc(): void {
     },
     'decision:testConnection': async (raw) => {
       const { sanitizeDecisionPreferences } = await import('@shared/decision')
-      // 画面にはキーを渡していないので、settings.json に書かれた apiKey / apiKeyEnv を引き継ぐ。E2E は本物を呼ばない
+      // 画面にはキーを渡していないので、settings.json に書かれた apiKey / apiKeyEnv を引き継ぐ
       const prefs = sanitizeDecisionPreferences(keepKeyRefs({ d: currentSettings().decision as KeyRef | undefined }, { d: (raw ?? {}) as KeyRef })?.d)
-      return (await decision()).testConnection(prefs, { fake: IS_E2E, interactive: true })
+      return (await decision()).testConnection(prefs, { interactive: true })
     },
     'usage:apiCalls': () => apiUsageSummary(),
     'usage:openApiLog': async () => {
@@ -3035,11 +3131,20 @@ function registerIpc(): void {
       if (!workspace.folderPath) throw new UserFacingError(t('errors.openProjectFolder'))
       const { BROWSER_TARGET } = await import('@shared/captureTarget')
       let captureTarget = sanitizeCaptureTarget(options.captureTarget) ?? BROWSER_TARGET
-      // 利用者の操作の直後に1回だけ。対象と音は、利用者が選んだ範囲を超えない（security-5 [1]）
-      if (captureRequestProblem({ target: captureTarget, mic: options.captureMic !== false, systemAudio: options.captureSystemAudio === true }, captureConsent) !== null) {
-        throw new UserFacingError(t('errors.captureChooseAgain'))
+      if (options.fullScreen === true) {
+        // ワンクリック録画: 押した操作（main が受けた本物の入力）を、Ferret の窓がある画面の全体を録る同意にする。音は選んだ範囲を超えない
+        if (captureRequestProblem({ target: BROWSER_TARGET, mic: options.captureMic !== false, systemAudio: options.captureSystemAudio === true }, captureConsent) !== null) {
+          throw new UserFacingError(t('errors.captureChooseAgain'))
+        }
+        if (!gestures.consume('record')) throw new UserFacingError(t('errors.needsUserAction'))
+        captureTarget = await quickScreenTarget()
+      } else {
+        // 利用者の操作の直後に1回だけ。対象と音は、利用者が選んだ範囲を超えない（security-5 [1]）
+        if (captureRequestProblem({ target: captureTarget, mic: options.captureMic !== false, systemAudio: options.captureSystemAudio === true }, captureConsent) !== null) {
+          throw new UserFacingError(t('errors.captureChooseAgain'))
+        }
+        if (!gestures.consume('record')) throw new UserFacingError(t('errors.needsUserAction'))
       }
-      if (!gestures.consume('record')) throw new UserFacingError(t('errors.needsUserAction'))
       // 文字で指摘は録画と同時に使わない（録画の書き込みと取り違えない）
       textNotes?.setActive(false, { notify: true })
       // 画面全体・別のウインドウを録るときは、内蔵ブラウザにページが無くてもよい
@@ -3070,12 +3175,10 @@ function registerIpc(): void {
           transcription: options.transcription ?? 'local' }
         sttWarnings = []
         transcriber = null
-        // 検証用の合成音は文字起こしに送らない。送るのは検証の音声（ADE_QA_AUDIO）か、相手の声の検証（ADE_SYNTHETIC_SYSTEM_AUDIO）のときだけ
-        const systemAudioCheck = options.captureSystemAudio ? syntheticSystemAudio(process.env.ADE_SYNTHETIC_SYSTEM_AUDIO, IS_E2E) : null
-        // 検証起動で口の指定が無ければ、本物のループバックを開かない（OS の許可の確認を出さない）。許可が無いときと同じに扱う
-        const systemAudioSafe = systemAudioCheck ?? (options.captureSystemAudio && (IS_E2E || process.env.ADE_SYNTHETIC_MIC === '1') ? 'denied' as const : null)
+        // 検証用の合成音（ADE_SYNTHETIC_MIC）は文字起こしに送らない。本物のループバックも開かない（許可が無いときと同じに扱う）
+        const systemAudioSafe = options.captureSystemAudio && process.env.ADE_SYNTHETIC_MIC === '1' ? 'denied' as const : null
         let sttKind: import('./pipeline/stt/segmenter').SttEngineKind | null = null
-        if ((options.captureMic !== false || options.captureSystemAudio) && (process.env.ADE_SYNTHETIC_MIC !== '1' || (IS_E2E && process.env.ADE_QA_AUDIO) || systemAudioCheck)) {
+        if ((options.captureMic !== false || options.captureSystemAudio) && process.env.ADE_SYNTHETIC_MIC !== '1') {
           const { IncrementalTranscriber } = await import('./pipeline/stt/engine')
           // 区切りごとの進み具合を右パネルの「文字起こし」タブへ（録画は待たせない）
           const onProgress = (progress: import('./pipeline/stt/engine').TranscriberProgress) => liveFeed?.progress(progress)
@@ -3099,14 +3202,15 @@ function registerIpc(): void {
           captureMic: options.captureMic !== false, captureTarget, watch,
           // 拡張機能のポップアップがあるときは、動画にも重ねて録る（無ければ今までどおりタブの映像だけ）
           overlayCompositing: extensions?.hasPopupExtensions() ?? false,
-          ...(IS_E2E && process.env.ADE_QA_LIMIT_MS ? { maxDurationMs: Number(process.env.ADE_QA_LIMIT_MS) } : {}),
           ...(options.micDeviceId ? { micDeviceId: options.micDeviceId } : {}),
           ...(process.env.ADE_SYNTHETIC_MIC === '1' ? { syntheticMic: true } : {}),
-          ...(systemAudioSafe ? { syntheticSystemAudio: systemAudioSafe } : {}),
-          ...(IS_E2E && process.env.ADE_QA_AUDIO ? { syntheticMicWavBase64: (await readFile(process.env.ADE_QA_AUDIO)).toString('base64') } : {}) })
+          ...(systemAudioSafe ? { syntheticSystemAudio: systemAudioSafe } : {}) })
           .catch((err: unknown) => { liveFeed?.stop(); throw err })
         for (const warning of sttWarnings) send('recording:warning', warning)
         return controller.status
+      } catch (err) {
+        restoreQuickTarget()
+        throw err
       } finally { recordingBusy = false }
     },
     'recording:pause': async () => {
@@ -3173,6 +3277,17 @@ function registerIpc(): void {
     'fs:search': (query, mode) => searchFiles(projectRoot(), query, mode),
     'fs:inspect': (relPath) => inspectProjectFile(projectRoot(), relPath),
     'fs:readOffice': (relPath) => readOfficeFile(projectRoot(), relPath),
+    // 古い形式などは LibreOffice で変えてから開く・書き戻す（変換の部品は使うときに読む）
+    'fs:openOffice': async (relPath) => {
+      const root = projectRoot()
+      const { openOfficeDocument } = await import('./officeFiles')
+      return openOfficeDocument(root, relPath, await officeConverter())
+    },
+    'fs:writeOffice': async (relPath, data) => {
+      const root = projectRoot()
+      const { writeOfficeDocument } = await import('./officeFiles')
+      return writeOfficeDocument(root, relPath, data, await officeConverter())
+    },
     // フッターの git と同じく、起動の後で読む（github/gitSync.ts を起動時に読み込まない）
     'fs:gitStatus': async () => {
       const root = projectRoot()
@@ -3206,7 +3321,7 @@ function registerIpc(): void {
     },
     'fs:terminalDir': (relPath) => terminalDirFor(projectRoot(), relPath),
     'fs:rename': (relPath, newName) => renameEntry(projectRoot(), relPath, newName),
-    'fs:trash': (relPaths) => trashEntries(projectRoot(), relPaths, trashFor((absolute) => shell.trashItem(absolute))),
+    'fs:trash': (relPaths) => trashEntries(projectRoot(), relPaths, (absolute) => shell.trashItem(absolute)),
     'fs:reveal': async (relPath) => shell.showItemInFolder(await resolveInside(projectRoot(), relPath)),
     'fs:openExternal': async (relPath) => {
       const file = await resolveInside(projectRoot(), relPath)
@@ -3241,10 +3356,7 @@ function registerIpc(): void {
       const [{ submitFeedback }, { sendToRelay }, { gh }, { githubStatus }, { clipboard, net }, os] = await Promise.all([
         import('./feedback'), import('./feedbackRelay'), import('./github/gh'), import('./github'), import('electron'), import('node:os')])
       return submitFeedback(input, {
-        // 確認・テストの起動（ADE_E2E）からは本物の中継へ送らない（Sentry と同じ扱い）。送れない扱いにしてブラウザへ回す
-        relay: (submission) => process.env.ADE_E2E === '1'
-          ? Promise.resolve({ ok: false as const, code: 'disabled' as const, retryable: false })
-          : sendToRelay(submission, { fetch: (url, init) => net.fetch(url, init), userAgent: `${PRODUCT_NAME}/${app.getVersion()}` }),
+        relay: (submission) => sendToRelay(submission, { fetch: (url, init) => net.fetch(url, init), userAgent: `${PRODUCT_NAME}/${app.getVersion()}` }),
         appMeta: () => ({ appVersion: app.getVersion(), platform: process.platform, arch: process.arch, osRelease: os.release(), installId: telemetryInstallId() }),
         gh: (args, options) => gh(args, options),
         signedIn: async () => Boolean((await githubStatus()).account),
@@ -3410,7 +3522,7 @@ async function main(): Promise<void> {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     // 窓がまだ出ていなければ出す（2回目の起動でも見えないままにしない。Orca #8421）
-    if (!mainWindow.isVisible() && !HIDE_WINDOW) mainWindow.show()
+    if (!mainWindow.isVisible()) mainWindow.show()
     mainWindow.focus()
   })
 
@@ -3431,11 +3543,9 @@ async function main(): Promise<void> {
   // 開発版は名前を変えず、「について」の版の行にだけ (dev) と添える
   app.setAboutPanelOptions({ applicationName: PRODUCT_NAME, ...(IS_PACKAGED ? {} : { applicationVersion: `${appVersion()} (dev)` }) })
 
-  // E2E中はDockのアイコンを出さない（跳ねない・メニューバーを切り替えない）
-  if (HIDE_WINDOW && process.platform === 'darwin') app.dock?.hide()
   // 開発起動では .app の icns が無いので、Dock のアイコンだけ build/icon.png に差し替える
   const devIcon = join(app.getAppPath(), 'build', 'icon.png')
-  if (!IS_PACKAGED && !HIDE_WINDOW && process.platform === 'darwin' && existsSync(devIcon)) {
+  if (!IS_PACKAGED && process.platform === 'darwin' && existsSync(devIcon)) {
     app.dock?.setIcon(devIcon)
   }
 
@@ -3534,7 +3644,7 @@ async function main(): Promise<void> {
     return mediaResponseFromHandle(handle, request.headers.get('range'), 'video/webm')
   })
 
-  // 起動時にプロジェクトフォルダ・URLを指定できる（E2Eと `ferret <folder>` 相当の用途）。
+  // 起動時にプロジェクトフォルダ・URLを指定できる（`ferret <folder>` 相当の用途）。
   // 指定がなければ WS-1 のとおり前回の値を復元する。
   // 開くプロジェクトは ADE_PROJECT_DIR → 前回のプロジェクト の順に決める。
   // 指定フォルダもプロジェクトとして登録し、2回目以降は同じプロジェクト（URLプリセット込み）を開く。
@@ -3542,6 +3652,10 @@ async function main(): Promise<void> {
   const startupFolder = presetFolder && presetFolder.length > 0 ? presetFolder : loadedSettings.folderPath
   // 「すべてのプロジェクト」（エディタ全体）を用意する（無ければ作る）
   await ensureEditorWorkspace().catch((err: unknown) => reportHandled(err, { area: 'startup', op: 'prepare editor workspace' }))
+  // 作業用のフォルダ「work」（無ければ足す・フォルダを作り直す）
+  try { ensureWorkProject() } catch (err) { reportHandled(err, { area: 'startup', op: 'prepare work project' }) }
+  // グローバルのオーケストラ（無ければ足す・フォルダを作り直す）
+  try { ensureGlobalOrchestra() } catch (err) { reportHandled(err, { area: 'startup', op: 'prepare global orchestra' }) }
   loadedSettings = currentSettings()
   let startupProject = presetFolder && presetFolder.length > 0
     ? null
@@ -3552,7 +3666,7 @@ async function main(): Promise<void> {
     if (!added.alreadyPresent) updateSettings({ projects: added.projects })
   }
   // 開いていたプロジェクトが無ければ、全体（すべてのプロダクト）を開く。ふだんは1つのフォルダではなく全体で頼む
-  if (!startupProject && !(presetFolder && presetFolder.length > 0)) startupProject = currentSettings().projects.find((p) => p.editorWorkspace) ?? null
+  if (!startupProject && !(presetFolder && presetFolder.length > 0)) startupProject = currentSettings().projects.find((p) => p.editorWorkspace && !p.global) ?? null
   /** 起動時に開くタブ（そのプロジェクトで前に開いていたタブ）。無ければ loadedSettings.url の1枚 */
   let startupTabs: ProjectTabs | null = null
   if (startupProject) {
@@ -3560,12 +3674,14 @@ async function main(): Promise<void> {
     loadedSettings = currentSettings()
     // そのプロジェクトで前に開いていた URL（無ければ登録 URL の先頭）から始める
     const saved = loadedSettings.projects.find((p) => p.id === startupProject!.id) ?? startupProject
-    const tabs = sessionTabs(saved)
-    if (tabs.urls.length > 1 || tabs.urls[0] !== DEFAULT_URL || !loadedSettings.url) {
-      loadedSettings = { ...loadedSettings, url: tabs.urls[tabs.active] ?? DEFAULT_URL }
-      startupTabs = tabs
-    }
+    // 覚えたタブが無くても、全体の「最後の URL」（別のプロジェクトで見ていたページのことがある）は持ち込まない。
+    // 持ち込むと、そのページがこのプロジェクトの URL として覚えられ、切り替えても前のプロジェクトのページが出続けていた
+    const tabs = startupBrowserTabs(saved, loadedSettings.url)
+    loadedSettings = { ...loadedSettings, url: tabs.urls[tabs.active] ?? DEFAULT_URL }
+    startupTabs = tabs
   }
+  // 内蔵ブラウザのタブがどのプロジェクトのものか（recordProjectUrl はこのプロジェクトにだけ覚える）
+  browserTabsOwner = startupProject?.id ?? null
   if (loadedSettings.folderPath) {
     // 保持期間を過ぎた動画の掃除は窓を開くのを待たせない。小さな切れに分けて、あとから少しずつ進める（security-5 [7]）
     const { scheduleRetention } = await import('./sessions')
@@ -3585,22 +3701,20 @@ async function main(): Promise<void> {
     (id, code) => send('terminal:exit', id, code)
   )
   // 判定モデルを有効にしていれば、タブごとに中継の URL（合言葉付き）・モデル・画像の可否を渡す。キーは渡さない
-  // Agent どうしの依頼（既定は入）。タブごとの合言葉と CLI の場所も渡す（src/main/agentMail.ts）
   terminals.launchEnv = async (meta) => ({
     ...(currentSettings().decision?.enabled
       ? await (await decision()).launchEnv({ ...(workspace.projectId ? { projectId: workspace.projectId } : {}), ...(meta.agent ? { agent: meta.agent } : {}), sessionId: meta.sessionId })
       : {}),
-    ...(await agentMailEnv(meta.sessionId).catch((err: unknown) => { reportHandled(err, { area: 'agent-mail', op: 'terminal env' }); return {} })),
     // browser-use で内蔵ブラウザを動かす（BU_CDP_URL。src/main/browserAutomation.ts）
-    ...(await (await browserAutomation()).env().catch((err: unknown) => { reportHandled(err, { area: 'browser', op: 'automation env' }); return {} }))
+    ...(await (await browserAutomation()).env().catch((err: unknown) => { reportHandled(err, { area: 'browser', op: 'automation env' }); return {} })),
+    // このタブの印。Agent がビジュアルレビューの計画に書き、承認・フィードバックをこのタブへ送り返す（skill ferret-visual-review）
+    FERRET_TERMINAL_ID: meta.sessionId
   })
   // タブが閉じたら、そのタブに渡した中継の合言葉を無効にする（残った子プロセスが使い続けられないように）
-  terminals.onSessionClosed = (sessionId) => { decisionService?.revokeSession(sessionId); revokeAgentMailSession(sessionId) }
-  terminals.onCreated = agentMailTerminalCreated
-  initAgentMail({ terminals, launch: (request) => send('agentMail:launch', request) })
+  terminals.onSessionClosed = (sessionId) => { decisionService?.revokeSession(sessionId) }
   // ターミナルを速く開く：次の素のシェルを先に起動しておく。タブの環境変数を決めるもの（プロジェクト・判定モデル）が変われば作り直す
   terminals.spareShells = process.env.ADE_TERMINAL_PREWARM !== '0'
-  terminals.spareContext = () => JSON.stringify([workspace.projectId ?? null, currentSettings().decision ?? null, currentSettings().agents.agentMail])
+  terminals.spareContext = () => JSON.stringify([workspace.projectId ?? null, currentSettings().decision ?? null])
   // 上限での自動切り替え。新しいタブは renderer が開き、引き継ぎは main が行う
   initFailover({ terminals, launch: (request) => send('failover:launch', request), notice: (notice) => send('failover:notice', notice) })
   // 文字起こし・整理の API 呼び出しも同じ記録へ（src/main/decision/callLog.ts の recordApiCall）
@@ -3626,9 +3740,7 @@ async function main(): Promise<void> {
   // 最初のタブを開く要求が届く前に、node-pty の読み込みと最初のシェルの起動（rc の読み込み）を済ませておく
   terminals.prewarm()
   registerIpc()
-  // 発信の下書きを、最近の変更から裏で作り置く（新しいコミットがあり、未使用が少ないときだけ。src/main/publish/background.ts）
-  if (!IS_E2E) publishBackground.start()
-  // 裏での更新。配布版だけ、起動から少し待って確かめ、あとは6時間ごと（開発版・E2E では動かさない）
+  // 裏での更新。配布版だけ、起動から少し待って確かめ、あとは6時間ごと（開発版では動かさない）
   autoUpdater().start()
   // スリープ明けはすぐ、ウインドウに戻ったときは前の確認から1時間たっていれば確かめる（6時間ごとの確認はスリープで遅れる）
   // スリープ明けはネットワークが戻るのを待ってから確かめる（autoUpdate.ts の resumed）
@@ -3672,6 +3784,7 @@ async function main(): Promise<void> {
     // 題名・読み込みの変化でも届く。URL が同じなら設定を書き直さない（題名が毎秒変わるページで毎秒保存していた）
     if (state.url && state.url !== 'about:blank' && state.url !== currentSettings().url) updateSettings({ url: state.url })
     recordProjectUrl(state)
+    screenCache?.onState(state)
     send('browser:stateChanged', state)
     for (const listener of browserTabListeners) listener()
   })
@@ -3714,8 +3827,13 @@ async function main(): Promise<void> {
   void syncMirror()
   // 入れてある設定の skill を、この版の設定の項目に合わせる
   syncAgentSkillOnStart()
-  syncAgentMailSkillNow()
+  removeLegacyAgentMail()
+  removeLegacyPublish()
   syncBrowserSkillNow()
+  syncVisualReviewSkillNow()
+  scheduleProjectsSkillSync(3000)
+  scheduleGlobalRulesSync(3000)
+  startScreenCache()
 
   await rendererLoad
   mark('renderer:loaded')
@@ -3737,9 +3855,9 @@ const QUIT_WATCHDOG_MS = 3000
 /** 終了処理の状態。入口が複数あるので1か所で持つ */
 let shutdownPhase: 'running' | 'draining' | 'ready' = 'running'
 
-/** 終了の前に未保存の確認が要るか（E2E では聞かない） */
+/** 終了の前に未保存の確認が要るか */
 function needsUnsavedPrompt(): boolean {
-  return unsavedFiles.length > 0 && !discardUnsavedConfirmed && !IS_E2E
+  return unsavedFiles.length > 0 && !discardUnsavedConfirmed
 }
 
 /**
@@ -3904,16 +4022,12 @@ app.on('before-quit', (event) => {
 
 // 準備のできた更新は、閉じたときに入れる（起動し直さない。次に開いたとき新しい版）。落ちたとき（0 以外）は入れない
 app.on('quit', (_event, exitCode) => {
-  // Agent どうしの依頼の受け口（一時フォルダ）を消す
-  stopAgentMail()
-  publishBackground.stop()
   void mobileRemote?.stop()
   if (exitCode === 0) autoUpdates?.installOnQuit()
 })
 
 app.on('activate', () => {
   // ウィンドウを閉じたら終了するので、ここで作り直す経路は持たない
-  if (HIDE_WINDOW) return
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show()
 })
 

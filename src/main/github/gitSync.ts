@@ -4,7 +4,7 @@ import { devNull } from 'node:os'
 import { delimiter } from 'node:path'
 import type { GitActionResult, GitRepoStatus } from '@shared/github'
 import {
-  autoFetchAllowedByEnv, classifyGitError, emptyFetchState, gitActionAvailability, parseGitStatus, pushPrecondition, recordFetch, shouldFetch,
+  classifyGitError, emptyFetchState, gitActionAvailability, parseGitStatus, pushPrecondition, recordFetch, shouldFetch,
   type FetchTrigger, type GitFetchState, type GitSyncAction, type GitSyncErrorKind
 } from '@shared/gitSync'
 import { resolveTrustedExecutable, windowsSearchPathEnv } from '../agentExecutable'
@@ -151,6 +151,8 @@ function runGit(git: string, folder: string, args: readonly string[], timeoutMs:
 
 const fetchStates = new Map<string, GitFetchState>()
 const busy = new Map<string, GitSyncAction>()
+/** 裏の fetch を走らせるか調べている最中のフォルダ（重ねないための印。画面には出さない） */
+const checking = new Set<string>()
 const queues = new Map<string, Promise<unknown>>()
 
 function fetchState(folder: string): GitFetchState {
@@ -232,27 +234,24 @@ async function doFetch(folder: string, git: string, automatic: boolean): Promise
  */
 export async function autoFetch(folder: string | null, trigger: FetchTrigger, visible: boolean): Promise<GitRepoStatus | null> {
   if (!folder) return null
-  // E2E はネットワークへ出ない（ローカルの bare リポジトリで確かめる E2E だけ ADE_E2E_GIT_FETCH=1 で走らせる）
-  if (trigger !== 'manual' && !autoFetchAllowedByEnv(process.env)) return null
-  if (busy.has(folder) || !shouldFetch(trigger, fetchState(folder), Date.now(), visible)) return null
-  // 調べている間に同じきっかけ（フッターが2か所にあるときなど）でもう一度呼ばれても重ねない
-  const previous = fetchState(folder)
-  fetchStates.set(folder, { ...previous, fetching: true })
-  let started = false
+  if (busy.has(folder) || checking.has(folder) || !shouldFetch(trigger, fetchState(folder), Date.now(), visible)) return null
+  // 調べている間に同じきっかけ（フッターが2か所にあるときなど）でもう一度呼ばれても重ねない。
+  // 印は fetchState の fetching とは別に持つ。fetching はフッターの「取得中」の回る印になるので、本当に fetch している間だけ立てる
+  // （以前はここで fetching を立てていたため、認めていないリモートでも 30 秒ごと・前に出すたびに、同時に読んだフッターの状態が
+  //  「取得中」になり、次の読み直しでもまた重なって、回る印が消えなかった）
+  checking.add(folder)
   try {
     const git = await trustedGit(folder)
     if (!git) return null
     const before = await readGitStatus(folder)
     // 行き先を見せて認めてもらったリモートだけ（security-7 [9]）。プロジェクトの設定が決めた相手へ、開いただけで通信しない
     if (!before.isGit || !before.hasRemote || before.fetch.autoFetch !== 'approved') return null
-    started = true
     return await exclusive(folder, async () => {
       await doFetch(folder, git, true)
       return readGitStatus(folder)
     })
   } finally {
-    // 走らせなかったときは、印だけ戻す（試した時刻は付けない）
-    if (!started) fetchStates.set(folder, { ...fetchState(folder), fetching: false })
+    checking.delete(folder)
   }
 }
 

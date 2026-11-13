@@ -259,15 +259,15 @@ export function safeStorageCipher(safeStorage: {
   }
 }
 
-/** 暗号化しない（保存しない）。dev 起動・E2E で使う */
+/** 暗号化しない（保存しない）。dev 起動で使う */
 export const NO_CIPHER: KeyCipher = { available: () => false, likelyAvailable: () => false, encrypt: () => Buffer.alloc(0), decrypt: () => '' }
 
 /**
  * 使う暗号化を選ぶ。**配布版だけ** safeStorage を使う。
  * dev 起動では使わない（Electron.app の名前・署名が変わると Keychain の許可が合わず、起動のたびに確認が出るため）。
- * E2E も使わない（確認で止まらないように）。どちらもキーはその起動中だけ持つ。
+ * キーはその起動中だけ持つ。
  * safeStorage はここでは呼ばない（渡すだけ）。
  */
-export function chooseKeyCipher(opt: { isPackaged: boolean; isE2E: boolean; safeStorage: Parameters<typeof safeStorageCipher>[0]; platform?: NodeJS.Platform }): KeyCipher {
-  return opt.isPackaged && !opt.isE2E ? safeStorageCipher(opt.safeStorage, opt.platform) : NO_CIPHER
+export function chooseKeyCipher(opt: { isPackaged: boolean; safeStorage: Parameters<typeof safeStorageCipher>[0]; platform?: NodeJS.Platform }): KeyCipher {
+  return opt.isPackaged ? safeStorageCipher(opt.safeStorage, opt.platform) : NO_CIPHER
 }

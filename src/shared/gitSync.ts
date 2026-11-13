@@ -146,16 +146,6 @@ export function emptyFetchState(): GitFetchState {
   return { fetching: false, lastFetchAt: null, lastAttemptAt: null, lastError: null, failures: 0 }
 }
 
-/**
- * 裏の fetch（開いたとき・定期・前に出したとき）を走らせてよい環境か。製品（ADE_E2E でない）は常に走らせる。
- * E2E（ADE_E2E=1）はネットワークへ出ないよう止める。ただし E2E がローカルの bare リポジトリをリモートにして
- * 裏の fetch を確かめるときだけ、ADE_E2E_GIT_FETCH=1 で走らせる（ADE_E2E が無ければこの変数は何も変えない）
- */
-export function autoFetchAllowedByEnv(env: Readonly<Record<string, string | undefined>>): boolean {
-  if (env.ADE_E2E !== '1') return true
-  return env.ADE_E2E_GIT_FETCH === '1'
-}
-
 /** 自動の fetch の間隔。失敗が続けば 5分→10分→20分…と延ばし、最大 1時間 */
 export function autoFetchDelayMs(failures: number): number {
   const steps = Math.max(0, Math.min(failures, 10))

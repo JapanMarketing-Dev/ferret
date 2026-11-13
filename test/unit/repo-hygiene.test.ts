@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 const ROOT_FILES = new Set([
   '.gitattributes', '.gitignore', '.gitleaks.toml', 'CONTRIBUTING.md', 'LICENSE', 'README.ja.md', 'README.md', 'SECURITY.md',
   'THIRD_PARTY_NOTICES.md', 'electron-builder.config.cjs', 'electron-builder.dev.cjs', 'electron.vite.config.ts', 'package.json',
-  'playwright.config.ts', 'pnpm-lock.yaml', 'tsconfig.json', 'tsconfig.node.json', 'tsconfig.preload.json', 'tsconfig.test.json',
+  'pnpm-lock.yaml', 'tsconfig.json', 'tsconfig.node.json', 'tsconfig.preload.json', 'tsconfig.test.json',
   'tsconfig.web.json', 'vitest.config.ts', 'wrangler.jsonc'
 ])
 
@@ -44,7 +44,7 @@ describe('公開版に出す中身', () => {
   it('実名や自宅のパスに見える文字列を置かない（架空の名前は taro・hanako などを使う）', () => {
     let out = ''
     try {
-      out = execFileSync('git', ['grep', '-nE', FORBIDDEN.source, '--', '.', ':!e2e', ':!docs/qa', ':!playwright.config.ts'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      out = execFileSync('git', ['grep', '-nE', FORBIDDEN.source, '--', '.', ':!docs/qa'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
     } catch { return } // 該当なし（git grep は 1 で終わる）か、git の無い複製
     const hits = out.split('\n').filter((line) => line && FORBIDDEN.test(line.replace(ALLOWED, '')))
     expect(hits).toEqual([])

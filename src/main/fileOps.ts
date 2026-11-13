@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { lstat, open, readdir, readlink, realpath, rename, stat } from 'node:fs/promises'
+import { lstat, open, readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { ENTRY_NAME_PROBLEM_KEYS, MAX_COPY_BYTES, MAX_COPY_ENTRIES, entryNameProblem, isInsideGitDir, nestedNameParts, nestedNameProblem, uniqueName, type FsCreated, type FsEntry, type FsTransfer } from '@shared/files'
 import { t } from '@shared/i18n'
@@ -258,15 +258,15 @@ function assertSameIdentity(expected: Identities | undefined, path: string, actu
 }
 
 /** 中身を数える（リンクは辿らない）。上限を超えたらその場で断る。seen があれば、測った実体をパスごとに控える */
-async function measure(absolute: string, total: { entries: number; bytes: number }, seen?: Identities): Promise<void> {
+async function measure(absolute: string, total: { entries: number; bytes: number }, seen?: Identities, limit: Readonly<CopyBudget> = newCopyBudget()): Promise<void> {
   const info = await lstat(absolute, { bigint: true })
   seen?.set(absolute, identityOf(info))
   total.entries++
   if (info.isFile()) total.bytes += Number(info.size)
-  if (total.entries > MAX_COPY_ENTRIES) throw copyTooManyError()
-  if (total.bytes > MAX_COPY_BYTES) throw copyTooLargeError()
+  if (total.entries > limit.entries) throw copyTooManyError()
+  if (total.bytes > limit.bytes) throw copyTooLargeError()
   if (!info.isDirectory()) return
-  for (const name of await readdir(absolute)) await measure(join(absolute, name), total, seen)
+  for (const name of await readdir(absolute)) await measure(join(absolute, name), total, seen, limit)
 }
 
 /**
@@ -356,13 +356,15 @@ async function namesIn(root: string, dir: string): Promise<string[]> {
  * 選んだもの（相対パス）を destRel のフォルダへコピーする（貼り付け・複製）。
  * 同じ名前があれば「名前 copy」「名前 copy 2」と重ならない名前にする（上書きはしない）。from → to の組を返す
  */
-export async function copyEntries(root: string, relPaths: unknown, destRel: unknown): Promise<FsTransfer[]> {
+export async function copyEntries(root: string, relPaths: unknown, destRel: unknown,
+  /** 単体テスト用: 数と大きさの上限を小さくする（1万個のファイルを作らずに上限の動きを確かめる） */
+  limit: Readonly<CopyBudget> = newCopyBudget()): Promise<FsTransfer[]> {
   const dest = await resolveDestination(root, destRel)
   const sources = await resolveSources(root, relPaths)
   const total = { entries: 0, bytes: 0 }
   for (const source of sources) {
     await assertNotIntoItself(source.absolute, dest.absolute)
-    await measure(source.absolute, total)
+    await measure(source.absolute, total, undefined, limit)
   }
   const taken = await namesIn(root, dest.absolute)
   const done: FsTransfer[] = []
@@ -528,12 +530,3 @@ export async function terminalDirFor(root: string, relPath: unknown): Promise<st
   return (await stat(real)).isDirectory() ? absolute : dirname(absolute)
 }
 
-/**
- * ゴミ箱へ送る口。ふだんは渡された trashItem（Electron の shell.trashItem）。
- * E2E（ADE_E2E=1）で ADE_E2E_TRASH_DIR があれば、使っている人の本物のゴミ箱を汚さないよう、そのフォルダへ移す。
- */
-export function trashFor(trashItem: (absolute: string) => Promise<void>, env: NodeJS.ProcessEnv = process.env): (absolute: string) => Promise<void> {
-  const dir = env.ADE_E2E === '1' ? env.ADE_E2E_TRASH_DIR?.trim() : ''
-  if (!dir) return trashItem
-  return async (absolute) => { await rename(absolute, join(dir, `${Date.now()}-${basename(absolute)}`)) }
-}

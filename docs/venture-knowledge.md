@@ -98,7 +98,7 @@ Agent と人が、ビジネスの業務（広告・発信・画像・動画・�
 - 予算の変更は `budgetChange` の承認依頼。管理画面で Agent が変えない。
 
 ### 発信（`streams/content/calendar.json`・`streams/content/drafts/`）
-- 計画（`idea`）→ 下書き（`draft`）→ チェック（`review`、`post` の承認依頼）→ 人が Ferret の「発信」で投稿（`posted`）→ 反応の振り返り。
+- 計画（`idea`）→ 下書き（`draft`）→ チェック（`review`、`post` の承認依頼）→ 人が投稿（`posted`）→ 反応の振り返り。
 - 観点: 事実の出典、体験談・数字・お客様の声の創作をしない、ステルスマーケティングにならない（広告であることの表示）、引用の範囲と出典、ブランドのトーン。
 
 ### 画像（`streams/images/requests.json`・`streams/images/out/`）

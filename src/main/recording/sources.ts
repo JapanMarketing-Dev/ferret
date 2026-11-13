@@ -4,8 +4,8 @@ import { t } from '@shared/i18n'
 import { reportHandled } from '@shared/report'
 import { windowNumberOf, withAppWindows } from '@shared/desktopApps'
 import { displayIdOfScreen, sortScreensByDisplay, withMissingDisplays } from '@shared/captureSources'
+import { screenSourceForDisplay } from '@shared/quickCapture'
 import { captureMacWindowImage, listMacWindows } from './devices'
-import { fakeCapturePath, readFakeCapture } from './fakeCapture'
 
 /**
  * 画面全体・別のウインドウの録画対象（REC-2 の拡張 / 設計9章）。
@@ -21,9 +21,6 @@ import { fakeCapturePath, readFakeCapture } from './fakeCapture'
  * Orca はマイク・カメラを見ているが、同じ考え方で 'screen' を見る。
  */
 export function screenAccess(): CaptureSourceList['screenAccess'] {
-  // E2E の偽の画面・ウインドウ（fakeCapture.ts）。OS の許可は読まない
-  const fake = fakeCapturePath()
-  if (fake) return readFakeCapture(fake).screenAccess
   if (process.platform !== 'darwin') return 'granted'
   try {
     return systemPreferences.getMediaAccessStatus('screen')
@@ -64,9 +61,6 @@ export async function openScreenSettings(): Promise<void> {
 export async function listCaptureSources(
   thumbnail: { width: number; height: number } = { width: 320, height: 200 }
 ): Promise<CaptureSourceInfo[]> {
-  // E2E の偽の画面・ウインドウ（fakeCapture.ts）。desktopCapturer・osascript・screencapture を呼ばない
-  const fake = fakeCapturePath()
-  if (fake) return readFakeCapture(fake).sources
   const own = new Set(BrowserWindow.getAllWindows().map((w) => w.getMediaSourceId()))
   const withThumbnail = thumbnail.width > 0 && thumbnail.height > 0
   // ウインドウの題名・アプリ名は画面収録の許可があるときだけ読める。許可が無ければ読まない
@@ -122,4 +116,14 @@ function screenName(displayId: string | undefined, displays: Electron.Display[],
   const display = displays[index]!
   const params = { n: index + 1, width: display.size.width, height: display.size.height }
   return String(display.id) === primaryId ? t('recording.source.screenNumberedMain', params) : t('recording.source.screenNumbered', params)
+}
+
+/**
+ * ワンクリック録画の対象。その窓（Ferret）があるディスプレイの「画面全体」。窓が無ければ主ディスプレイ。
+ * 画面が1つも見つからなければ null
+ */
+export async function screenSourceOfWindow(window: BrowserWindow | null): Promise<CaptureSourceInfo | null> {
+  const display = window && !window.isDestroyed() ? screen.getDisplayMatching(window.getBounds()) : screen.getPrimaryDisplay()
+  const sources = await listCaptureSources({ width: 0, height: 0 })
+  return screenSourceForDisplay(sources, String(display.id))
 }

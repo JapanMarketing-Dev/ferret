@@ -276,7 +276,7 @@ describe('画面・リンクに旧名が残っていない', () => {
 
 describe('起動の経路で引っ越しが動く（settings.ts の configDir）', () => {
   const saved: Record<string, string | undefined> = {}
-  const keys = ['HOME', 'USERPROFILE', 'ADE_E2E', 'FERRET_CONFIG_DIR', 'MOVIE_ADE_CONFIG_DIR']
+  const keys = ['HOME', 'USERPROFILE', 'FERRET_CONFIG_DIR', 'MOVIE_ADE_CONFIG_DIR']
   beforeEach(() => {
     for (const k of keys) saved[k] = process.env[k]
     for (const k of keys.slice(2)) delete process.env[k]

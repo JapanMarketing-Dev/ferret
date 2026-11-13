@@ -59,15 +59,10 @@ export function classifySystemAudioError(name: string | undefined, platform?: Sy
 }
 
 /**
- * 検証用（ADE_E2E=1 のときだけ）。会議アプリや OS の許可なしで、相手の声の経路を通す。
+ * 検証用（ADE_SYNTHETIC_MIC=1 の起動）。会議アプリや OS の許可なしで、相手の声の経路を通す。
  * - page: 内蔵ブラウザのページが鳴らす音を、PC の音声の代わりに録る（OS の許可は要らない）
  * - denied: OS が許可しなかったときと同じく、取り込みを断る
  * - no-device: 音声の出力先が無いときと同じく、音声の無い取り込みを返す
  * - ends: page と同じに録り始め、途中で取り込みが止まる（出力先が抜かれたときと同じ）
  */
 export type SyntheticSystemAudio = 'page' | 'denied' | 'no-device' | 'ends'
-
-export function syntheticSystemAudio(value: string | undefined, isE2E: boolean): SyntheticSystemAudio | null {
-  if (!isE2E) return null
-  return value === 'page' || value === 'denied' || value === 'no-device' || value === 'ends' ? value : null
-}

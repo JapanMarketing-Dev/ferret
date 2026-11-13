@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check, Info, KeyRound, LogIn, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { accountDisplayName, type AgentAccountSummary, type AgentAccountsView } from '@shared/accounts'
+import { accountDisplayName, defaultLoginLabel, type AgentAccountSummary, type AgentAccountsView } from '@shared/accounts'
 import { TUI_AGENT_LABEL, type AccountAgent } from '@shared/types'
 import { Badge, Button, Field, IconButton } from '../ui'
 import { useAgentAccounts, type AccountAction } from '../hooks/useAgentAccounts'
@@ -19,7 +19,8 @@ import '../styles/accounts.css'
  *           ~/bench/orca/src/renderer/src/components/settings/accounts-pane-codex-account-row.tsx,
  *           ~/bench/orca/src/renderer/src/components/settings/accounts-pane-removal-dialogs.tsx（MIT, Copyright 2026 Lovecast Inc.）
  *
- * Orca と同じく「システムの既定」を先頭に置き、その下に追加したアカウントを並べる。
+ * いつものログイン（~/.claude・~/.codex）を、ログインしているアカウントの名前（メール）の1行として先頭に置き、
+ * その下に追加したアカウントを並べる。どれを使うかは行を押して選ぶ（「システムの既定」という別枠は出さない）。
  * 追加はログインを促す流れ（押すと内蔵ターミナルでログインが始まる）。保存は main 側で即時に行うので、
  * ダイアログを閉じたときの一括保存の対象ではない。WSL・リモート・使用量の表示は持ち込んでいない。
  */
@@ -156,13 +157,16 @@ function AgentAccounts({
   const t = useT()
   const { action, select, rename, remove, relogin, add, switched } = accounts
   const busy = action !== 'idle'
-  const systemActive = !!view && view.activeAccountId === null
+  // いつものログイン（~/.claude・~/.codex。保存値の null）も、追加したアカウントと同じ1行として、ログインしているアカウントの名前で並べる。
+  // 「システムの既定」という別枠は出さない（2026-11-13）。名前の変更・削除は無い（Ferret が作ったフォルダではないので消さない）
+  const defaultActive = !!view && view.activeAccountId === null
   const system = view?.systemDefault
-  const systemDetail = system?.email
-    ? t('accounts.systemDetail.email', { agent: TUI_AGENT_LABEL[agent], email: system.email })
-    : system?.signedIn
-      ? t('accounts.systemDetail.signedIn', { agent: TUI_AGENT_LABEL[agent] })
-      : t('accounts.systemDetail.signedOut', { agent: TUI_AGENT_LABEL[agent] })
+  const defaultName = defaultLoginLabel(agent, system)
+  // 追加したアカウントに同じメールがあるときだけ、どちらがいつものログインか分かるよう添える
+  const sameEmail = !!system?.email && !!view?.accounts.some((a) => a.email?.toLowerCase() === system.email?.toLowerCase())
+  const defaultDetail = [system?.signedIn && system.email ? system.workspaceLabel : null, sameEmail ? t('accounts.defaultLogin', { agent: TUI_AGENT_LABEL[agent] }) : null]
+    .filter(Boolean)
+    .join(t('common.listSeparator'))
 
   return (
     <div className="acct-group" id={`settings-accounts-${agent}`} data-testid={`accounts-${agent}`}>
@@ -175,26 +179,27 @@ function AgentAccounts({
           {t('accounts.add')}
         </Button>
       </div>
-      <div className={`acct-row${systemActive ? ' is-active' : ''}`}>
-        <button
-          type="button"
-          className="acct-row__main"
-          onClick={() => void select(agent, null)}
-          disabled={busy || systemActive}
-          aria-pressed={systemActive}
-        >
-          <span className="acct-row__radio" aria-hidden="true">{systemActive && <Check size={12} strokeWidth={2.5} />}</span>
-          <span className="acct-row__text">
-            <span className="acct-row__name">
-              {t('accounts.systemDefault')}
-              {systemActive && <Badge tone="brand">{t('accounts.selected')}</Badge>}
+      {view && (
+        <div className={`acct-row${defaultActive ? ' is-active' : ''}`} data-testid={`account-row-default-${agent}`}>
+          <button
+            type="button"
+            className="acct-row__main"
+            onClick={() => void select(agent, null)}
+            disabled={busy || defaultActive}
+            aria-pressed={defaultActive}
+            title={defaultActive ? t('accounts.selected') : t('accounts.switchTo')}
+          >
+            <span className="acct-row__radio" aria-hidden="true">{defaultActive && <Check size={12} strokeWidth={2.5} />}</span>
+            <span className="acct-row__text">
+              <span className="acct-row__name">
+                <span className="acct-row__label" title={defaultName}>{defaultName}</span>
+                {defaultActive && <Badge tone="brand">{t('accounts.selected')}</Badge>}
+                {!system?.signedIn && <Badge tone="warning">{t('accounts.status.signedOut')}</Badge>}
+              </span>
+              {defaultDetail && <span className="acct-row__detail" title={defaultDetail}>{defaultDetail}</span>}
             </span>
-            <span className="acct-row__detail" title={systemDetail}>{systemDetail}</span>
-          </span>
-        </button>
-      </div>
-      {view && view.accounts.length === 0 && (
-        <p className="acct-group__empty">{t('accounts.empty')}</p>
+          </button>
+        </div>
       )}
       {view?.accounts.map((account) => (
         <AccountRow

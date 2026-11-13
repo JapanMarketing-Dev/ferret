@@ -21,6 +21,8 @@ describe.runIf(posix)('ログインシェルの PATH を前回の起動の値で
   let dir: string
   beforeEach(() => {
     vi.resetModules()
+    // このファイルはログインシェルを差し替えて確かめるので、テスト用の軽いシェル（test/setup/isolateEnv.ts）は外す
+    delete process.env.FERRET_TEST_LOGIN_SHELL
     calls.length = 0
     dir = mkdtempSync(join(tmpdir(), 'ade-shell-path-'))
   })

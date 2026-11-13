@@ -387,12 +387,6 @@
   white-space: nowrap;
 }
 
-/* ページのタブだけは縮んで、長いタイトルを省略する（指摘・設定のタブは縮めない）*/
-.ctab--page {
-  min-width: 72px;
-  flex: 0 1 auto;
-}
-
 /* 選択中の下線。左から伸びる */
 .ctab::after {
   position: absolute;
@@ -418,6 +412,74 @@
 
 .ctab[aria-selected='true'] > svg {
   color: var(--color-accent);
+}
+
+/*
+ * いつもある画面（ダッシュボード・ブラウザ・指摘）の切り替え。タブ列の左端に固定し、ファイルのタブとは別の軸にする。
+ * 小さなセグメント（押し込んだ見た目で選択を示す）。右のファイルのタブ列は残りの幅をすべて使って横に流れる
+ */
+.ctabs__views {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border-right: 1px solid var(--color-border);
+  gap: 2px;
+}
+
+.cview {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  gap: var(--space-2);
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.cview:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.cview:focus-visible {
+  outline-offset: -2px;
+}
+
+.cview[aria-selected='true'] {
+  background: var(--color-surface-selected);
+  color: var(--color-text);
+}
+
+.cview > svg {
+  flex: none;
+}
+
+.cview[aria-selected='true'] > svg {
+  color: var(--color-accent);
+}
+
+/* 中央ペインが狭いときは、文字を外してアイコン（と件数）だけにする（幅はタブ列で測る） */
+.ctabs {
+  container-type: inline-size;
+}
+
+@container (max-width: 520px) {
+  .cview__label {
+    display: none;
+  }
+}
+
+.ctabs__files {
+  flex: 1 1 auto;
 }
 
 /* ── ブラウザのツールバー ─────────────────────────────── */
@@ -3270,50 +3332,6 @@ button.sb-more__row:hover {
   height: 24px;
   align-self: center;
   margin-left: var(--space-1);
-}
-
-/* 巡回の帯（RoundBar.tsx）。上部のバーの中央、エディタ／フィードバックの切り替えの隣 */
-.round-bar {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin-left: var(--space-3);
-  padding: 2px var(--space-2);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated);
-  font-size: 12px;
-  -webkit-app-region: no-drag;
-}
-
-.round-bar__label,
-.round-bar__pos {
-  color: var(--color-text-muted);
-}
-
-.round-bar__name {
-  max-width: 160px;
-  overflow: hidden;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.round-bar__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 1px var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-hover);
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.round-bar__btn--quiet {
-  background: none;
 }
 
 /* オーケストラの対象外のプロジェクトの印（薄く） */

@@ -1,6 +1,6 @@
 import { expandedStorageKey } from '@shared/fileTreeState'
 import { TREE_DRAG_TYPE } from '../lib/treeDrag'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import { ChevronRight, ClipboardPaste, Copy, CopyPlus, ExternalLink, Eye, EyeOff, FileCode, FilePlus, FileSearch, FileText, Folder, FolderOpen, FolderPlus, Link, ListCollapse, Pencil, RefreshCw, Scissors, Search, SquareTerminal, Trash2, Undo2 } from 'lucide-react'
 import { ENTRY_NAME_PROBLEM_KEYS, isSameOrUnder, nestedNameParts, nestedNameProblem, type FsEntry, type FsTransfer } from '@shared/files'
 import { GIT_STATE_LETTER, gitStateFor, isHiddenByDefault, withoutHidden, type GitDecorations, type GitFileState } from '@shared/gitDecorations'
@@ -134,7 +134,7 @@ const KEYS = {
   delete: () => (isMac() ? formatShortcut('Mod', 'Backspace') : 'Delete')
 }
 
-export function FileExplorer({
+function FileExplorerImpl({
   root,
   projectId = null,
   activePath,
@@ -189,9 +189,12 @@ export function FileExplorer({
   }, [root])
 
   // ファイル名で絞り込む。打ち終わるのを少し待つ
+  // 前の問い合わせの失敗は、打ち直したら消す（残すと検索の失敗1回でツリーごと出なくなる）。
+  // 欄を空にしたら回っている印も止める（待っていた答えは捨てるので、止める人がいなくなる）
   useEffect(() => {
     const trimmed = query.trim()
-    if (!root || !trimmed) { setNameResults([]); setTruncated(false); return }
+    setSearchError(null)
+    if (!root || !trimmed) { setNameResults([]); setTruncated(false); setSearching(false); return }
     let cancelled = false
     setSearching(true)
     const timer = window.setTimeout(() => {
@@ -708,7 +711,8 @@ function useTreeOperations({
     const pending = readDrop(dataTransfer)
     void run(async () => {
       const entries = await pending
-      if (entries.length === 0) return
+      // 実パスの無いもの（ブラウザ・ほかのアプリから引いた画像など）は取り込めない。黙って何もしないままにしない
+      if (entries.length === 0) { setActionError(t('drop.errors.unreadable')); return }
       afterCopied(dest, await window.ade.invoke('fs:import', entries.map((e) => e.path), dest))
     })
   }
@@ -1128,3 +1132,6 @@ function DeleteDialog({ paths, dirty, onCancel, onConfirm }: { paths: string[]; 
     </Modal>
   )
 }
+
+/** 親（App）が描き直しても、渡す値が同じなら描き直さない（内蔵ブラウザの状態などの変化で重い部品を描き直さない） */
+export const FileExplorer = memo(FileExplorerImpl)

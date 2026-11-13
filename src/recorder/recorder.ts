@@ -15,6 +15,7 @@
 
 import { init as initSentry } from '@sentry/electron/renderer'
 import { classifySystemAudioError } from '../shared/systemAudio'
+import { defaultMicKey, micRecoveryAction, silencePadSamples, type MicDeviceLike } from '../shared/micRecovery'
 import { compositeLayout, fitInto, sourceMaxWidth, type Rect } from '../shared/captureComposite'
 
 export {} // このファイルをモジュールにする（declare global のため）
@@ -35,13 +36,10 @@ interface StartPayload {
   startedAtEpoch: number
   platform?: string
   captureMic: boolean
-  syntheticMicWavBase64?: string
   syntheticMic: boolean
   captureSystemAudio: boolean
   systemAudioEndAfterMs?: number
   systemAudioSynthetic?: boolean
-  /** 検証用（E2E の偽の画面・ウインドウ）。画面・ウインドウの代わりに canvas の映像を録る（OS の画面収録に触れない） */
-  syntheticDesktop?: boolean
   micDeviceId?: string
   videoBitsPerSecond: number
   videoMaxWidth: number
@@ -125,11 +123,12 @@ class AudioCapture {
     private readonly startOffsetMs: number
   ) {}
 
+  private input: MediaStreamAudioSourceNode | null = null
+
   async start(stream: MediaStream): Promise<void> {
     if (stream.getAudioTracks().length === 0) {
       throw new Error(text('noAudioTrack', { source: this.source }))
     }
-    this.stream = stream
     // 16kHz で作ると Chromium が入力を自動でリサンプルする
     const context = new AudioContext({ sampleRate: SAMPLE_RATE })
     this.context = context
@@ -140,14 +139,46 @@ class AudioCapture {
     node.port.onmessage = (event: MessageEvent) => {
       if (this.paused) return
       const data = event.data as { samples: Int16Array; rms: number; peak: number }
-      const offsetMs = this.startOffsetMs + (this.samplesSent / SAMPLE_RATE) * 1000
-      this.samplesSent += data.samples.length
-      // 転送可能オブジェクトとして渡す（コピーを減らす）
-      bridge.pcm({ source: this.source, offsetMs, samples: data.samples.buffer as ArrayBuffer })
+      this.send(data.samples)
       bridge.level({ source: this.source, rms: data.rms, peak: data.peak })
     }
+    this.connect(stream)
+  }
 
-    context.createMediaStreamSource(stream).connect(node)
+  private send(samples: Int16Array): void {
+    const offsetMs = this.startOffsetMs + (this.samplesSent / SAMPLE_RATE) * 1000
+    this.samplesSent += samples.length
+    // 転送可能オブジェクトとして渡す（コピーを減らす）
+    bridge.pcm({ source: this.source, offsetMs, samples: samples.buffer as ArrayBuffer })
+  }
+
+  private connect(stream: MediaStream): void {
+    if (!this.context || !this.node) return
+    this.stream = stream
+    this.input = this.context.createMediaStreamSource(stream)
+    this.input.connect(this.node)
+  }
+
+  /**
+   * 録画中にマイクを付け替える（抜かれた・既定が変わった。MicKeeper）。同じ系統のまま、途切れた分を無音で埋めてからつなぐ
+   * （main はサンプル数で時刻を数えるので、埋めないと後の声が早い時刻にずれる。@shared/micRecovery の silencePadSamples）
+   */
+  replace(stream: MediaStream, activeMs: number): void {
+    if (!this.context || !this.node) {
+      stream.getTracks().forEach((track) => track.stop())
+      return
+    }
+    try { this.input?.disconnect() } catch { /* もう外れている */ }
+    this.input = null
+    this.stream?.getTracks().forEach((track) => track.stop())
+    this.stream = null
+    let pad = silencePadSamples(activeMs, this.startOffsetMs, this.samplesSent, SAMPLE_RATE)
+    while (pad > 0) {
+      const size = Math.min(pad, SAMPLE_RATE / 10)
+      this.send(new Int16Array(size))
+      pad -= size
+    }
+    this.connect(stream)
   }
 
   setPaused(paused: boolean): void {
@@ -160,6 +191,8 @@ class AudioCapture {
 
   stop(): void {
     this.node?.port.close()
+    this.input?.disconnect()
+    this.input = null
     this.node?.disconnect()
     this.stream?.getTracks().forEach((track) => track.stop())
     void this.context?.close()
@@ -445,6 +478,131 @@ const captures: AudioCapture[] = []
 let videoWrites: Promise<void> = Promise.resolve()
 /** 止める操作の途中。相手の声の取り込みが終わっても「途中で止まった」とは知らせない */
 let stopping = false
+/** 録画を始めた時刻と、一時停止していた時間（マイクを付け替えるときの時刻。一時停止の間は数えない） */
+let recordStartedAt = 0
+let pausedTotalMs = 0
+let pausedAt: number | null = null
+function activeMs(): number {
+  const now = Date.now()
+  return now - recordStartedAt - pausedTotalMs - (pausedAt !== null ? now - pausedAt : 0)
+}
+let micKeeper: MicKeeper | null = null
+
+/**
+ * 録画中のマイクを持ち続ける。マイクが抜かれた・OS の既定のマイクが変わった・取り込みが終わった（ended）ときは、
+ * 録画を止めずにマイクだけを開き直して同じ音声の系統へつなぐ。開けるマイクが無い間は映像だけ録り、戻ったらつなぐ。
+ * どうするかは @shared/micRecovery の micRecoveryAction が決める（単体テストあり）
+ */
+class MicKeeper {
+  private track: MediaStreamTrack | null = null
+  private requested = ''
+  private defaultKey: string | null = null
+  private busy = false
+  private again = false
+  private stopped = false
+  private failures = 0
+  private retry: ReturnType<typeof setTimeout> | null = null
+  private readonly onDeviceChange = () => void this.check()
+
+  constructor(private readonly wanted: string, private readonly echoCancellation: boolean) {}
+
+  /** 最初に開く。開けなければ投げる（録画は続ける。マイクがつながったら devicechange で開き直す） */
+  async start(): Promise<void> {
+    navigator.mediaDevices.addEventListener('devicechange', this.onDeviceChange)
+    const devices = await this.devices()
+    const action = micRecoveryAction(this.wanted, null, devices)
+    // 一覧が読めない・空でも、まず既定（または選んだもの）を開いてみる（許可の前は一覧が空のことがある）
+    const deviceId = action.kind === 'open' ? action.deviceId : (this.wanted === 'default' ? '' : this.wanted)
+    await this.attach(await this.openStream(deviceId), deviceId, devices)
+  }
+
+  private capture: AudioCapture | null = null
+
+  /** 開いたマイクを音声の系統へつなぐ。まだ系統が無ければ作る（録画の開始時にマイクが無かったときは、つながった時刻から録る） */
+  private async attach(stream: MediaStream, deviceId: string, devices: MicDeviceLike[]): Promise<void> {
+    if (this.stopped) { stream.getTracks().forEach((track) => track.stop()); return }
+    if (this.capture) this.capture.replace(stream, activeMs())
+    else {
+      const capture = new AudioCapture('mic', activeMs())
+      try {
+        await capture.start(stream)
+      } catch (err) {
+        capture.stop()
+        throw err
+      }
+      capture.setPaused(pausedAt !== null)
+      captures.push(capture)
+      this.capture = capture
+    }
+    this.adopt(stream, deviceId, devices)
+  }
+
+  private async devices(): Promise<MicDeviceLike[]> {
+    try {
+      return (await navigator.mediaDevices.enumerateDevices())
+        .filter((d) => d.kind === 'audioinput')
+        .map((d) => ({ deviceId: d.deviceId, label: d.label, groupId: d.groupId }))
+    } catch {
+      return []
+    }
+  }
+
+  private openStream(deviceId: string): Promise<MediaStream> {
+    return navigator.mediaDevices.getUserMedia({
+      /*
+       * 相手の声も録るときは、スピーカーから出た相手の声がマイクに入りにくいようエコー除去を入れる。
+       * 残った二重取りは、文字起こしのあとに時刻と文で落とす（src/main/pipeline/merge.ts）
+       */
+      audio: deviceId
+        ? { deviceId: { exact: deviceId }, echoCancellation: this.echoCancellation, noiseSuppression: false }
+        : { echoCancellation: this.echoCancellation, noiseSuppression: false },
+      video: false
+    })
+  }
+
+  private adopt(stream: MediaStream, deviceId: string, devices: MicDeviceLike[]): void {
+    const track = stream.getAudioTracks()[0] ?? null
+    this.track = track
+    this.requested = deviceId
+    this.defaultKey = deviceId === '' ? defaultMicKey(devices.filter((d) => d.deviceId !== '')) : null
+    // マイクが抜かれた・OS が取り込みを止めた。録画は止めず、開き直す
+    track?.addEventListener('ended', () => { if (this.track === track) void this.check() })
+  }
+
+  /** 一覧が変わった・取り込みが終わった。必要ならマイクを開き直す（重なったら終わってからもう一度） */
+  async check(): Promise<void> {
+    if (this.stopped) return
+    if (this.busy) { this.again = true; return }
+    this.busy = true
+    try {
+      const devices = await this.devices()
+      const open = this.track ? { requested: this.requested, defaultKey: this.defaultKey, live: this.track.readyState === 'live' } : null
+      const action = micRecoveryAction(this.wanted, open, devices)
+      if (action.kind !== 'open') return
+      await this.attach(await this.openStream(action.deviceId), action.deviceId, devices)
+      this.failures = 0
+      console.info('[recorder] microphone switched', action.deviceId ? 'chosen' : 'default')
+    } catch (err) {
+      // 開けなかった（切り替えの途中など）。少し待って数回だけ試し直す。それでもだめなら次の devicechange を待つ
+      console.warn('[recorder] microphone reopen failed', message(err))
+      if (++this.failures <= 5 && !this.stopped) {
+        if (this.retry) clearTimeout(this.retry)
+        this.retry = setTimeout(() => { this.retry = null; void this.check() }, 1_500)
+      }
+    } finally {
+      this.busy = false
+      if (this.again && !this.stopped) { this.again = false; void this.check() }
+    }
+  }
+
+  stop(): void {
+    this.stopped = true
+    navigator.mediaDevices.removeEventListener('devicechange', this.onDeviceChange)
+    if (this.retry) clearTimeout(this.retry)
+    this.retry = null
+    this.track = null
+  }
+}
 
 /**
  * 映像。内蔵ブラウザのタブ映像（tab）は OSの画面収録権限が要らない。
@@ -478,42 +636,13 @@ async function captureVideo(
 }
 
 /**
- * 検証用（E2E の偽の画面・ウインドウ。main の fakeCapture.ts）。ID ごとに色の違う canvas を動かし続けた映像。
- * 非表示の窓でも描き続けるよう requestAnimationFrame ではなくタイマーで描く
- */
-function syntheticDesktopStream(sourceId: string, maxFrameRate: number): MediaStream {
-  const canvas = document.createElement('canvas')
-  canvas.width = 640
-  canvas.height = 400
-  const ctx = canvas.getContext('2d')
-  let hue = 0
-  for (const ch of sourceId) hue = (hue * 31 + ch.charCodeAt(0)) % 360
-  let n = 0
-  const draw = () => {
-    if (!ctx) return
-    ctx.fillStyle = `hsl(${hue}, 70%, 45%)`
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect((n * 8) % canvas.width, 180, 40, 40)
-    ctx.font = '24px sans-serif'
-    ctx.fillText(sourceId, 20, 40)
-    n++
-  }
-  draw()
-  const timer = setInterval(draw, 100)
-  const stream = canvas.captureStream(Math.max(1, Math.min(30, maxFrameRate)))
-  stream.getVideoTracks()[0]?.addEventListener('ended', () => clearInterval(timer))
-  return stream
-}
-
-/**
  * 複数の画面・ウインドウを並べた1本の映像。どれか1つでも取り込めなければ始めない（選んだものの一部だけを黙って録らない）。
  * 合成が使えない環境では、最初の対象だけを録って知らせる
  */
 async function compositeDesktopStream(payload: StartPayload, extra: string[]): Promise<MediaStream> {
   const ids = [payload.sourceId, ...extra]
   const width = sourceMaxWidth(ids.length, payload.videoMaxWidth)
-  const open = (id: string) => (payload.syntheticDesktop ? Promise.resolve(syntheticDesktopStream(id, payload.videoMaxFrameRate)) : captureVideo('desktop', id, width, payload.videoMaxFrameRate))
+  const open = (id: string) => captureVideo('desktop', id, width, payload.videoMaxFrameRate)
   if (!DesktopCompositor.supported()) {
     console.warn('[recorder] desktop compositing is not available; recording the first source only')
     return open(payload.sourceId)
@@ -562,14 +691,15 @@ async function start(payload: StartPayload): Promise<void> {
   const startedAt = payload.startedAtEpoch
   stopping = false
   messages = payload.messages ?? {}
+  recordStartedAt = startedAt
+  pausedTotalMs = 0
+  pausedAt = null
 
   // 映像
   try {
     const extra = payload.sourceKind === 'desktop' ? payload.extraSourceIds ?? [] : []
     const stream = extra.length > 0 ? await compositeDesktopStream(payload, extra)
-      : payload.syntheticDesktop && payload.sourceKind === 'desktop'
-        ? syntheticDesktopStream(payload.sourceId, payload.videoMaxFrameRate)
-        : await captureVideo(
+      : await captureVideo(
           payload.sourceKind,
           payload.sourceId,
           payload.videoMaxWidth,
@@ -604,28 +734,17 @@ async function start(payload: StartPayload): Promise<void> {
     bridge.error(text('videoFailed', { message: message(err) }))
   }
 
-  // マイク（自分）
+  // マイク（自分）。録画中にマイクが抜かれた・既定が変わっても、開き直して録り続ける（MicKeeper）
   if (payload.captureMic) {
     try {
-      const stream = payload.syntheticMic
-        ? await syntheticSpeechStream(payload.syntheticMicWavBase64)
-        : await navigator.mediaDevices.getUserMedia({
-            /*
-             * 相手の声も録るときは、スピーカーから出た相手の声がマイクに入りにくいようエコー除去を入れる。
-             * 残った二重取りは、文字起こしのあとに時刻と文で落とす（src/main/pipeline/merge.ts）
-             */
-            audio: payload.micDeviceId
-              ? {
-                  deviceId: { exact: payload.micDeviceId },
-                  echoCancellation: payload.captureSystemAudio,
-                  noiseSuppression: false
-                }
-              : { echoCancellation: payload.captureSystemAudio, noiseSuppression: false },
-            video: false
-          })
-      const capture = new AudioCapture('mic', Date.now() - startedAt)
-      await capture.start(stream)
-      captures.push(capture)
+      if (payload.syntheticMic) {
+        const capture = new AudioCapture('mic', activeMs())
+        await capture.start(syntheticSpeechStream())
+        captures.push(capture)
+      } else {
+        micKeeper = new MicKeeper(payload.micDeviceId ?? '', payload.captureSystemAudio)
+        await micKeeper.start()
+      }
     } catch (err) {
       bridge.error(text('micFailed', { message: message(err) }))
     }
@@ -661,17 +780,9 @@ async function start(payload: StartPayload): Promise<void> {
  * 検証用の合成音声。実機のマイクを開かずに、音声の経路（Worklet → PCM → main）を通す。
  * 1.2秒鳴って0.8秒黙る、を繰り返す。無音区切り（SilenceSegmenter）の確認にも使える。
  */
-async function syntheticSpeechStream(wavBase64?: string): Promise<MediaStream> {
+function syntheticSpeechStream(): MediaStream {
   const context = new AudioContext()
   const destination = context.createMediaStreamDestination()
-  if (wavBase64) {
-    const bytes = Uint8Array.from(atob(wavBase64), (c) => c.charCodeAt(0))
-    const source = context.createBufferSource()
-    source.buffer = await context.decodeAudioData(bytes.buffer)
-    source.connect(destination)
-    source.start(context.currentTime + 0.35)
-    return destination.stream
-  }
   const oscillator = context.createOscillator()
   oscillator.type = 'sawtooth'
   oscillator.frequency.value = 180
@@ -728,11 +839,13 @@ bridge.onStart((payload: StartPayload) => {
 })
 
 bridge.onPause(() => {
+  if (pausedAt === null) pausedAt = Date.now()
   if (recorder?.state === 'recording') recorder.pause()
   for (const capture of captures) capture.setPaused(true)
 })
 
 bridge.onResume(() => {
+  if (pausedAt !== null) { pausedTotalMs += Date.now() - pausedAt; pausedAt = null }
   if (recorder?.state === 'paused') recorder.resume()
   for (const capture of captures) capture.setPaused(false)
 })
@@ -754,6 +867,8 @@ bridge.onStop(() => {
       attempt(() => compositor?.stop())
       compositor = null
       pendingOverlay = null
+      attempt(() => micKeeper?.stop())
+      micKeeper = null
       for (const capture of captures) attempt(() => capture.stop())
       captures.length = 0
       await videoWrites

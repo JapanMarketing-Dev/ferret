@@ -1,4 +1,5 @@
 import type { AccountAgent } from './types'
+import { TUI_AGENT_LABEL } from './agentCatalog'
 import { t } from './i18n'
 
 /**
@@ -28,7 +29,11 @@ export interface AgentAccount {
   lastAuthenticatedAt: number | null
 }
 
-/** Agent ごとの一覧と選択。activeAccountId が null なら「システムの既定アカウント」 */
+/**
+ * Agent ごとの一覧と選択。activeAccountId が null なら「いつものログイン」（~/.claude・~/.codex のアカウント）。
+ * 画面では「システムの既定」という別枠にせず、ログインしているアカウント（メール）の1行として並べて選ばせる（2026-11-13）。
+ * 保存値の null はそのまま「いつものログイン」の行を指すので、前の版で「システムの既定」を選んでいた人もそのまま同じアカウントを使う
+ */
 export interface AgentAccountList {
   accounts: AgentAccount[]
   activeAccountId: string | null
@@ -56,6 +61,8 @@ export interface AgentAccountSummary extends AgentAccount {
 interface SystemDefaultAccount {
   signedIn: boolean
   email: string | null
+  /** プラン・ワークスペース名。読めなければ null（古い main からは来ないので省略可） */
+  workspaceLabel?: string | null
 }
 
 export interface AgentAccountsView {
@@ -140,4 +147,13 @@ export function dedupeAccountRows<T extends { accountId: string | null; email: s
 /** 表示名。名前 → メール → 「ログイン待ち」の順 */
 export function accountDisplayName(account: Pick<AgentAccount, 'label' | 'email'>): string {
   return account.label.trim() || account.email || t('accounts.pendingLabel')
+}
+
+/**
+ * いつものログイン（~/.claude・~/.codex。保存値の null）の表示名。ログインしているアカウントのメール →
+ * 分からなければ「いつもの Claude Code のログイン」。「システムの既定」という名前は出さない
+ */
+export function defaultLoginLabel(agent: AccountAgent, identity: { signedIn: boolean; email: string | null } | null | undefined): string {
+  const email = identity?.signedIn ? identity.email?.trim() : null
+  return email || t('accounts.defaultLogin', { agent: TUI_AGENT_LABEL[agent] })
 }

@@ -28,8 +28,8 @@ import { hasClipboardFiles } from './clipboardPaste'
 
 type RendererKind = 'webgl' | 'canvas' | 'dom'
 
-/** 1つのペインが覚えておく行数。多くの Agent のタブを並べると、ペインの数だけ renderer のメモリを使う */
-export const TERMINAL_SCROLLBACK = 5000
+/** 1つのペインが覚えておく行数。多くの Agent のタブを並べると、ペインの数だけ renderer のメモリを使う（5000 → 3000。戻す分は RESTORE_LINE_LIMIT の 2000 行） */
+export const TERMINAL_SCROLLBACK = 3000
 /**
  * 画面の文字（terminal:screen。main の Agent の状態の判定に使う）を送る間隔。
  * 画面に出ていないペインは間を空ける（出力のたびに画面の全行を文字に直すのが重い）

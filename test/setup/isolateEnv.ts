@@ -8,3 +8,10 @@ const INHERITED_PREFIXES = ['FERRET_VIDEO_', 'FERRET_AGENT_', 'FERRET_DECISION_'
 for (const key of Object.keys(process.env)) {
   if (INHERITED_PREFIXES.some((prefix) => key.startsWith(prefix))) delete process.env[key]
 }
+
+/*
+ * ログインシェルの PATH（src/main/agentDetection.ts の loginShellPath。`$SHELL -ilc`）を、利用者の rc を読む本物のシェルで取らない。
+ * zsh の rc は手元で 1.5〜2 秒かかり、git・Agent の検出を通るテストがそのたびに待っていた（全体が10秒を超える一因）。
+ * ターミナルのシェル（SHELL）はそのままにし、PATH を読むシェルだけを rc の軽い /bin/sh にする（VITEST の中だけ効く）
+ */
+if (process.platform !== 'win32') process.env.FERRET_TEST_LOGIN_SHELL = '/bin/sh'

@@ -15,6 +15,14 @@ const recorderOut = resolve(__dirname, 'out/recorder')
 const sourcemap = 'hidden' as const
 
 /**
+ * 配布用のビルド（`electron-vite build`）だけ JS と CSS を縮める（読み込み・解析を軽くし、配布物を小さくする）。
+ * dev（`electron-vite dev`）は読みやすさを優先して縮めない。
+ * 縮めても上の hidden のソースマップは出るので、Sentry では元の行に戻せる
+ * （debug ID は sentry-sourcemaps.mjs が縮めたあとの JS の末尾に書き込む）。
+ */
+const minify = process.argv.includes('build') ? ('esbuild' as const) : false
+
+/**
  * 録画用ウィンドウ（設計4章）の中身を組み立てる。
  *
  * electron-vite の設定は main / preload / renderer の3つしか持てず、
@@ -38,6 +46,7 @@ function recorderPagePlugin(): Plugin {
           emptyOutDir: true,
           // 録画ウインドウのスタックも Sentry で元の行に戻せるように（.map は配布物に入らない）
           sourcemap,
+          minify,
           lib: {
             entry: resolve(recorderSrc, 'recorder.ts'),
             formats: ['iife'],
@@ -60,6 +69,7 @@ export default defineConfig({
     resolve: { alias: { '@shared': shared } },
     build: {
       sourcemap,
+      minify,
       // 起動時間（NF-5）のため、メインプロセスは単一ファイルに固め、
       // 録画・分解・セッション一覧は動的 import で遅延読み込みする。
       rollupOptions: { input: { index: resolve(__dirname, 'src/main/index.ts') } }
@@ -70,6 +80,7 @@ export default defineConfig({
     resolve: { alias: { '@shared': shared } },
     build: {
       sourcemap,
+      minify,
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/preload/index.ts'),
@@ -87,6 +98,8 @@ export default defineConfig({
     resolve: { alias: { '@shared': shared, '@': resolve(__dirname, 'src/renderer') } },
     build: {
       sourcemap,
+      minify,
+      cssMinify: minify ? 'esbuild' : false,
       rollupOptions: { input: { index: resolve(__dirname, 'src/renderer/index.html') } }
     }
   }

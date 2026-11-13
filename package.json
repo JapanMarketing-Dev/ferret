@@ -1,6 +1,6 @@
 {
   "name": "ade-movie",
-  "version": "0.7.13",
+  "version": "0.8.0",
   "private": true,
   "license": "MIT",
   "description": "画面を操作しながら喋って囲むだけでUIフィードバックをAgentへ渡すデスクトップADE",
@@ -16,7 +16,6 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "fixture:serve": "node test/fixtures/serve.mjs",
     "postinstall": "node scripts/ensure-electron-binary.mjs && node scripts/install-app-deps.mjs && node scripts/prepare-dev-electron.mjs",
     "rebuild:native": "node scripts/install-app-deps.mjs",
     "test:unit": "vitest run",
@@ -54,7 +53,6 @@
     "@fontsource-variable/inter": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@monaco-editor/react": "^4.7.0",
-    "@playwright/test": "^1.64.1",
     "@sentry/cli": "2.58.6",
     "@tiptap/core": "3.32.1",
     "@tiptap/extension-code-block": "3.32.1",
@@ -73,13 +71,13 @@
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-webgl": "0.18.0",
     "@xterm/xterm": "^5.5.0",
-    "budoux": "0.10.2",
     "electron": "^44.9.3",
     "electron-builder": "^26.18.0",
     "electron-vite": "^5.0.0",
     "lucide-react": "^1.64.0",
     "marked": "^18.1.1",
     "mermaid": "^12.2.0",
+    "playwright-core": "1.64.1",
     "monaco-editor": "^0.57.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -87,8 +85,6 @@
     "typescript": "~5.9.3",
     "vite": "^7.3.7",
     "vitest": "^5.0.5",
-    "wrangler": "4.156.0",
-    "yaml": "2.9.1",
-    "zod": "4.6.7"
+    "wrangler": "4.156.0"
   }
 }

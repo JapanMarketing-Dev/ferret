@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, Settings, X } from 'lucide-react'
-import { applyOrder, moveItem } from '@shared/layout'
+import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, ScanEye, Settings, X } from 'lucide-react'
+import { moveItem } from '@shared/layout'
 import { CountBadge } from '../ui'
 import { useT } from '../lib/i18n'
 import { fileTabId, type FileTabId, type OpenFile } from '../editor/useOpenFiles'
 import { CLOSE_TABS_ACTIONS, tabsToClose, type CloseTabsAction } from '../editor/closeTabs'
+import { centerTabGroups } from '../editor/centerTabGroups'
 import '../styles/editor.css'
 
 /**
- * 中央ペインに並ぶタブ。ブラウザと指摘一覧と、開いたファイルを同じ場所で切り替える。
+ * 中央ペインのタブ。ブラウザ（URL）・指摘一覧と、開いたファイルを切り替える。
  * ファイルは `file:<プロジェクトの根>/<相対パス>`。
  */
 /**
  * settings … 設定のページ（⌘, で開閉。開いている間だけタブを出す）。
  */
-export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'settings' | FileTabId
+export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'visual-review' | 'settings' | FileTabId
 
 /** タブのドラッグで運ぶデータの種類（ほかの DnD と混ざらないように） */
 const DRAG_TYPE = 'application/x-ade-center-tab'
@@ -26,6 +27,10 @@ export function isFileTab(tab: CenterTab): tab is FileTabId {
 
 /**
  * 中央ペインのタブ列（32px）。
+ *
+ * いつもある画面（ダッシュボード・ブラウザ・指摘）は、左端の固定の切り替え（セグメント）に置き、
+ * 開いたファイル・設定のタブとは別の軸にする（ファイルのタブが列の残りをすべて使い、横に流せる）。
+ * ドラッグの並べ替えはファイル・設定のタブの中だけ（@renderer/editor/centerTabGroups）。
  *
  * 選択中は「2px の下線（ブランド）＋ごく薄い地の持ち上げ」で示す。
  * 「指摘」やファイルのタブを選ぶと内蔵ブラウザのビューを隠してDOMを出すので、
@@ -38,6 +43,7 @@ export function CenterTabs({
   active,
   pageTitle,
   findingCount,
+  visualReviewCount = 0,
   files = [],
   onChange,
   onCloseFile,
@@ -52,9 +58,11 @@ export function CenterTabs({
   /** 全体（すべてのプロダクト）を開いている間だけ、先頭にダッシュボードのタブを出す */
   dashboard?: boolean
   active: CenterTab
-  /** ブラウザタブに出すページ名 */
+  /** ブラウザの切り替えのツールチップに出すページ名 */
   pageTitle: string
   findingCount: number
+  /** ビジュアルレビューで返事を待っている計画の数 */
+  visualReviewCount?: number
   /** 開いているファイル（今のプロジェクトの分） */
   files?: OpenFile[]
   onChange: (tab: CenterTab) => void
@@ -84,7 +92,8 @@ export function CenterTabs({
   useEffect(() => () => menuOpenChange.current?.(false), [])
   const closeMenu = useCallback(() => setMenu(null), [])
   const isDirty = (tab: string) => files.some((file) => fileTabId(file.id) === tab && file.dirty)
-  const ids = [...(dashboard ? ['dashboard' as const] : []), ...applyOrder<CenterTab>(['browser', 'findings', ...(settingsOpen ? ['settings' as const] : []), ...files.map((file) => fileTabId(file.id))], order).filter((tab) => tab !== 'dashboard')]
+  const { views, docs } = centerTabGroups({ dashboard, settingsOpen, files: files.map((file) => fileTabId(file.id)), order })
+  const ids = docs as CenterTab[]
   const dragProps = (id: CenterTab) => onReorder ? {
     draggable: true,
     onDragStart: (e: DragEvent<HTMLElement>) => {
@@ -112,46 +121,65 @@ export function CenterTabs({
 
   return (
     <div className="ctabs" role="tablist" aria-label={t('centerTabs.label')}>
+      <div className="ctabs__views" data-testid="ctab-views">
+        {views.map((tab) => {
+          if (tab === 'browser') return (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              className="cview"
+              aria-selected={active === 'browser'}
+              onClick={() => onChange('browser')}
+              data-testid="ctab-browser"
+              title={pageTitle || t('centerTabs.browser')}
+            >
+              <Globe size={13} strokeWidth={1.75} />
+              <span className="cview__label">{t('centerTabs.browser')}</span>
+            </button>
+          )
+          if (tab === 'findings') return (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              className="cview"
+              aria-selected={active === 'findings'}
+              onClick={() => onChange('findings')}
+              data-testid="ctab-findings"
+              title={t('centerTabs.findings')}
+            >
+              <ListChecks size={13} strokeWidth={1.75} />
+              <span className="cview__label">{t('centerTabs.findings')}</span>
+              <CountBadge count={findingCount} />
+            </button>
+          )
+          if (tab === 'visual-review') return (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              className="cview"
+              aria-selected={active === 'visual-review'}
+              onClick={() => onChange('visual-review')}
+              data-testid="ctab-visual-review"
+              title={visualReviewCount > 0 ? t('visualReview.tabPending', { count: visualReviewCount }) : t('centerTabs.visualReview')}
+            >
+              <ScanEye size={13} strokeWidth={1.75} />
+              <span className="cview__label">{t('centerTabs.visualReview')}</span>
+              <CountBadge count={visualReviewCount} tone="warning" />
+            </button>
+          )
+          return (
+            <button key={tab} type="button" role="tab" className="cview" aria-selected={active === 'dashboard'} onClick={() => onChange('dashboard')} data-testid="ctab-dashboard" title={t('orchestra.dashboard')}>
+              <LayoutDashboard size={13} strokeWidth={1.75} />
+              <span className="cview__label">{t('orchestra.dashboard')}</span>
+            </button>
+          )
+        })}
+      </div>
       <div className="ctabs__files">
           {ids.map((tab) => {
-            if (tab === 'browser') return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                className="ctab ctab--page"
-                aria-selected={active === 'browser'}
-                onClick={() => onChange('browser')}
-                data-testid="ctab-browser"
-                title={pageTitle || undefined}
-                {...dragProps(tab)}
-              >
-                <Globe size={13} strokeWidth={1.75} />
-                <span className="ctab__label">{pageTitle || t('centerTabs.browser')}</span>
-              </button>
-            )
-            if (tab === 'dashboard') return (
-              <button key={tab} type="button" role="tab" className="ctab" aria-selected={active === 'dashboard'} onClick={() => onChange('dashboard')} data-testid="ctab-dashboard">
-                <LayoutDashboard size={13} strokeWidth={1.75} />
-                <span className="ctab__label">{t('orchestra.dashboard')}</span>
-              </button>
-            )
-            if (tab === 'findings') return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                className="ctab"
-                aria-selected={active === 'findings'}
-                onClick={() => onChange('findings')}
-                data-testid="ctab-findings"
-                {...dragProps(tab)}
-              >
-                <ListChecks size={13} strokeWidth={1.75} />
-                <span className="ctab__label">{t('centerTabs.findings')}</span>
-                <CountBadge count={findingCount} />
-              </button>
-            )
             if (tab === 'settings') return (
               <div
                 key={tab}
@@ -179,7 +207,7 @@ export function CenterTabs({
               </div>
             )
             const file = files.find((f) => fileTabId(f.id) === tab)
-            if (!file) return null
+            if (!file || !isFileTab(tab)) return null
             const Icon = file.language === 'markdown' || file.language === 'plaintext' ? FileText : FileCode
             return (
               <div

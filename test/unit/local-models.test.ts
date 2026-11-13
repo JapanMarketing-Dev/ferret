@@ -126,24 +126,3 @@ describe('端末内のサーバーの確認（整理の前）', () => {
     expect(f).toHaveBeenCalledWith('http://localhost:1234/v1/models', expect.not.objectContaining({ headers: expect.anything() }))
   })
 })
-
-describe('E2E の差し替え（ADE_E2E=1 のときだけ）', () => {
-  it('FERRET_E2E_TOTALMEM_GB でメモリを差し替え、数でない値・E2E 以外では本物を使う', async () => {
-    const { hardwareInfo } = await import('../../src/main/localModels')
-    const { totalmem } = await import('node:os')
-    const saved = { e2e: process.env.ADE_E2E, mem: process.env.FERRET_E2E_TOTALMEM_GB }
-    try {
-      process.env.ADE_E2E = '1'
-      process.env.FERRET_E2E_TOTALMEM_GB = '64'
-      expect(hardwareInfo().totalMemBytes).toBe(64 * GB)
-      process.env.FERRET_E2E_TOTALMEM_GB = 'abc'
-      expect(hardwareInfo().totalMemBytes).toBe(totalmem())
-      process.env.FERRET_E2E_TOTALMEM_GB = '64'
-      delete process.env.ADE_E2E
-      expect(hardwareInfo().totalMemBytes).toBe(totalmem())
-    } finally {
-      if (saved.e2e === undefined) delete process.env.ADE_E2E; else process.env.ADE_E2E = saved.e2e
-      if (saved.mem === undefined) delete process.env.FERRET_E2E_TOTALMEM_GB; else process.env.FERRET_E2E_TOTALMEM_GB = saved.mem
-    }
-  })
-})

@@ -49,6 +49,8 @@ export interface FsSearchResult {
 export interface FsChangedEvent {
   /** 変わったパス（相対）。ディレクトリの増減も含む */
   paths: string[]
+  /** 通知が多すぎて paths に入れきれなかった（どのファイルが変わったか分からない。開いているものは全部確かめ直す） */
+  overflow?: boolean
 }
 
 // Orca由来: src/main/ipc/filesystem/filesystem-file-content-inspection.ts（MIT）

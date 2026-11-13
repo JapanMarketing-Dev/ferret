@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { copyImage, ensureFeedbackFile, recordFeedbackMessage, recordReviewProgress, recordReviewSent, seedPlaybook } from '../../src/main/feedbackLog'
+import { copyImage, recordFeedbackMessage, recordReviewProgress, recordReviewSent, seedPlaybook } from '../../src/main/feedbackLog'
 import { SubagentLinkError, syncOrchestrator } from '../../src/main/orchestrator'
 import { FEEDBACK_LOG_PATH, MAX_FEEDBACK_IMAGE_BYTES, PLAYBOOK_PATH, findingKey, foldFeedback, parseFeedbackEvents } from '../../src/shared/feedbackLog'
 import { renderOrchestratorGuide, renderSubagent } from '../../src/shared/orchestrator'
@@ -192,17 +192,6 @@ describe('プレイブックの雛形', () => {
     await symlink(join(root, 'x'), join(orchestra, 'feedback'))
     await expect(syncOrchestrator(orchestra, [], true)).resolves.toBeDefined()
     expect(await readdir(join(root, 'x'))).toEqual([])
-  })
-
-  it('画面から開く前に用意する：記録は空の log.md、プレイブックは雛形。相対パスを返す', async () => {
-    expect(await ensureFeedbackFile(orchestra, 'O', 'log')).toBe(FEEDBACK_LOG_PATH)
-    expect(await readFile(join(orchestra, FEEDBACK_LOG_PATH), 'utf8')).toContain('(No feedback recorded yet.)')
-    expect(await ensureFeedbackFile(orchestra, 'O', 'playbook')).toBe(PLAYBOOK_PATH)
-    expect(await readFile(join(orchestra, PLAYBOOK_PATH), 'utf8')).toContain('# Playbook — O')
-    // 既にある log.md は書き直さない
-    await writeFile(join(orchestra, FEEDBACK_LOG_PATH), 'kept')
-    await ensureFeedbackFile(orchestra, 'O', 'log')
-    expect(await readFile(join(orchestra, FEEDBACK_LOG_PATH), 'utf8')).toBe('kept')
   })
 })
 

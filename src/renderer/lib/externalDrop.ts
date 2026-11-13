@@ -21,21 +21,26 @@ export function droppedName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path
 }
 
-/** エディタの領域へ落としたものの振り分け（App.tsx）。どれを開き、何を案内するか */
+/**
+ * エディタの領域へ落としたものの振り分け（App.tsx）。どれを開き、どれをコピーしてから開くか。
+ * プロジェクトの外のファイルは、プロジェクトの根へコピー（fs:import。同じ名前があれば「名前 copy」）してから開く。
+ * ファイルツリーへ落としたときと同じく、元のファイルは読むだけで変えない（読み取り専用で外のファイルを開く仕組みは無いので、取り込んで開く）
+ */
 export interface EditorDropPlan {
   /** プロジェクトの中のファイル（相対パス）。エディタ・ビューアで開く */
   open: string[]
-  /** プロジェクトとして追加して開くフォルダ（いちばん初めの1つ） */
+  /** プロジェクトの外のファイル（絶対パス）。プロジェクトの根へコピーしてから開く */
+  copy: string[]
+  /** プロジェクトとして追加して開くフォルダ（ファイルが1つも無いときの、いちばん初めの1つ） */
   folder: string | null
-  /** プロジェクトの外のファイル（ツリーへの取り込みを案内する。最初の1つの名前） */
-  outside: string | null
   /** 読み取れたものが1つも無い */
   unreadable: boolean
 }
 
 export function planEditorDrop(entries: readonly DroppedEntry[]): EditorDropPlan {
-  const open = entries.flatMap((entry) => (entry.kind === 'file' && entry.relPath ? [entry.relPath] : []))
-  const outsideFile = entries.find((entry) => entry.kind === 'file' && !entry.relPath)
-  const folder = open.length === 0 ? entries.find((entry) => entry.kind === 'dir')?.path ?? null : null
-  return { open, folder, outside: outsideFile ? droppedName(outsideFile.path) : null, unreadable: entries.length === 0 }
+  const files = entries.filter((entry) => entry.kind === 'file')
+  const open = files.flatMap((entry) => (entry.relPath ? [entry.relPath] : []))
+  const copy = files.flatMap((entry) => (entry.relPath ? [] : [entry.path]))
+  const folder = files.length === 0 ? entries.find((entry) => entry.kind === 'dir')?.path ?? null : null
+  return { open, copy, folder, unreadable: entries.length === 0 }
 }

@@ -8,7 +8,7 @@ import { formatDate, t } from '@shared/i18n'
  *
  * 出てよい場所は2つだけ:
  *   - 部品見本（#gallery）
- *   - E2Eの撮影（window.ade.demo === true。ADE_E2E=1 のとき）
+ *   - 撮影（window.ade.demo === true。ADE_DEMO=1 のとき）
  * 通常起動では使わない。実データが無ければ空状態を出す。
  *
  * 次の工程で実データをつなぐときは、この値を捨てて同じ型の実データを

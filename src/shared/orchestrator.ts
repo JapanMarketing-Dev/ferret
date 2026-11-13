@@ -8,6 +8,7 @@
  */
 
 import { FEEDBACK_LOG_PATH, PLAYBOOK_PATH } from './feedbackLog'
+import { renderGlobalGuideSection, type GlobalGuide } from './globalOrchestra'
 
 export const SUBAGENT_PREFIX = 'ferret-'
 
@@ -152,7 +153,14 @@ export interface OrchestraRules {
   allowed?: string
   /** プロジェクトの id → そのプロダクトだけのルール（インフラ・タグ・インスタンスなど） */
   products?: Record<string, string>
+  /**
+   * すべてのプロジェクトのルール（グローバルのオーケストラの rules.md の中身。@shared/globalOrchestra）。
+   * settings には持たない（sanitizeOrchestraRules が外す）。書くときに main が rules.md から読んで足す
+   */
+  global?: string
 }
+
+const GLOBAL_TITLE = 'Global rules for every project (from the Global orchestra\'s rules.md in Ferret):'
 
 const ALLOWED_TITLE = 'Operations allowed without asking a person (set by the human in Ferret; do them without adding them to human.md):'
 
@@ -195,6 +203,7 @@ export function renderSubagent(child: OrchestratorChild, rules?: OrchestraRules)
     ...feedbackRules(child.orchestraFolder ? `${child.orchestraFolder}/` : 'the orchestra folder\'s '),
     '- End with a short report: what you changed (files), how you checked it, and anything left for the orchestrator.',
     ...rulesBlock(ALLOWED_TITLE, rules?.allowed),
+    ...rulesBlock(GLOBAL_TITLE, rules?.global),
     ...rulesBlock('Shared rules for all products (set by the human in Ferret):', rules?.shared),
     ...rulesBlock(`Rules only for ${name} (set by the human in Ferret; infrastructure and other per-product settings):`, child.projectId ? rules?.products?.[child.projectId] : undefined),
     ''
@@ -249,12 +258,14 @@ export const GUIDE_END = '<!-- ferret-orchestrator:end -->'
  * オーケストレーターのフォルダの CLAUDE.md・AGENTS.md に入れる Ferret の欄。
  * 1つの Agent とのやり取りで、共通の部分は1回で決め、プロダクトごとの部分は子の subagent に並行して任せる進め方を書く
  */
-export function renderOrchestratorGuide(children: readonly OrchestratorChild[], rules?: OrchestraRules): string {
+export function renderOrchestratorGuide(children: readonly OrchestratorChild[], rules?: OrchestraRules, global?: GlobalGuide): string {
   const list = children.length
     ? children.map((c) => `- ${oneLine(c.name)}: \`${c.path}\` (subagent: \`${c.agent}\`)`).join('\n')
     : '- (no products yet. Add projects to this orchestrator in Ferret.)'
   return [
     GUIDE_START,
+    // グローバルのオーケストラは、何のためのフォルダか・全部への適用の仕方を先に書く
+    ...(global ? renderGlobalGuideSection(global) : []),
     '## Orchestrator (managed by Ferret)',
     '',
     'This folder coordinates several products that are developed in parallel. Each product is its own project and has a subagent:',
@@ -268,7 +279,7 @@ export function renderOrchestratorGuide(children: readonly OrchestratorChild[], 
     '3. Subagents work only in their own folders and report back. Check the reports for consistency across products, fix any mismatch, and summarize for the user per product.',
     '4. Ferret reviews can cover many products in one recording. Each finding names its product by URL, screen or file path (each subagent\'s description lists its pages). Route each finding to its product\'s subagent; findings for different products run in parallel.',
     '5. Work in three levels: you (orchestra) → one subagent per product (its lead) → workers the lead starts inside that product\'s folder for independent pieces. A product can be software or a business (blog, YouTube, ads, sales outreach, data analysis); the lead works the way that product\'s own files describe.',
-    '6. Anything that needs a person (a decision, a login, a value check, an approval) goes into human.md in this folder as a table row: | # | product | URL | what to check | (B1… screens, A1… approvals, P1… things to provide, D1… decisions). Make every item multiple choice: after the table, add a block with the same number (Q1… for questions not in the table): a heading `### P2 [product] question`, optional explanation lines, then 2–4 numbered options `1. …`, the recommended one first with `(recommended)` after it; the block runs until the next heading. Always name the product. The person picks an option (and can add a note) in Ferret, which writes `- P2: 1. … — note` lines under `## Answers` at the end of human.md; never remove an answer line before you have acted on it. Keep one row per thing, update it when the state changes, and delete it together with its answer once it is done. Do not put the operations allowed without asking (below) into human.md; just do them. Ferret shows human.md as a checklist and lets the person open every URL in one feedback session.',
+    '6. Anything that needs a person (a decision, a login, a value check, an approval) goes into human.md in this folder as a table row: | # | product | URL | what to check | (B1… screens, A1… approvals, P1… things to provide, D1… decisions). Make every item multiple choice: after the table, add a block with the same number (Q1… for questions not in the table): a heading `### P2 [product] question`, optional explanation lines, then 2–4 numbered options `1. …`, the recommended one first with `(recommended)` after it; the block runs until the next heading. Always name the product. The person answers by editing human.md (for example `- P2: 1. … — note` lines under `## Answers` at the end) or by telling you; never remove an answer before you have acted on it. Keep one row per thing, update it when the state changes, and delete it together with its answer once it is done. Do not put the operations allowed without asking (below) into human.md; just do them. Ferret does not display human.md, so when you add items also list them briefly in your reply.',
     '7. Connections and permissions are set up once, here at the top: Claude in Chrome and other browser use, computer use, MCP servers, logins, and permission approvals. Subagents inherit this session\'s tools and approvals, so never set them up again per product and never ask the user to connect or approve again for each product.',
     '8. Security, tests and anything else that must not be missed: run them for every included product in parallel, each with an independent second check, and treat an unchecked product as not done.',
     '9. Every request that reaches you here runs as parallel subagents, one per product, all started together, including browser use (Claude in Chrome, computer use): each subagent works in its own tab or window at the same time. Never run products one after another; a person who wants a serial run asks inside that product instead.',
@@ -277,6 +288,7 @@ export function renderOrchestratorGuide(children: readonly OrchestratorChild[], 
     '12. Roles: the human sets the critical frame (goals, value, scope, what "good" is). Agents work inside that frame as testers: compare each product against its benchmark products (named in the product rules or docs; if unknown, ask once in human.md) in fine detail (screens, flows, copy, speed, edge cases) and report concrete gaps with evidence (screenshots, URLs, steps), never vague summaries. Fix the gaps inside the frame yourselves; ask the human only about frame-level decisions.',
     '13. Requests must be specific. When you hand work to a subagent (or a lead to a worker), state the exact target (screen, file, flow), the acceptance criteria and the benchmark to match, not a broad "make it better".',
     ...rulesBlock(`### ${ALLOWED_TITLE}`, rules?.allowed),
+    ...rulesBlock(`### ${GLOBAL_TITLE}`, rules?.global),
     ...rulesBlock('### Shared rules (set by the human in Ferret)', rules?.shared),
     ...children.flatMap((c) => rulesBlock(`### Rules only for ${oneLine(c.name)} (set by the human in Ferret)`, c.projectId ? rules?.products?.[c.projectId] : undefined)),
     GUIDE_END

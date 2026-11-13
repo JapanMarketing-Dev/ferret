@@ -1,8 +1,8 @@
 /**
- * プロダクトの巡回（src/shared/productRound.ts）と、全体の共通・個別のルール（src/shared/orchestrator.ts）
+ * オーケストラのプロダクトの一覧（src/shared/productRound.ts）と、全体の共通・個別のルール（src/shared/orchestrator.ts）
  */
 import { describe, expect, it } from 'vitest'
-import { confirmRound, currentStep, nextRound, roundProducts } from '../../src/shared/productRound'
+import { roundProducts } from '../../src/shared/productRound'
 import { renderOrchestratorGuide, renderSubagent, sanitizeOrchestraRules } from '../../src/shared/orchestrator'
 import type { Project } from '../../src/shared/types'
 
@@ -12,28 +12,6 @@ const all = [p('all', { editorWorkspace: true, orchestrator: true }), p('shop'),
 describe('巡回するプロダクト', () => {
   it('全体・以前のオーケストレーター・SSH は入れず、サイドバーの順', () => {
     expect(roundProducts(all).map((x) => x.id)).toEqual(['shop', 'blog'])
-  })
-
-  it('確認の巡回：確認待ちのあるレビューだけを、プロダクトの順に', () => {
-    const r = confirmRound([
-      { projectId: 'blog', reviewId: 'b1', count: 2 },
-      { projectId: 'shop', reviewId: 's1', count: 0 },
-      { projectId: 'shop', reviewId: 's2', count: 1 }
-    ], all.map((x) => x.id))!
-    expect(r.steps).toEqual([{ projectId: 'shop', reviewId: 's2' }, { projectId: 'blog', reviewId: 'b1' }])
-    expect(confirmRound([], [])).toBeNull()
-  })
-
-  it('確認の巡回は「次へ」で1つずつ進み、最後で終わる（自動では進まない）。録画の巡回は無い', async () => {
-    const r = confirmRound([{ projectId: 'shop', reviewId: 's1', count: 1 }, { projectId: 'blog', reviewId: 'b1', count: 1 }], all.map((x) => x.id))!
-    expect(currentStep(r)).toEqual({ projectId: 'shop', reviewId: 's1' })
-    const second = nextRound(r)!
-    expect(currentStep(second)).toEqual({ projectId: 'blog', reviewId: 'b1' })
-    expect(nextRound(second)).toBeNull()
-    const { readFile } = await import('node:fs/promises')
-    const hook = await readFile(new URL('../../src/renderer/hooks/useProductRound.ts', import.meta.url), 'utf8')
-    expect(hook).not.toMatch(/useEffect/)
-    expect(hook).not.toContain("'record'")
   })
 })
 

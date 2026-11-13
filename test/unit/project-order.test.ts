@@ -57,7 +57,7 @@ describe('プロジェクトの並び順', () => {
   })
 
   it('保存した並び順を読む。知らない値・壊れた形は既定', () => {
-    expect(sanitizeProjectView({ sort: 'recent', starredOnly: true })).toEqual({ sort: 'recent', starredOnly: true })
+    expect(sanitizeProjectView({ sort: 'recent', starredOnly: true })).toEqual({ sort: 'recent', orchestraSort: 'manual', starredOnly: true })
     expect(sanitizeProjectView({ sort: 'size', starredOnly: 'yes' })).toEqual(DEFAULT_PROJECT_VIEW)
     expect(sanitizeProjectView(null)).toEqual(DEFAULT_PROJECT_VIEW)
   })

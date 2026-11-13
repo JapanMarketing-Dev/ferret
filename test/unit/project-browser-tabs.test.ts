@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Project } from '@shared/types'
 import { MAX_BROWSER_TABS } from '@shared/browserTabs'
-import { MAX_HISTORY_ENTRIES, recordableTabs, restorableHistory, sanitizeProjectSession, sessionTabs, withProjectSession } from '@shared/projectSession'
+import { MAX_HISTORY_ENTRIES, recordableTabs, restorableHistory, sanitizeProjectSession, sessionTabs, startupBrowserTabs, withProjectSession } from '@shared/projectSession'
 
 const project = (over: Partial<Project> = {}): Project => ({ id: 'a', name: 'a', folderPath: '/work/a', urls: [], ...over })
 
@@ -64,5 +64,27 @@ describe('戻る・進むの履歴の持ち越し（restorableHistory）', () =>
     expect(head.index).toBe(0)
     const tail = restorableHistory(entries, entries.length - 1, allowed)!
     expect(tail.entries[tail.index]).toBe(entries[entries.length - 1])
+  })
+})
+
+describe('起動時に開く内蔵ブラウザのタブ（別のプロジェクトのページを持ち込まない）', () => {
+  it('プロジェクトに覚えたタブがあれば、それを開く', () => {
+    expect(startupBrowserTabs(project({ session: { tabs: ['https://a.test/', 'https://a.test/b'], activeTab: 1 } }), 'http://localhost:4321/other'))
+      .toEqual({ urls: ['https://a.test/', 'https://a.test/b'], active: 1 })
+  })
+
+  it('覚えたものが無くても、全体の最後の URL（別のプロジェクトで見ていたページ）は使わず、空の画面にする', () => {
+    expect(startupBrowserTabs(project(), 'http://localhost:4321/other')).toEqual({ urls: ['about:blank'], active: 0 })
+  })
+
+  it('覚えたものが無ければ、登録 URL の先頭を開く', () => {
+    expect(startupBrowserTabs(project({ urls: [{ id: 'u', label: 'dev', url: 'http://localhost:3000' }] as Project['urls'] }), 'http://localhost:4321/other'))
+      .toEqual({ urls: ['http://localhost:3000'], active: 0 })
+  })
+
+  it('プロジェクトが無いときだけ、全体の最後の URL を使う（無ければ空の画面）', () => {
+    expect(startupBrowserTabs(null, 'http://localhost:4321/other')).toEqual({ urls: ['http://localhost:4321/other'], active: 0 })
+    expect(startupBrowserTabs(null, '')).toEqual({ urls: ['about:blank'], active: 0 })
+    expect(startupBrowserTabs(null, undefined)).toEqual({ urls: ['about:blank'], active: 0 })
   })
 })

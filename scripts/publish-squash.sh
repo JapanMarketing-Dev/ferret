@@ -11,8 +11,8 @@
 #      FERRET_REQUIRE_CROSS_OS=1 なら Linux・Windows の記録も求める。既定では公開後の GitHub Actions に任せる）。
 #      同じ tree を CI と同じ CodeQL で調べて警告が0件だったかも確かめる（scripts/codeql-local.sh の記録）
 #   1. 公開先の main を取得し、一時的な worktree を作る
-#   2. 元の ref の中身を git archive で写し、公開しないもの（E2E 一式・docs/qa など）を外す
-#   3. package.json・tsconfig から E2E の記述を外し、pnpm-lock.yaml を作り直す
+#   2. 元の ref の中身を git archive で写し、公開しないもの（docs/qa など）を外す
+#   3. pnpm-lock.yaml を作り直す
 #   4. 実名・自宅のパスなどが残っていないか調べる
 #   5. GitHub の noreply アドレスを作者にしてコミットする
 #   6. gitleaks で、作ったコミットと中身を調べる
@@ -45,8 +45,6 @@ FORBIDDEN_FILE="${PUBLISH_FORBIDDEN_FILE:-$ROOT/.publish-forbidden.txt}"
 
 # 公開版に含めないもの。手元の main には残す
 EXCLUDES=(
-  e2e
-  playwright.config.ts
   docs/qa
   .quit-probe.mjs
   test-results
@@ -116,36 +114,10 @@ for path in "${EXCLUDES[@]}"; do
   rm -rf "${STAGE:?}/$path"
 done
 
-# --- 3. E2E の記述を外し、lockfile を作り直す -------------------------------
-say "package.json と tsconfig から E2E の記述を外します"
+# --- 3. lockfile を作り直す ----------------------------------------------
+say "pnpm-lock.yaml を作り直します"
 (
   cd "$STAGE"
-  node - <<'EOF'
-const fs = require('fs')
-const { execSync } = require('child_process')
-const write = (p, j) => fs.writeFileSync(p, JSON.stringify(j, null, 2) + '\n')
-
-const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-delete pkg.scripts?.['test:e2e']
-// @playwright/test をまだ使っているファイルがあれば残す（例: アイコンを描く scripts/build-icon.mjs）
-let users = ''
-try { users = execSync("grep -rlI --exclude-dir=node_modules --exclude=publish-squash.sh '@playwright/test' src scripts tools test 2>/dev/null", { encoding: 'utf8' }).trim() } catch {}
-if (users) console.log(`@playwright/test は次のファイルが使っているので残します:\n${users}`)
-else delete pkg.devDependencies?.['@playwright/test']
-write('package.json', pkg)
-
-for (const p of ['tsconfig.json', 'tsconfig.test.json']) {
-  if (!fs.existsSync(p)) continue
-  const j = JSON.parse(fs.readFileSync(p, 'utf8'))
-  if (Array.isArray(j.include)) j.include = j.include.filter((x) => !/^e2e\/|^playwright\.config\.ts$/.test(x))
-  write(p, j)
-}
-
-if (fs.existsSync('vitest.config.ts')) {
-  const s = fs.readFileSync('vitest.config.ts', 'utf8').split('\n').filter((l) => !l.includes('pnpm test:e2e')).join('\n')
-  fs.writeFileSync('vitest.config.ts', s)
-}
-EOF
   pnpm install --lockfile-only --ignore-scripts --silent
 )
 

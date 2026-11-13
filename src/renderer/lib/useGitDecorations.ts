@@ -5,7 +5,7 @@ import { buildGitDecorations, type FsGitStatus, type GitDecorations } from '@sha
  * ファイルツリーの git の色分けの状態（fs:gitStatus）。
  *
  * 読み直すのは、ファイルの変更（fs:changed。保存・Agent の書き換え）、.git の HEAD・index の変化（github:headChanged。コミット・ステージ）、
- * ウインドウを前に出したとき。続けて起きたものはまとめ（前回から GIT_REFRESH_MIN_GAP_MS は空ける）、git を重ねて走らせない（走っている間の変化は、終わってから1回だけ読み直す）。
+ * ウインドウを前に出したとき（前回から30秒以上たっていれば）。続けて起きたものはまとめ（前回から GIT_REFRESH_MIN_GAP_MS は空ける）、git を重ねて走らせない（走っている間の変化は、終わってから1回だけ読み直す）。
  * null は「まだ分からない」（色を付けない）。
  */
 
@@ -16,6 +16,8 @@ export const GIT_REFRESH_DEBOUNCE_MS = 1500
  * （大きなリポジトリの git status は重く、多くのプロジェクトで Agent を動かすと CPU を使い続けていた）
  */
 export const GIT_REFRESH_MIN_GAP_MS = 4000
+/** ウインドウを前に出したときに読み直すのは、前回の開始からこれ以上たっていたときだけ */
+export const GIT_FOCUS_MIN_GAP_MS = 30_000
 
 /** 次に git を呼ぶまでの待ち。前回の開始から GIT_REFRESH_MIN_GAP_MS は空ける（lastStart が null なら、まだ走らせていない） */
 export function gitRefreshDelay(now: number, lastStart: number | null): number {
@@ -56,13 +58,15 @@ export function useGitDecorations(root: string | null): GitDecorations | null {
     void load()
     const offFs = window.ade.on('fs:changed', schedule)
     const offHead = window.ade.on('github:headChanged', schedule)
-    window.addEventListener('focus', schedule)
+    // 前に出したときは、前回から GIT_FOCUS_MIN_GAP_MS 以上たっていたときだけ（ファイルと .git の変化は上の通知で追える）
+    const onFocus = () => { if (lastStart === null || Date.now() - lastStart >= GIT_FOCUS_MIN_GAP_MS) schedule() }
+    window.addEventListener('focus', onFocus)
     return () => {
       disposed = true
       window.clearTimeout(timer)
       offFs()
       offHead()
-      window.removeEventListener('focus', schedule)
+      window.removeEventListener('focus', onFocus)
     }
   }, [root])
 

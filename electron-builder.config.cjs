@@ -118,6 +118,9 @@ module.exports = {
   // node-pty はネイティブモジュールと補助の実行ファイル（spawn-helper、Windows の conpty.dll / OpenConsole.exe）を
   // asar の外に置かないと起動できない
   asarUnpack: ['node_modules/node-pty/**/*'],
+  // Electron（Chromium）の言語のファイル（Windows・Linux の locales/*.pak、macOS の *.lproj）は、画面の言語の英語と日本語だけを残す。
+  // 'en' は en-US / en-GB の両方に当たる。ほかの言語の 50 個ほどを入れない（配布物を小さくする）
+  electronLanguages: ['en', 'ja'],
   /*
    * node-pty 1.1 は N-API なので Electron 向けに作り直さなくても読める。
    * macOS / Windows は同梱の prebuilds/<os>-<cpu> があり、読み込み側（node-pty の loadNativeModule）が

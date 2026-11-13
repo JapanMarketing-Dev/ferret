@@ -56,15 +56,6 @@ export interface RemoteTerminalSource {
   write(id: string, data: string): void
 }
 
-/** human.md の「人が確認すること」の1件（読むだけ。@shared/humanChecklist の ChecklistItem の一部） */
-export interface RemoteChecklistItem {
-  key: string
-  label: string
-  url: string
-  note: string
-  answer?: string
-}
-
 export interface RemoteServerDeps {
   terminals: () => RemoteTerminalSource | null
   /** 今の合言葉（要求のたびに読む。取り替えたら次の要求から効く） */
@@ -72,8 +63,6 @@ export interface RemoteServerDeps {
   projects: () => ReadonlyArray<{ name: string; folderPath: string }>
   agentLabel: (agent: TuiAgent) => string
   locale: () => RemotePageLocale
-  /** オーケストラの human.md。無ければ空 */
-  checklist?: () => Promise<readonly RemoteChecklistItem[]>
   /** 予期しない失敗（Sentry へ。URL・合言葉・本文は渡さない） */
   onError?: (err: unknown, op: string) => void
   /** 合言葉の誤りの制限（テストで縮める） */
@@ -85,8 +74,6 @@ export const REMOTE_AUTH_LIMIT = { maxFailures: 10, windowMs: 5 * 60_000 }
 
 /** 一覧に出すターミナルの上限 */
 const MAX_TERMINALS = 200
-/** human.md の項目の上限 */
-const MAX_CHECKLIST = 200
 
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
@@ -259,10 +246,6 @@ export class MobileRemoteServer {
     }
 
     const terminals = this.deps.terminals()
-    if (route.kind === 'checklist') {
-      const items = (await this.deps.checklist?.().catch((err: unknown) => { this.deps.onError?.(err, 'read checklist'); return [] })) ?? []
-      return this.json(res, 200, { items: items.slice(0, MAX_CHECKLIST).map(({ key, label, url, note, answer }) => ({ key, label, url, note, ...(answer ? { answer } : {}) })) })
-    }
     if (!terminals) return this.json(res, 503, { error: 'notReady' })
     if (route.kind === 'terminals') return this.json(res, 200, { terminals: await this.summaries(terminals) })
 

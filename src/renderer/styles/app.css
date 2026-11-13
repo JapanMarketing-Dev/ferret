@@ -356,7 +356,7 @@ button {
   display: none;
 }
 
-/* 巡回中のフィードバックの画面：上の帯 → 巡回の帯 → ブラウザ（RoundBar.tsx。ブラウザの枠は測り直される） */
+/* オーケストラのフィードバックの画面：上の帯 → プロダクトの帯（OrchestraDock.tsx）→ ブラウザ（ブラウザの枠は測り直される） */
 .shell--feedback.shell--round {
   grid-template-rows: var(--size-fb-bar) auto minmax(0, 1fr);
 }
@@ -369,10 +369,6 @@ button {
   padding: var(--space-1) 0;
   background: var(--color-bg-chrome);
   box-shadow: inset 0 -1px 0 var(--color-border);
-}
-
-.round-dock .round-bar {
-  margin-left: 0;
 }
 
 /* ───── オーケストラ（全体）：ダッシュボード・指示の欄・フィードバックの帯・右下のターミナルのボタン ───── */
@@ -388,56 +384,16 @@ button {
   overflow: auto;
 }
 
-.orchestra__head,
-.orchestra__section-head {
+.orchestra__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
 }
 
-.orchestra__section-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 .orchestra__title {
   margin: 0;
   font-size: 20px;
-}
-
-.orchestra__stats {
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-}
-
-.orchestra__stat {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md, 10px);
-  background: var(--color-bg-elevated);
-}
-
-.orchestra__stat-value {
-  font-size: 22px;
-  font-weight: 600;
-}
-
-.orchestra__stat-label {
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-.orchestra__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
 }
 
 .orchestra__section h3 {
@@ -468,151 +424,13 @@ button {
   opacity: 0.5;
 }
 
-.orchestra__key {
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
 .orchestra__name {
   font-weight: 600;
-}
-
-.orchestra__note {
-  color: var(--color-text-muted);
 }
 
 .orchestra__cell-actions {
   text-align: right;
   white-space: nowrap;
-}
-
-/* 確認リストの答え（番号の選択肢・おすすめ・自由入力） */
-.orchestra__table tr.orchestra__check-row td {
-  border-bottom: none;
-  padding-bottom: 2px;
-}
-
-.orchestra__answer-row td {
-  padding-top: 2px;
-}
-
-.checklist-answer {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-}
-
-/* 選択肢は縦に並べ、おすすめを一番上に（Claude Code の質問と同じ） */
-.checklist-answer__options {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.checklist-answer__free {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.checklist-answer__free .checklist-answer__input {
-  flex: 1;
-}
-
-/* 確認リストのプロダクトの見出し */
-.orchestra__table tr.orchestra__group-row th {
-  padding-top: var(--space-3);
-  border-bottom: var(--size-border) solid var(--color-border);
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.orchestra__group-count {
-  margin-left: var(--space-2);
-  color: var(--color-text-muted);
-  font-weight: 400;
-}
-
-.checklist-answer__option {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 26px;
-  padding: 2px 10px 2px 4px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.checklist-answer__option:hover {
-  border-color: var(--color-primary, #4f8cff);
-}
-
-.checklist-answer__option.is-picked {
-  border-color: var(--color-text);
-  background: var(--color-surface-active);
-}
-
-.checklist-answer__num {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: var(--color-border);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.checklist-answer__option.is-picked .checklist-answer__num {
-  background: var(--color-text);
-  color: var(--color-bg-app);
-}
-
-.checklist-answer__rec {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-
-.checklist-answer__input {
-  flex: 1 1 180px;
-  min-width: 0;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--color-text);
-  font: inherit;
-  font-size: 12px;
-}
-
-.checklist-answer__clear {
-  display: inline-grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-}
-
-.checklist-answer__allow {
-  font-size: 12px;
-}
-
-.orchestra__allowed {
-  margin-top: var(--space-3);
 }
 
 .orchestra__state--working {
@@ -693,13 +511,6 @@ button {
   gap: var(--space-3);
 }
 
-.orchestra-dock__tour {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: var(--space-1);
-}
-
 /* 上の段（プロダクト）・下の段（prd・local・確認リスト）。多いときは横に流す */
 .orchestra-dock__groups,
 .orchestra-dock__items {
@@ -776,11 +587,6 @@ button {
   color: var(--color-text);
 }
 
-.orchestra-dock__key {
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-
 .orchestra-dock__label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -835,137 +641,3 @@ button {
   background: var(--color-primary, #4f8cff);
 }
 
-/* ダッシュボード：インフラのコスト（今月・今年・総額の切り替えと内訳、推定の月額） */
-.orchestra-cost__periods {
-  display: inline-flex;
-  gap: var(--space-1);
-}
-
-.orchestra-cost__period {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 96px;
-  padding: var(--space-1) var(--space-3);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--color-text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.orchestra-cost__period strong {
-  color: var(--color-text);
-  font-size: 15px;
-}
-
-.orchestra-cost__period.is-selected {
-  border-color: var(--color-border-focus, #4f8cff);
-  background: var(--color-surface-selected);
-}
-
-/* 推定の月額（切り替えではなく、実績の隣に出す） */
-.orchestra-cost__forecast {
-  margin-left: var(--space-2);
-  border-style: dashed;
-  cursor: default;
-}
-
-.orchestra-cost__group {
-  margin: var(--space-3) 0 var(--space-2);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.orchestra-cost__group .st-note {
-  font-weight: 400;
-}
-
-.orchestra-cost__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: var(--space-3);
-}
-
-.orchestra-cost__card {
-  min-width: 0;
-  padding: var(--space-3);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-sm);
-}
-
-.orchestra-cost__card h4 {
-  margin: 0 0 var(--space-2);
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.orchestra-cost__card ul {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.orchestra-cost__card li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 72px auto;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: 12px;
-}
-
-.orchestra-cost__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.orchestra-cost__bar {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--color-surface-hover);
-}
-
-.orchestra-cost__bar > span {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--color-border-focus, #4f8cff);
-}
-
-.orchestra-cost__usd {
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* ダッシュボードの自由な部品（.ferret/dashboard.json） */
-.orchestra__stat-hint {
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-
-.orchestra__note-text {
-  margin: 0;
-  padding: var(--space-3);
-  border: var(--size-border) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font: inherit;
-  font-size: 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.orchestra__links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}

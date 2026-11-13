@@ -10,20 +10,10 @@ import { parseNvidiaSmiVram, recommendLocalModels, type HardwareInfo, type Local
 let gpuVramBytes: number | undefined
 let probing: Promise<void> | null = null
 
-/**
- * E2E（ADE_E2E=1）だけ、メモリと VRAM を GB で差し替えられる（FERRET_E2E_TOTALMEM_GB・FERRET_E2E_GPU_VRAM_GB）。
- * 数でない値は無視する（本物の値を使う）
- */
-function e2eGb(name: string): number | undefined {
-  if (process.env.ADE_E2E !== '1') return undefined
-  const v = Number(process.env[name])
-  return process.env[name]?.trim() && Number.isFinite(v) && v > 0 ? v * 1024 ** 3 : undefined
-}
-
 export function hardwareInfo(): HardwareInfo {
-  const vram = e2eGb('FERRET_E2E_GPU_VRAM_GB') ?? gpuVramBytes
+  const vram = gpuVramBytes
   return {
-    totalMemBytes: e2eGb('FERRET_E2E_TOTALMEM_GB') ?? totalmem(),
+    totalMemBytes: totalmem(),
     platform: platform(),
     arch: arch(),
     cpuModel: cpus()[0]?.model,

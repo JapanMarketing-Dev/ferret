@@ -13,13 +13,20 @@ const MAX_ENTRY_BYTES = 64 * 1024 * 1024
 /** 部品の数の上限 */
 const MAX_ENTRIES = 20_000
 
-interface ZipEntry {
+export interface ZipEntry {
   name: string
   method: number
   compressedSize: number
   size: number
   localOffset: number
   encrypted: boolean
+  /** 書き直し（zipWrite.ts）でそのまま写す値 */
+  flags: number
+  crc32: number
+  modTime: number
+  modDate: number
+  /** 中央ディレクトリに書いてあるままの名前のバイト（先頭の / も含む） */
+  rawName: Uint8Array
 }
 
 export interface ZipArchive {
@@ -70,13 +77,14 @@ async function inflateRaw(data: Uint8Array, expected: number): Promise<Uint8Arra
   return out
 }
 
-export function openZip(data: Uint8Array): ZipArchive {
+/** 中央ディレクトリを並びのまま読む（読み取りと書き直しで共有する） */
+export function readZipDirectory(data: Uint8Array): ZipEntry[] {
   const eocd = findEndOfCentralDirectory(data)
   const count = u16(data, eocd + 10)
   const cdOffset = u32(data, eocd + 16)
   if (count === 0xffff || cdOffset === 0xffffffff) throw new OfficeFormatError('zip64 is not supported')
   if (count > MAX_ENTRIES) throw new OfficeFormatError('too many zip entries')
-  const entries = new Map<string, ZipEntry>()
+  const list: ZipEntry[] = []
   const decoder = new TextDecoder()
   let at = cdOffset
   for (let i = 0; i < count; i += 1) {
@@ -89,22 +97,37 @@ export function openZip(data: Uint8Array): ZipArchive {
     const extraLength = u16(data, at + 30)
     const commentLength = u16(data, at + 32)
     const localOffset = u32(data, at + 42)
-    const name = decoder.decode(data.subarray(at + 46, at + 46 + nameLength)).replace(/^\/+/, '')
-    entries.set(name, { name, method, compressedSize, size, localOffset, encrypted: (flags & 1) === 1 })
+    const rawName = data.subarray(at + 46, at + 46 + nameLength)
+    const name = decoder.decode(rawName).replace(/^\/+/, '')
+    list.push({
+      name, method, compressedSize, size, localOffset, encrypted: (flags & 1) === 1,
+      flags, crc32: u32(data, at + 16), modTime: u16(data, at + 12), modDate: u16(data, at + 14), rawName
+    })
     at += 46 + nameLength + extraLength + commentLength
   }
+  return list
+}
+
+/** 部品の中身の圧縮したままのバイト（ローカルヘッダーの後ろ） */
+export function rawEntryData(data: Uint8Array, entry: ZipEntry): Uint8Array {
+  const local = entry.localOffset
+  if (local + 30 > data.length || u32(data, local) !== 0x04034b50) throw new OfficeFormatError('broken local header')
+  const start = local + 30 + u16(data, local + 26) + u16(data, local + 28)
+  const end = start + entry.compressedSize
+  if (end > data.length) throw new OfficeFormatError('truncated zip entry')
+  return data.subarray(start, end)
+}
+
+export function openZip(data: Uint8Array): ZipArchive {
+  const entries = new Map<string, ZipEntry>()
+  for (const entry of readZipDirectory(data)) entries.set(entry.name, entry)
 
   const bytes = async (name: string): Promise<Uint8Array | null> => {
     const entry = entries.get(name)
     if (!entry) return null
     if (entry.encrypted) throw new OfficeFormatError('encrypted zip entry')
     if (entry.size > MAX_ENTRY_BYTES) throw new OfficeFormatError('zip entry too large')
-    const local = entry.localOffset
-    if (local + 30 > data.length || u32(data, local) !== 0x04034b50) throw new OfficeFormatError('broken local header')
-    const start = local + 30 + u16(data, local + 26) + u16(data, local + 28)
-    const end = start + entry.compressedSize
-    if (end > data.length) throw new OfficeFormatError('truncated zip entry')
-    const raw = data.subarray(start, end)
+    const raw = rawEntryData(data, entry)
     if (entry.method === 0) return raw
     if (entry.method === 8) return inflateRaw(raw, entry.size)
     throw new OfficeFormatError(`unsupported zip method ${entry.method}`)

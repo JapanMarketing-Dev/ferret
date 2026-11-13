@@ -507,15 +507,6 @@ export interface CliToolStatus {
   version: string | null
 }
 
-/**
- * この表のどれかのインストールコマンドか（全 OS）。E2E では本物を走らせないよう main がこれで見分けて差し替える
- */
-export function isKnownCliInstallCommand(command: string): boolean {
-  const line = command.trim()
-  if (!line) return false
-  return CLI_TOOL_IDS.some((id) => Object.values(CLI_TOOLS[id].install).some((c) => c?.trim() === line))
-}
-
 /** 設定の画面の「インストール」リンク（判定モデルの Ollama など）の URL に当たる CLI。無ければ null */
 export function cliToolForInstallUrl(url: string | undefined): CliToolId | null {
   if (!url) return null

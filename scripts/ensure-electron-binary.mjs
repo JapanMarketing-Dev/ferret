@@ -3,7 +3,7 @@
  *
  * pnpm はビルドスクリプトの結果をストアにキャッシュするため、クリーンインストールでも
  * electron の postinstall（バイナリのダウンロード）が走らず、`dist/` が無いまま終わることがある。
- * その状態だと `pnpm dev` も `pnpm test:e2e` も「Electron が見つからない」で止まるので、
+ * その状態だと `pnpm dev` も「Electron が見つからない」で止まるので、
  * インストールの最後に存在を確かめ、無ければ electron 自身の install.js を実行する。
  */
 import { spawnSync } from 'node:child_process'

@@ -1,7 +1,0 @@
-{
-  "manifest_version": 3,
-  "name": "Ferret E2E Popup",
-  "version": "1.0.0",
-  "description": "E2E only: an action popup to draw over (e2e/popup-annotation.spec.ts). No permissions, no scripts.",
-  "action": { "default_popup": "popup.html", "default_title": "Ferret E2E Popup" }
-}

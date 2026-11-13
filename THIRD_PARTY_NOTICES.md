@@ -166,9 +166,6 @@ The built app includes the following packages (versions as pinned in `pnpm-lock.
 | @sentry/electron (with @sentry/node, @sentry/browser, @sentry/core) | MIT | Functional Software, Inc. dba Sentry |
 | @fontsource-variable/inter (Inter) | SIL Open Font License 1.1 | The Inter Project Authors |
 | @fontsource-variable/jetbrains-mono (JetBrains Mono) | SIL Open Font License 1.1 | The JetBrains Mono Project Authors |
-| zod (video CLI) | MIT | Colin McDonnell |
-| yaml (video CLI, templates) | ISC | Eemeli Aro |
-| budoux (video CLI, Japanese caption line breaks) | Apache-2.0 | Google LLC |
 
 The following packages are pulled in by mermaid and bundled unmodified:
 

@@ -8,10 +8,6 @@
  *   - レビューするページがまだ無い（内蔵ブラウザで URL を開いていない）… 警告を出さず、フィードバックの画面へ移るだけ
  *     （URL はそこで入れてから録画を始める）
  */
-export function newReviewNeedsPage(emptyReason: string | null, captureTargetKind: string): boolean {
-  return emptyReason !== null && emptyReason !== 'no-folder' && captureTargetKind === 'browser'
-}
-
 type NewReviewPlan =
   | { action: 'start'; projectId: string }
   | { action: 'switch-then-start'; projectId: string }
@@ -30,4 +26,23 @@ export function planNewReview(input: {
   if (!target || !input.projectIds.includes(target)) return { action: 'no-project' }
   if (input.recording) return { action: 'busy' }
   return target === input.activeProjectId ? { action: 'start', projectId: target } : { action: 'switch-then-start', projectId: target }
+}
+
+/**
+ * 上の「フィードバック」を押したとき、その場で録画（画面全体のワンクリック録画）を始めるか。
+ * 始めないときは画面を切り替えるだけ:
+ *   - エディタへ戻す・すでにフィードバックの画面 … 切り替えるだけ
+ *   - 録画中・開始の途中 … 二重に始めない
+ *   - フォルダが無い … 保存先が無いので録れない
+ *   - 全体（オーケストラ）… ページの URL で指摘をプロダクトに分けるので、帯の「全部録る」から内蔵ブラウザを録る
+ */
+export function feedbackPressStartsRecording(input: {
+  next: 'editor' | 'feedback'
+  mode: 'editor' | 'feedback'
+  recording: boolean
+  starting: boolean
+  hasFolder: boolean
+  orchestra: boolean
+}): boolean {
+  return input.next === 'feedback' && input.mode !== 'feedback' && !input.recording && !input.starting && input.hasFolder && !input.orchestra
 }

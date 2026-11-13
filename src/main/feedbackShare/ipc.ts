@@ -42,7 +42,6 @@ export interface FeedbackShareDeps {
   installId: () => string | null
   userDataDir: () => string
   isPackaged: boolean
-  isE2E: boolean
   /** 届いた録画を mtg と同じ流れでレビューにする（index.ts が meeting/import.ts の importShareRecording に設定の文字起こしなどを付けて渡す） */
   importRecording: (input: { projectDir: string; recording: ShareRecording; events: ShareEventsFile | null; download: (dest: string) => Promise<void> }) => Promise<ReviewData>
   /** 平文をクリップボードへ（テストでは差し替える） */
@@ -82,7 +81,7 @@ export function feedbackShareHandlers(deps: FeedbackShareDeps): { [C in Channel]
   const shares = async (): Promise<ShareStore> => {
     if (!store) {
       const [{ ShareStore: Store }, { chooseKeyCipher }] = await Promise.all([import('./store'), import('../pipeline/stt/keys')])
-      store = new Store(join(deps.userDataDir(), 'feedback-share', 'shares.bin'), chooseKeyCipher({ isPackaged: deps.isPackaged, isE2E: deps.isE2E, safeStorage }))
+      store = new Store(join(deps.userDataDir(), 'feedback-share', 'shares.bin'), chooseKeyCipher({ isPackaged: deps.isPackaged, safeStorage }))
     }
     return store
   }

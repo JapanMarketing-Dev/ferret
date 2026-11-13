@@ -5,7 +5,7 @@ import { AGENT_CATALOG, BUILTIN_AGENTS, DEFAULT_AGENT_PREFERENCES } from './agen
 import { DECISION_PRESET_IDS } from './decision'
 import { LLM_API_PROVIDERS, STT_REMOTE_PROVIDERS } from './aiProviders'
 import { LOCALE_PREFERENCES } from './i18n'
-import { DEFAULT_LAYOUT, FIXED_DOCKS, FOOTER_ITEMS, PANEL_IDS, TERMINAL_DOCKS } from './layout'
+import { DEFAULT_LAYOUT, FIXED_DOCKS, FOOTER_ITEMS, PANEL_IDS, REMOVED_FOOTER_ITEMS, TERMINAL_DOCKS } from './layout'
 import { ONBOARDING_STEPS } from './onboarding'
 import { STT_LANGUAGE_CODES } from './sttLanguages'
 import { DEFAULT_PROJECT_KIND, DEFAULT_TARGET_PURPOSE, PROJECT_KINDS, TARGET_PURPOSES } from './projectTargets'
@@ -169,7 +169,11 @@ export const SETTINGS_SCHEMA: JsonSchema = {
               type: 'object',
               description: 'Which footer items are shown.',
               additionalProperties: false,
-              properties: Object.fromEntries(FOOTER_ITEMS.map((id) => [id, bool(`Show the ${id} item.`)]))
+              properties: {
+                ...Object.fromEntries(FOOTER_ITEMS.map((id) => [id, bool(`Show the ${id} item.`)])),
+                // 削除した項目（古い settings.json に残っていても読めるように。読み込みで捨てる）
+                ...Object.fromEntries(REMOVED_FOOTER_ITEMS.map((id) => [id, bool('Removed. Ignored.', { deprecated: true })]))
+              }
             }
           }
         }
@@ -200,6 +204,9 @@ export const SETTINGS_SCHEMA: JsonSchema = {
           orchestraExcluded: { type: 'boolean', description: 'Leave this project out of the orchestra: no subagent in All products, not in rounds, not touched by requests sent from All products. For projects that should not change right now.' },
           browserProfile: str('Built-in browser sign-in group. Leave it out to share sign-ins (cookies, saved site data) with every project; projects with the same name share one group and are kept apart from the rest (for example one per client). Up to 40 characters.'),
           research: { type: 'boolean', description: 'Folder registered by the business research of earlier versions (removed in 0.7.11). Kept out of orchestras and listed last as a plain folder. Set by the app.' },
+          archived: { type: 'boolean', description: 'Archived: kept (folder, targets, session) but hidden from the sidebar, the orchestra, rounds and the ferret-projects skill until restored. For projects on hold. Archiving an orchestra hides its projects too. Remove the key to restore.' },
+          work: { type: 'boolean', description: 'The built-in "work" scratch folder for quick throwaway tasks (set by the app). Kept out of orchestras and listed last. To hide it, archive it; if removed, Ferret adds it back on the next start.' },
+          global: { type: 'boolean', description: 'The built-in "Global" orchestra (set by the app, together with editorWorkspace). It covers every registered project; ask its agent to apply something to all projects. Its folder holds rules.md (rules for every project, which Ferret copies to every orchestra and to the agents\' global instructions) and projects.md. No project belongs to it (orchestraId never points here). To hide it, archive it; if removed, Ferret adds it back on the next start.' },
           editorWorkspace: { type: 'boolean', description: 'The built-in "All projects" entry (set by the app). Its hidden folder links every registered project as a subfolder; the agent started there hands work to each project\'s subagent.' },
           orchestrator: { type: 'boolean', description: 'Orchestrator. Projects in the subfolders (git repositories or registered projects) become Claude Code subagents in <folder>/.claude/agents/ferret-*.md, and reviews sent from here tell the agent to hand each finding to the right subagent. Ferret rewrites those files when the project is opened.' },
           addedAt: str('When the project was added (ISO 8601). Used by the "Date added" sort; set by the app.'),
@@ -276,7 +283,6 @@ export const SETTINGS_SCHEMA: JsonSchema = {
         notify: bool('Show a system notification when all agents in a project have finished, or when an agent is waiting for a permission or an answer. Nothing is shown for the tab you are looking at. Clicking the notification opens that tab.', { default: false }),
         restoreTerminals: bool('Remember terminal tabs (order, split, folder, agent and account) and the text on their screens, and bring them back when Ferret starts again and when you reopen a closed terminal (Cmd/Ctrl+Shift+T). Claude Code reopens with --continue and Codex with resume --last. Up to 2,000 lines per terminal are kept in Ferret\'s own data folder, never in the project. Turning this off deletes what was saved.', { default: true }),
         sleepIdleAgents: bool('Save memory: when Claude Code or Codex in a project you are not looking at has been waiting for input for 30 minutes, Ferret remembers its screen and closes it. Opening that project starts it again with the same conversation (--continue / resume --last). Plain shells, agents that are working or waiting for a permission, and agents sharing a folder and account with another tab are left running. Works only while restoreTerminals is on. After a restart, tabs of other projects start when you open that project.', { default: true }),
-        agentMail: bool('Agent mail: an agent in a Ferret terminal can ask another agent (Codex, Claude Code, Antigravity, ...) to do a task in a visible Ferret terminal and get the result back as a file, back and forth. Ferret gives each terminal FERRET_AGENT_CLI, FERRET_AGENT_MAIL and FERRET_AGENT_ID, pastes requests and replies into the terminals, opens the other agent next to the sender when it is not running, and installs the ferret-agent-mail skill for Claude Code and Codex. Turn off to stop delivering and remove the skill.', { default: true }),
         windowsShell: { type: 'string', description: 'Windows only: the shell for terminal tabs. powershell (default) uses PowerShell 7 (pwsh) when installed, otherwise Windows PowerShell, and keeps command history between tabs and restarts (Up arrow). cmd uses cmd.exe, which forgets history when a tab closes. Applies to tabs opened afterwards.', enum: ['powershell', 'cmd'], default: 'powershell' }
       }
     },

@@ -10,7 +10,7 @@ import { PREVIEW_ASSET_HOST, PREVIEW_PROJECT_HOST, PREVIEW_SCHEME, previewKind, 
 import { readTextFile } from '../files'
 import { previewImageType, readPreviewImage } from './image'
 import { consumeRemoteImagesGrant, isRemoteImagesGrantRequest, issueRemoteImagesGrant } from './remoteGrant'
-import { mermaidScriptUrl, previewCsp, REMOTE_IMAGES_PARAM, renderMermaidBlockPage, renderPreviewBody, renderPreviewMessage, renderPreviewPage } from './render'
+import { mermaidScriptUrl, previewCsp, REMOTE_IMAGES_PARAM, renderMermaidBlockPage, renderPreviewMessage, renderPreviewPage } from './render'
 import { t } from '@shared/i18n'
 import { reportHandled } from '@shared/report'
 
@@ -60,6 +60,9 @@ function respond(body: string | Buffer, type: string, status = 200, remoteImages
 
 const HTML = 'text/html; charset=utf-8'
 
+/** Markdown の描画（marked 入り）は、プレビューを初めて描くときに読み込む（main の起動時に読む JS を減らす） */
+const loadMarkdown = (): Promise<typeof import('./markdown')> => import('./markdown')
+
 async function handle(request: Request, getRoot: () => string | null): Promise<Response> {
   const url = new URL(request.url)
 
@@ -98,7 +101,7 @@ async function handle(request: Request, getRoot: () => string | null): Promise<R
   let body: string
   try {
     const result = await readTextFile(root, path)
-    body = result.kind === 'text' ? renderPreviewBody(kind, result.content) : renderPreviewMessage(result.reason)
+    body = result.kind === 'text' ? (await loadMarkdown()).renderPreviewBody(kind, result.content) : renderPreviewMessage(result.reason)
   } catch (err) {
     const message = err instanceof Error && err.message === t('files.errors.outside') ? err.message : t('preview.readFailed')
     body = renderPreviewMessage(message)
@@ -128,10 +131,10 @@ export function registerPreviewProtocol(sessions: Session[], getRoot: () => stri
 }
 
 /** 編集中の内容をページの中身にする（ファイルは読まないので、パスは種類の判定にだけ使う） */
-export function renderPreviewSource(path: unknown, source: unknown): string {
+export async function renderPreviewSource(path: unknown, source: unknown): Promise<string> {
   const kind = typeof path === 'string' ? previewKind(path) : null
   if (!kind || typeof source !== 'string') return ''
-  return renderPreviewBody(kind, source)
+  return (await loadMarkdown()).renderPreviewBody(kind, source)
 }
 
 /**

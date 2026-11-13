@@ -28,9 +28,8 @@ export interface BrowserImportDeps {
   /** 内蔵ブラウザの表示中のタブ */
   pageContents: () => WebContents | null
   userDataDir: () => string
-  /** 配布版だけ safeStorage で暗号化して保存する。dev 起動・E2E は保存しない（pipeline/stt/keys.ts の chooseKeyCipher） */
+  /** 配布版だけ safeStorage で暗号化して保存する。dev 起動は保存しない（pipeline/stt/keys.ts の chooseKeyCipher） */
   isPackaged: boolean
-  isE2E: boolean
   /** 取り込んだパスワードが変わったことを画面へ知らせる（鍵のボタンを出し直す） */
   notifyChanged?: () => void
   /** 書き出しの CSV を探すフォルダ（既定はホームのダウンロードとデスクトップ。テスト用） */
@@ -59,7 +58,7 @@ export function browserImportHandlers(deps: BrowserImportDeps): { [C in Channel]
     if (!passwords) {
       const { SavedLoginStore: Store } = await import('./passwords')
       const { chooseKeyCipher } = await import('../pipeline/stt/keys')
-      passwords = new Store(join(dir(), 'passwords.bin'), chooseKeyCipher({ isPackaged: deps.isPackaged, isE2E: deps.isE2E, safeStorage }))
+      passwords = new Store(join(dir(), 'passwords.bin'), chooseKeyCipher({ isPackaged: deps.isPackaged, safeStorage }))
     }
     return passwords
   }

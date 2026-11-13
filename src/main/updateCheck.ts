@@ -3,7 +3,6 @@ import { compareAppVersions, isValidAppVersion, pickAppVersion, type UpdateCheck
 // package.json はビルド時に埋め込む（dev 起動では app.getAppPath() がプロジェクト直下を指さないことがある）
 import { version } from '../../package.json'
 import { t } from '@shared/i18n'
-import { IS_PACKAGED } from './runtime'
 import { reportHandled } from '@shared/report'
 import { SMALL_JSON_MAX_BYTES, readBoundedBytes, readBoundedJson, readBoundedText } from './boundedResponse'
 import { RELEASE_PUBLIC_KEY, SIGNED_SUMS_MAX_BYTES, UPDATE_SUMS_NAME, verifiedReleaseFiles, verifiedUpdateFiles, type SignedReleaseFile, type SignedUpdateFile } from './releaseSignature'
@@ -27,36 +26,20 @@ import { RELEASE_PUBLIC_KEY, SIGNED_SUMS_MAX_BYTES, UPDATE_SUMS_NAME, verifiedRe
 /** 配信元。独自ドメインへ移すときはここだけ変える（今は r2.dev の開発用 URL） */
 export const RELEASE_BASE_URL = 'https://pub-588d93b3e875464f98d6cf98dc711a0c.r2.dev/'
 
-/**
- * E2E だけの差し替え（偽の配信元と、その配信元の署名の鍵）。配布版（IS_PACKAGED）では読まない。
- * 配信元は手元のループバック（http://127.0.0.1:<port>/）だけを受け付ける
- */
-export function e2eReleaseOverride(
-  name: 'FERRET_E2E_RELEASE_BASE_URL' | 'FERRET_E2E_RELEASE_KEY',
-  env: Record<string, string | undefined> = process.env,
-  packaged: boolean = IS_PACKAGED
-): string | null {
-  if (packaged || env.ADE_E2E !== '1') return null
-  const value = env[name]?.trim()
-  if (!value) return null
-  if (name === 'FERRET_E2E_RELEASE_BASE_URL') return /^http:\/\/127\.0\.0\.1:\d{2,5}\/$/.test(value) ? value : null
-  return /^ssh-ed25519 [A-Za-z0-9+/=]+$/.test(value) ? value : null
+/** 単体テストだけが差し替える配信元と鍵（VITEST の外では何もしない） */
+let testSource: { base: string; key: string } | null = null
+export function setReleaseSourceForTests(source: { base: string; key: string } | null): void {
+  if (process.env.VITEST) testSource = source
 }
-const e2eOverride = (name: Parameters<typeof e2eReleaseOverride>[0]): string | null => e2eReleaseOverride(name)
 
-/** いま使う配信元（ふだんは RELEASE_BASE_URL。E2E だけ偽の配信元） */
+/** いま使う配信元 */
 export function releaseBase(): string {
-  return e2eOverride('FERRET_E2E_RELEASE_BASE_URL') ?? RELEASE_BASE_URL
+  return testSource?.base ?? RELEASE_BASE_URL
 }
 
-/** 配布物の署名を確かめる公開鍵（ふだんは同梱の RELEASE_PUBLIC_KEY。E2E だけ偽の配信元の鍵） */
+/** 配布物の署名を確かめる公開鍵（同梱の RELEASE_PUBLIC_KEY） */
 function releaseTrustKey(): string {
-  return e2eOverride('FERRET_E2E_RELEASE_KEY') ?? RELEASE_PUBLIC_KEY
-}
-
-/** E2E の偽の配信元で動いているか（autoUpdate.ts が、本物の入れ替えをせずに流れだけを通すのに使う） */
-export function usingE2eReleaseServer(): boolean {
-  return e2eOverride('FERRET_E2E_RELEASE_BASE_URL') !== null && e2eOverride('FERRET_E2E_RELEASE_KEY') !== null
+  return testSource?.key ?? RELEASE_PUBLIC_KEY
 }
 /** ダウンロードサイト（Workers の静的配信）。空にすると R2 上の自分の OS・CPU 向けファイルを直接開く */
 export const DOWNLOAD_PAGE_URL = 'https://ferretade.dev/download'

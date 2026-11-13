@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { describeTargetUrl, isMermaidFence, previewKind, previewPathFromUrl, previewUrl } from '@shared/preview'
 import { readTextFile } from '../../src/main/files'
-import { renderPreviewBody, renderPreviewPage } from '../../src/main/preview/render'
+import { renderPreviewPage } from '../../src/main/preview/render'
+import { renderPreviewBody } from '../../src/main/preview/markdown'
 
 // 期待値は日本語の文言。画面の言語を日本語に固定する（既定は英語）
 import { setLocale } from '@shared/i18n'

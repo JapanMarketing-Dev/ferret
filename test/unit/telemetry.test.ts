@@ -47,17 +47,9 @@ describe('DSN', () => {
 })
 
 describe('送る条件', () => {
-  const base = { e2e: false, unitTest: false, enabled: true, dsn: DEFAULT_SENTRY_DSN }
+  const base = { unitTest: false, enabled: true, dsn: DEFAULT_SENTRY_DSN }
   it('設定 ON なら送る（配布版も dev 起動も）', () => {
     expect(shouldSendCrashReports(base)).toBe(true)
-  })
-  it('E2E では送らない', () => {
-    expect(shouldSendCrashReports({ ...base, e2e: true })).toBe(false)
-  })
-  it('確認用の FERRET_SENTRY_FORCE なら E2E の起動でも送る（単体テスト・設定 OFF には勝たない）', () => {
-    expect(shouldSendCrashReports({ ...base, e2e: true, forced: true })).toBe(true)
-    expect(shouldSendCrashReports({ ...base, unitTest: true, forced: true })).toBe(false)
-    expect(shouldSendCrashReports({ ...base, enabled: false, e2e: true, forced: true })).toBe(false)
   })
   it('単体テストでは送らない', () => {
     expect(shouldSendCrashReports({ ...base, unitTest: true })).toBe(false)

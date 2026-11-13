@@ -21,6 +21,9 @@ export function installMenu(handlers: {
 
 let unsubscribeLocale: (() => void) | null = null
 
+/** ターミナルの欄を隠す・出すキー（画面の表記は renderer の SHORTCUTS.toggleTerminal） */
+export const TOGGLE_TERMINAL_ACCELERATOR = 'Ctrl+`'
+
 function buildMenu(handlers: Parameters<typeof installMenu>[0]): void {
   const isMac = process.platform === 'darwin'
 
@@ -99,6 +102,12 @@ function buildMenu(handlers: Parameters<typeof installMenu>[0]): void {
           click: () => handlers.onCommand('toggleTargets')
         },
         { label: t('menu.toggleFooter'), click: () => handlers.onCommand('toggleFooter') },
+        {
+          // ターミナルの欄を隠す・出す。VS Code と同じ Control+`（macOS の ⌘` はウインドウの切り替えなので使わない）
+          label: t('menu.toggleTerminal'),
+          accelerator: TOGGLE_TERMINAL_ACCELERATOR,
+          click: () => handlers.onCommand('toggleTerminal')
+        },
         {
           label: t('menu.toggleViewport'),
           accelerator: 'CmdOrCtrl+Shift+V',

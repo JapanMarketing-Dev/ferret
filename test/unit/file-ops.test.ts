@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { entryNameProblem, isInsideGitDir, isSameOrUnder, movedPath } from '@shared/files'
-import { MAX_TRASH_ENTRIES, createEntry, renameEntry, trashEntries, trashFor } from '../../src/main/fileOps'
+import { MAX_TRASH_ENTRIES, createEntry, renameEntry, trashEntries } from '../../src/main/fileOps'
 
 // 期待値は日本語の文言。画面の言語を日本語に固定する（既定は英語）
 import { setLocale } from '@shared/i18n'
@@ -199,16 +199,6 @@ describe('作成・名前の変更・ゴミ箱（src/main/fileOps.ts）', () => 
       await expect(trashEntries(root, [], trash)).rejects.toThrow()
       await expect(trashEntries(root, Array.from({ length: MAX_TRASH_ENTRIES + 1 }, () => 'README.md'), trash)).rejects.toThrow()
       expect(trash).not.toHaveBeenCalled()
-    })
-
-    it('E2E の口: ADE_E2E=1 と ADE_E2E_TRASH_DIR のときだけ、本物のゴミ箱ではなくそのフォルダへ移す', async () => {
-      const real = vi.fn(async (_absolute: string) => {})
-      expect(trashFor(real, {})).toBe(real)
-      expect(trashFor(real, { ADE_E2E_TRASH_DIR: base })).toBe(real)
-      const fake = trashFor(real, { ADE_E2E: '1', ADE_E2E_TRASH_DIR: join(base, 'outside') })
-      await expect(trashEntries(root, ['README.md'], fake)).resolves.toEqual(['README.md'])
-      expect(real).not.toHaveBeenCalled()
-      expect((await readdir(join(base, 'outside'))).some((n) => n.endsWith('-README.md'))).toBe(true)
     })
 
     it('ゴミ箱へ送れなければ、パスを含まない文言で知らせる', async () => {

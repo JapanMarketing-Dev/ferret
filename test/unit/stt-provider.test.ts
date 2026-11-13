@@ -316,13 +316,12 @@ describe('キーチェーンの確認を出さない（起動時・dev 版）', 
   let dir = ''
   afterEach(async () => { if (dir) await rm(dir, { recursive: true, force: true }) })
 
-  it('dev 起動・E2E では safeStorage を使わない（呼びもしない）。配布版だけ使う', async () => {
+  it('dev 起動では safeStorage を使わない（呼びもしない）。配布版だけ使う', async () => {
     const { chooseKeyCipher, NO_CIPHER } = await import('../../src/main/pipeline/stt/keys')
     const ss = spySafeStorage()
-    expect(chooseKeyCipher({ isPackaged: false, isE2E: false, safeStorage: ss })).toBe(NO_CIPHER)
-    expect(chooseKeyCipher({ isPackaged: true, isE2E: true, safeStorage: ss })).toBe(NO_CIPHER)
+    expect(chooseKeyCipher({ isPackaged: false, safeStorage: ss })).toBe(NO_CIPHER)
     dir = await mkdtemp(join(tmpdir(), 'ade-dev-keys-'))
-    const dev = new SttKeyStore(join(dir, 'k.bin'), chooseKeyCipher({ isPackaged: false, isE2E: false, safeStorage: ss }), devKeyEnv(false, { OPENAI_API_KEY: 'sk-dotenv-0000000000000000' }))
+    const dev = new SttKeyStore(join(dir, 'k.bin'), chooseKeyCipher({ isPackaged: false, safeStorage: ss }), devKeyEnv(false, { OPENAI_API_KEY: 'sk-dotenv-0000000000000000' }))
     expect(dev.storage()).toBe('session')
     expect(await dev.set('anthropic', 'sk-ant-dev-key')).toEqual({ persisted: false })
     expect(await dev.read('anthropic')).toBe('sk-ant-dev-key')
@@ -330,7 +329,7 @@ describe('キーチェーンの確認を出さない（起動時・dev 版）', 
     expect(await dev.read('openai')).toBe('sk-dotenv-0000000000000000')
     expect(untouched(ss.calls)).toBe(true)
     await expect(stat(join(dir, 'k.bin'))).rejects.toThrow()
-    expect(chooseKeyCipher({ isPackaged: true, isE2E: false, safeStorage: ss, platform: 'darwin' })).not.toBe(NO_CIPHER)
+    expect(chooseKeyCipher({ isPackaged: true, safeStorage: ss, platform: 'darwin' })).not.toBe(NO_CIPHER)
   })
 
   it('配布版でも、起動時の表示（保存方式・キーの有無）では safeStorage に触れない。復号は実際に使うときだけ', async () => {

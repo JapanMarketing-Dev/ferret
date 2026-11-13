@@ -11,6 +11,7 @@ import { shouldIncludePath } from '@shared/files'
  * ENOSPC で見張りが黙って止まり、Agent が書いた変更がエディタに届かなくなる。
  * ここでは変更通知の対象（shouldIncludePath）のフォルダにだけ、1つずつ張る。
  * 例外として、指摘の進み具合（.ferret/reviews/<id>/progress.json）を拾うため .ferret/reviews/<id> までは降りる。
+ * ビジュアルレビューの計画（.ferret/visual-review/<id>.json と画像のフォルダ）も拾うため .ferret/visual-review/<id> まで降りる。
  */
 
 /** 張るフォルダの数の上限。超えた分は見張らない（上限に当たってほかのアプリの見張りまで止めないため） */
@@ -26,10 +27,13 @@ export const MAX_DISCOVERY_MS = 30_000
 /** このフォルダ（`/` 区切りの相対パス。'' はプロジェクトの直下）に降りて見張るか */
 export function shouldWatchDir(rel: string): boolean {
   if (rel === '' || shouldIncludePath(rel)) return true
+  if (/^\.ferret\/visual-review(?:\/[^/]+)?$/.test(rel)) return true
   return /^\.(?:ferret|ade-movie)(?:\/reviews(?:\/[^/]+)?)?$/.test(rel)
 }
 
 type Listener = (event: string, filename: string) => void
+/** フォルダ1つを見張る関数（fs.watch の形）。単体テストは差し替えて、通知を自分で出す（OS の通知の遅れに左右されない） */
+export type WatchDir = (path: string, listener: (event: string, filename: string | Buffer | null) => void) => FSWatcher
 
 interface DiscoveryBudget {
   scanned: number
@@ -47,7 +51,8 @@ export class LinuxTreeWatcher {
 
   constructor(private readonly root: string, private readonly listener: Listener,
     /** 上限に当たって一部を見張れなかったとき（1回だけ） */
-    private readonly onLimit?: (err: unknown) => void) {
+    private readonly onLimit?: (err: unknown) => void,
+    private readonly watchDir: WatchDir = (path, listener) => watch(path, listener)) {
     // 直下は同期で張る（作れなければ fs.watch と同じく投げる）
     this.addDir('', true)
     void this.addChildren('', this.initial)
@@ -84,7 +89,7 @@ export class LinuxTreeWatcher {
     }
     let watcher: FSWatcher
     try {
-      watcher = watch(rel ? join(this.root, rel) : this.root, (event, name) => {
+      watcher = this.watchDir(rel ? join(this.root, rel) : this.root, (event, name) => {
         if (!name) return
         const child = rel ? `${rel}/${String(name)}` : String(name)
         this.listener(event, child)

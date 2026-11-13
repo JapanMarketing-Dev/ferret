@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { EventEmitter } from 'node:events'
+import type { FSWatcher } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LinuxTreeWatcher, shouldWatchDir } from '../../src/main/linuxTreeWatch'
+import { LinuxTreeWatcher, shouldWatchDir, type WatchDir } from '../../src/main/linuxTreeWatch'
 
 describe('shouldWatchDir', () => {
   it('重いフォルダには降りないが、指摘の進み具合の置き場までは降りる', () => {
@@ -27,38 +29,75 @@ describe('LinuxTreeWatcher', () => {
     if (root) await rm(root, { recursive: true, force: true })
   })
 
-  const until = async (check: () => boolean): Promise<void> => {
-    // 全部のテストを並べて流すと fs.watch の通知が遅れることがあるので、長めに待つ
-    const deadline = Date.now() + 8000
-    while (!check() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 25))
+  /**
+   * OS の通知（fs.watch）の代わり。張ったフォルダごとに通知の口を覚え、テストが自分で出す。
+   * 以前は本物の fs.watch を待っていたので、全部のテストを並べて流すと通知が遅れて落ちることがあった
+   */
+  function fakeWatch(): { watchDir: WatchDir; fire: (dir: string, event: string, name: string) => void; open: () => string[] } {
+    const listeners = new Map<string, (event: string, filename: string | null) => void>()
+    const watchDir: WatchDir = (path, listener) => {
+      const watcher = new EventEmitter() as EventEmitter & { close: () => void }
+      watcher.close = () => { if (listeners.get(path) === listener) listeners.delete(path) }
+      listeners.set(path, listener)
+      return watcher as unknown as FSWatcher
+    }
+    return {
+      watchDir,
+      fire: (dir, event, name) => listeners.get(dir ? join(root, dir) : root)?.(event, name),
+      open: () => [...listeners.keys()].map((path) => path.slice(root.length + 1)).sort()
+    }
   }
 
-  // Linux でだけ使う見張り。Windows は見張り中のフォルダの消し方・通知の出方が違うので流さない（files.ts は Windows では recursive を使う）
-  it.skipIf(process.platform === 'win32')('対象のフォルダの変更を拾い、node_modules は見張らない。あとから作ったフォルダも見張る', async () => {
+  /** 見張りの探索（opendir・stat）は非同期なので、終わるまで少し待つ（OS の通知は待たない） */
+  const until = async (check: () => boolean): Promise<void> => {
+    const deadline = Date.now() + 2000
+    while (!check() && Date.now() < deadline) await new Promise((done) => setTimeout(done, 5))
+  }
+
+  it('対象のフォルダの変更を拾い、node_modules は見張らない。あとから作ったフォルダも見張り、消したら外す', async () => {
     root = await mkdtemp(join(tmpdir(), 'tree-watch-'))
     await mkdir(join(root, 'src'), { recursive: true })
     await mkdir(join(root, 'node_modules', 'pkg'), { recursive: true })
-    const seen = new Set<string>()
-    watcher = new LinuxTreeWatcher(root, (_event, name) => seen.add(name))
+    const seen: string[] = []
+    const fake = fakeWatch()
+    watcher = new LinuxTreeWatcher(root, (_event, name) => seen.push(name), undefined, fake.watchDir)
     await until(() => watcher!.size === 2)
     expect(watcher.size).toBe(2) // 直下と src
+    expect(fake.open()).toEqual(['', 'src'])
 
     await writeFile(join(root, 'src', 'a.ts'), 'x')
-    await until(() => seen.has('src/a.ts'))
-    expect(seen.has('src/a.ts')).toBe(true)
+    fake.fire('src', 'rename', 'a.ts')
+    expect(seen).toContain('src/a.ts')
+    // ファイルが増えても、見張るフォルダは増えない
+    await new Promise((done) => setTimeout(done, 20))
+    expect(watcher.size).toBe(2)
 
     await mkdir(join(root, 'lib'))
+    fake.fire('', 'rename', 'lib')
     await until(() => watcher!.size === 3)
+    expect(fake.open()).toEqual(['', 'lib', 'src'])
     await writeFile(join(root, 'lib', 'b.ts'), 'x')
-    await until(() => seen.has('lib/b.ts'))
-    expect(seen.has('lib/b.ts')).toBe(true)
+    fake.fire('lib', 'change', 'b.ts')
+    expect(seen).toContain('lib/b.ts')
 
-    await writeFile(join(root, 'node_modules', 'pkg', 'c.js'), 'x')
-    await new Promise((done) => setTimeout(done, 200))
-    expect([...seen].some((name) => name.startsWith('node_modules/pkg'))).toBe(false)
+    // node_modules には張っていないので、その下の変更は届かない
+    fake.fire('node_modules/pkg', 'change', 'c.js')
+    expect(seen.some((name) => name.startsWith('node_modules'))).toBe(false)
 
     await rm(join(root, 'lib'), { recursive: true })
+    fake.fire('', 'rename', 'lib')
     await until(() => watcher!.size === 2)
-    expect(watcher.size).toBe(2)
+    expect(fake.open()).toEqual(['', 'src'])
+  })
+
+  it('閉じたら全部外す', async () => {
+    root = await mkdtemp(join(tmpdir(), 'tree-watch-'))
+    await mkdir(join(root, 'a', 'b'), { recursive: true })
+    const fake = fakeWatch()
+    watcher = new LinuxTreeWatcher(root, () => undefined, undefined, fake.watchDir)
+    await until(() => watcher!.size === 3)
+    watcher.close()
+    expect(watcher.size).toBe(0)
+    expect(fake.open()).toEqual([])
   })
 })

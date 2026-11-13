@@ -75,6 +75,16 @@ export function sessionTabs(project: Pick<Project, 'urls' | 'session'>): { urls:
 }
 
 /**
+ * 起動時に内蔵ブラウザで開くタブ。開くプロジェクトがあれば、そのプロジェクトのタブ（sessionTabs）だけを使い、
+ * 覚えたものが無ければ空の画面にする。全体の「最後の URL」（globalUrl）は別のプロジェクトで見ていたページのことがあるので、
+ * プロジェクトが無いときにだけ使う（持ち込むと、そのページがこのプロジェクトの URL として覚えられてしまう）
+ */
+export function startupBrowserTabs(project: Pick<Project, 'urls' | 'session'> | null, globalUrl: string | undefined | null): { urls: string[]; active: number } {
+  if (project) return sessionTabs(project)
+  return { urls: [globalUrl || DEFAULT_URL], active: 0 }
+}
+
+/**
  * 内蔵ブラウザのタブの一覧から、設定に覚えるタブ（URL の並びと前のタブの番号）。
  * 空のタブ・読み込み途中で URL がまだ無いタブは数えない。覚えるものが無ければ null（前の値を消さない）
  */
@@ -119,7 +129,7 @@ export function isRecordableUrl(url: string | undefined | null): url is string {
  */
 const FILE_PREFIX = 'file:'
 /** ファイル以外の中央のタブ（src/renderer/components/CenterTabs.tsx の CenterTab。settings は覚えない） */
-const KNOWN_TABS = ['dashboard', 'browser', 'findings'] as const
+const KNOWN_TABS = ['dashboard', 'browser', 'findings', 'visual-review'] as const
 
 export function encodeCenterTab(tab: string, root: string | null): string | undefined {
   if (!tab.startsWith(FILE_PREFIX)) return tab

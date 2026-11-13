@@ -88,8 +88,10 @@ describe('contained file I/O (security-4 [5])', () => {
 
 describe('directory listing bound (security-4 [9])', () => {
   it('stops at MAX_DIRECTORY_ENTRIES', async () => {
-    for (let i = 0; i < MAX_DIRECTORY_ENTRIES + 50; i++) writeFileSync(join(project, `f${i}`), '')
-    const entries = await listDirectory(project, '')
-    expect(entries.length).toBeLessThanOrEqual(MAX_DIRECTORY_ENTRIES)
+    // 5000 個を作ると遅いので、上限を小さくして同じ動きを確かめる
+    for (let i = 0; i < 70; i++) writeFileSync(join(project, `f${i}`), '')
+    expect(await listDirectory(project, '', 20)).toHaveLength(20)
+    expect((await listDirectory(project, '')).length).toBeGreaterThan(70)
+    expect(MAX_DIRECTORY_ENTRIES).toBe(5000)
   })
 })

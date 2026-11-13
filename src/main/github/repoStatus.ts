@@ -7,8 +7,15 @@ import { AUTOMATIC_GIT_CONFIG, readGitStatus, trustedGit } from './gitSync'
  * フッターの「どの GitHub / GitLab の、どのブランチか」。読み方と fetch・取り込み・push は gitSync.ts
  */
 export async function gitRepoStatus(folderPath: string | null): Promise<GitRepoStatus> {
-  return readGitStatus(folderPath)
+  // フッターが2か所（帯と「…」の中）にあるときなどに同じフォルダを同時に読むと git を重ねて走らせるので、走っている読み取りに相乗りする
+  const key = folderPath ?? ''
+  const running = reading.get(key)
+  if (running) return running
+  const next = readGitStatus(folderPath).finally(() => reading.delete(key))
+  reading.set(key, next)
+  return next
 }
+const reading = new Map<string, Promise<GitRepoStatus>>()
 
 // ─── .git/HEAD の監視 ─────────────────────────────
 

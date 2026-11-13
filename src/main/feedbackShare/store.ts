@@ -1,6 +1,6 @@
 /**
  * 作った共有リンクの控え（プロジェクトごと）。持ち主のトークンは OS の鍵の仕組み（safeStorage）で暗号化して
- * userData/feedback-share/shares.bin に置く。暗号化できない環境・dev 起動・E2E では保存せず、その起動の間だけ持つ
+ * userData/feedback-share/shares.bin に置く。暗号化できない環境・dev 起動では保存せず、その起動の間だけ持つ
  * （文字起こしのキー・取り込んだパスワードと同じ。pipeline/stt/keys.ts の chooseKeyCipher）。
  *
  * 設定を開き直せるよう、メモの平文とパスワードも同じく暗号化して持つ（Worker へはパスワードを送らず、メモはパスワードがあれば暗号文だけ）。

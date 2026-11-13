@@ -1,6 +1,6 @@
 /**
  * Claude Code・Codex に入れる skill「ferret-browser」（Ferret の内蔵ブラウザを browser-use で動かす）。Agent が読む文なので英語。
- * 入れる・書き直すのは main の browserSkill.ts（agentMail の skill と同じやり方。印のあるファイルだけを書き直す）
+ * 入れる・書き直すのは main の browserSkill.ts（印のあるファイルだけを書き直す）
  */
 
 export const BROWSER_SKILL_NAME = 'ferret-browser'

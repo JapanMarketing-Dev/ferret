@@ -1,4 +1,3 @@
-import { fakeCapturePath } from './fakeCapture'
 import { registerRecorderContents } from '../captureConsent'
 import { BrowserWindow, ipcMain, nativeImage, type NativeImage, type Streams, type WebContents } from 'electron'
 import { constants, createWriteStream, type WriteStream } from 'node:fs'
@@ -65,15 +64,12 @@ interface StartPayload {
   /** process.platform。相手の声を取り込む方法を OS で変える */
   platform: string
   captureMic: boolean
-  syntheticMicWavBase64?: string
   syntheticMic: boolean
   captureSystemAudio: boolean
-  /** 検証用（ADE_E2E=1 のときだけ）。相手の声の取り込みをこの時間(ms)で止める */
+  /** 検証用。相手の声の取り込みをこの時間(ms)で止める */
   systemAudioEndAfterMs?: number
   /** 検証用。OS の取り込み（ループバック）を使わない。古い取り込み方に逃げない */
   systemAudioSynthetic: boolean
-  /** 検証用（E2E の偽の画面・ウインドウ。fakeCapture.ts）。画面・ウインドウの代わりに canvas の映像を録る */
-  syntheticDesktop?: boolean
   micDeviceId?: string
   videoBitsPerSecond: number
   videoMaxWidth: number
@@ -265,10 +261,8 @@ export class RecorderWindow {
       platform: process.platform,
       captureMic: options.captureMic && !this.videoOnly,
       syntheticMic: options.syntheticMic === true && !this.videoOnly,
-      syntheticMicWavBase64: options.syntheticMicWavBase64,
       captureSystemAudio,
       systemAudioSynthetic: !!synthetic,
-      ...(source.kind === 'desktop' && fakeCapturePath() ? { syntheticDesktop: true } : {}),
       ...(synthetic === 'ends' ? { systemAudioEndAfterMs: 2500 } : {}),
       micDeviceId: options.micDeviceId,
       videoBitsPerSecond: options.videoBitsPerSecond,

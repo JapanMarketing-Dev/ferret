@@ -1,7 +1,9 @@
 import { ExternalDropOverlay, useExternalDrop } from '../hooks/useExternalDrop'
 import { readDrop } from '../lib/externalDrop'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDown,
   ArrowUp,
   Check,
@@ -13,6 +15,7 @@ import {
   FolderOpen,
   FolderPlus,
   MessageCircleQuestionMark,
+  Globe,
   Network,
   Pencil,
   Plus,
@@ -36,9 +39,11 @@ import { SetupProgressLink } from '../onboarding/SetupChecklist'
 import { FeedbackLink } from './FeedbackDialog'
 import { useProjectActivity } from '../terminal/agentActivity'
 import { dropPositionAt, stepAmongVisible, type DropPosition } from '@shared/reorder'
-import { PROJECT_SORTS, filterProjects, sanitizeProjectView, sortProjects, type ProjectListView } from '@shared/projectOrder'
-import { isOrchestra, orchestraIdOf, treeDrop, treeRows } from '@shared/orchestras'
+import { ORCHESTRA_SORTS, PROJECT_SORTS, filterProjects, sanitizeProjectView, sortOrchestras, sortProjects, type ProjectListView } from '@shared/projectOrder'
+import { isGlobalOrchestra, isOrchestra, orchestraIdOf, treeDrop, treeRows } from '@shared/orchestras'
 import { PROJECT_DRAG_TYPE } from '../lib/projectDrag'
+import { activeProjects, canArchive } from '@shared/projectArchive'
+import { ArchivedProjects } from './ArchivedProjects'
 
 export { toReviewSession, type ReviewSession }
 
@@ -109,7 +114,7 @@ function loadCollapsedOrchestras(): Set<string> {
   }
 }
 
-export function Sidebar({
+function SidebarImpl({
   projects,
   activeProjectId,
   onOverlayChange
@@ -200,7 +205,14 @@ export function Sidebar({
     })
   }, [projectActivity])
   // オーケストラを親のフォルダにし、属するプロジェクトをその下に字下げして並べる（@shared/orchestras）。子の並びは今の並び順
-  const displayed = sortProjects(projects.projects, view.sort, { activity: projectActivity, agentActiveAt })
+  // アーカイブしたもの（オーケストラごと隠したものも）は並べず、下の「アーカイブ済み」に置く（@shared/projectArchive）
+  const sortContext = { activity: projectActivity, agentActiveAt }
+  const sortedProjects = sortProjects(activeProjects(projects.projects), view.sort, sortContext)
+  // オーケストラ同士の並びはプロジェクトの並びと別（@shared/projectOrder の sortOrchestras。既定は手動）
+  const orchestraOrder = sortOrchestras(projects.projects, view.orchestraSort, sortContext).filter((o) => !o.archived)
+  // キーボードの並べ替えが見えている順で動くよう、オーケストラの位置にはオーケストラの並びを入れる
+  const orchestraQueue = [...orchestraOrder]
+  const displayed = sortedProjects.map((p) => (isOrchestra(p) ? orchestraQueue.shift() ?? p : p))
   const [collapsedOrchestras, setCollapsedOrchestras] = useState<Set<string>>(loadCollapsedOrchestras)
   const toggleOrchestra = (id: string) => setCollapsedOrchestras((prev) => {
     const next = new Set(prev)
@@ -209,7 +221,7 @@ export function Sidebar({
     try { localStorage.setItem(COLLAPSED_ORCHESTRAS_KEY, JSON.stringify([...next])) } catch { /* 保存できなくても、この起動の間は効く */ }
     return next
   })
-  const rows = treeRows(projects.projects, filterProjects(displayed, view), collapsedOrchestras)
+  const rows = treeRows(projects.projects, filterProjects(displayed, view), collapsedOrchestras, orchestraOrder)
   const shown = rows.map((r) => r.project)
   const depthOf = new Map(rows.map((r) => [r.project.id, r.depth]))
   const rowOf = new Map(rows.map((r) => [r.project.id, r]))
@@ -233,21 +245,36 @@ export function Sidebar({
     const move = treeDrop(projects.projects, rows, draggingId, targetId, position)
     if (!move) return
     run(() => window.ade.invoke('project:move', move.id, move.to, move.before))
-    if (view.sort !== 'manual') {
-      setView({ ...view, sort: 'manual' })
-      toast({ tone: 'info', message: t('sidebar.sort.switchedToManual') })
-    }
+    toManual(draggingId)
   }
-  const reorder = (next: string[] | null) => {
+  /**
+   * 手で並べ替えたら、動かしたものの並び順（オーケストラならオーケストラの、プロジェクトならプロジェクトの）を手動に切り替える。
+   * もう一方の並び順はそのまま（オーケストラは手動のまま、プロジェクトは最近使った順のまま、など）
+   */
+  const toManual = (id: string) => {
+    const moved = projects.projects.find((p) => p.id === id)
+    if (moved && isOrchestra(moved)) {
+      if (view.orchestraSort === 'manual') return
+      setView({ ...view, orchestraSort: 'manual' })
+      toast({ tone: 'info', message: t('sidebar.sort.orchestraSwitchedToManual') })
+      return
+    }
+    if (view.sort === 'manual') return
+    setView({ ...view, sort: 'manual' })
+    toast({ tone: 'info', message: t('sidebar.sort.switchedToManual') })
+  }
+  const reorder = (next: string[] | null, id: string) => {
     if (!next) return
     run(() => window.ade.invoke('project:reorder', next))
-    if (view.sort !== 'manual') {
-      setView({ ...view, sort: 'manual' })
-      toast({ tone: 'info', message: t('sidebar.sort.switchedToManual') })
-    }
+    toManual(id)
   }
   const stepOf = (id: string, delta: -1 | 1) => stepAmongVisible(projectIds, shownIds, id, delta, sameGroup(id))
-  const moveProject = (id: string, delta: -1 | 1) => reorder(stepOf(id, delta))
+  const moveProject = (id: string, delta: -1 | 1) => reorder(stepOf(id, delta), id)
+  /** アーカイブする・元に戻す（消さずに隠すだけなので確かめない） */
+  const setArchived = (project: Project, archived: boolean) => run(async () => {
+    await window.ade.invoke('project:update', { id: project.id, archived })
+    toast({ tone: 'success', message: t(archived ? 'archive.archived' : 'archive.restored', { name: project.name }) })
+  })
   const toggleStar = (project: Project) => run(() => window.ade.invoke('project:update', { id: project.id, starred: !project.starred }))
   /** 以前の版で作ったオーケストレーターをやめる（Ferret が書いた subagent などを外す。いまは「すべてのプロジェクト」を使う） */
   const stopOrchestrator = (project: Project) => run(async () => {
@@ -339,6 +366,14 @@ export function Sidebar({
               onChange={(e) => setView({ ...view, sort: sanitizeProjectView({ sort: e.target.value }).sort })}>
               {PROJECT_SORTS.map((sort) => <option key={sort} value={sort}>{t(`sidebar.sort.${sort}`)}</option>)}
             </select>
+            {/* オーケストラ同士の並び順（プロジェクトの並び順とは別。オーケストラがあるときだけ） */}
+            {projects.projects.some(isOrchestra) && <>
+              <div className="rv-filter__label">{t('sidebar.sort.orchestraLabel')}</div>
+              <select className="rv-filter__select" aria-label={t('sidebar.sort.orchestraLabel')} value={view.orchestraSort} data-testid="sidebar-orchestra-sort"
+                onChange={(e) => setView({ ...view, orchestraSort: sanitizeProjectView({ orchestraSort: e.target.value }).orchestraSort })}>
+                {ORCHESTRA_SORTS.map((sort) => <option key={sort} value={sort}>{t(`sidebar.sort.${sort}`)}</option>)}
+              </select>
+            </>}
             <label className="rv-filter__check">
               <input type="checkbox" checked={view.starredOnly} onChange={(e) => setView({ ...view, starredOnly: e.target.checked })} data-testid="sidebar-starred-only" />
               <span>{t('sidebar.starredOnly')}</span>
@@ -406,7 +441,7 @@ export function Sidebar({
                       role="treeitem"
                       tabIndex={0}
                       aria-selected={active}
-                      {...(isOrchestra(project) ? { 'aria-expanded': !collapsed } : {})}
+                      {...(isOrchestra(project) && !isGlobalOrchestra(project) ? { 'aria-expanded': !collapsed } : {})}
                       className="sb-project__row"
                       title={project.source === 'ssh' && project.ssh ? sshTargetLabel(project.ssh) : project.folderPath}
                       draggable
@@ -440,12 +475,15 @@ export function Sidebar({
                       }}
                       data-testid={`sidebar-project-${project.id}`}
                     >
-                      {isOrchestra(project) && <button type="button" className="sb-project__twisty" aria-label={t(rowOf.get(project.id)?.collapsed ? 'sidebar.orchestraExpand' : 'sidebar.orchestraCollapse', { name: project.name })} aria-expanded={!rowOf.get(project.id)?.collapsed}
+                      {/* グローバルは子を持たない（全部が対象。各プロジェクトは自分のグループの下に並ぶ）ので畳む印を出さない */}
+                      {isOrchestra(project) && !isGlobalOrchestra(project) && <button type="button" className="sb-project__twisty" aria-label={t(rowOf.get(project.id)?.collapsed ? 'sidebar.orchestraExpand' : 'sidebar.orchestraCollapse', { name: project.name })} aria-expanded={!rowOf.get(project.id)?.collapsed}
                         onClick={(e) => { e.stopPropagation(); toggleOrchestra(project.id) }} data-testid={`sidebar-orchestra-toggle-${project.id}`}>
                         <ChevronDown size={12} strokeWidth={2} className={rowOf.get(project.id)?.collapsed ? 'is-collapsed' : ''} />
                       </button>}
                       <span className="sb-project__icon" aria-hidden="true" title={t(`projectSource.source.${project.source ?? 'local'}` as TranslationKey)}>
-                        {project.source && project.source !== 'local'
+                        {isGlobalOrchestra(project)
+                          ? <Globe size={14} strokeWidth={1.5} />
+                          : project.source && project.source !== 'local'
                           ? <ProjectSourceIcon project={project} />
                           : active ? <FolderOpen size={14} strokeWidth={1.5} /> : <Folder size={14} strokeWidth={1.5} />}
                       </span>
@@ -456,7 +494,7 @@ export function Sidebar({
                         </span>
                       )}
                       {project.orchestrator && (
-                        <span className="sb-project__starred" role="img" aria-label={t(project.editorWorkspace ? 'editorWorkspace.hint' : 'orchestrator.badge')} title={t(project.editorWorkspace ? 'editorWorkspace.hint' : 'orchestrator.badge')} data-testid={project.editorWorkspace ? 'sidebar-editor-workspace' : 'sidebar-project-orchestrator'}>
+                        <span className="sb-project__starred" role="img" aria-label={t(isGlobalOrchestra(project) ? 'globalOrchestra.hint' : project.editorWorkspace ? 'editorWorkspace.hint' : 'orchestrator.badge')} title={t(isGlobalOrchestra(project) ? 'globalOrchestra.hint' : project.editorWorkspace ? 'editorWorkspace.hint' : 'orchestrator.badge')} data-testid={project.editorWorkspace ? 'sidebar-editor-workspace' : 'sidebar-project-orchestrator'}>
                           <Network size={11} strokeWidth={2} />
                         </span>
                       )}
@@ -534,6 +572,7 @@ export function Sidebar({
             })}
           </div>
         )}
+        <ArchivedProjects projects={projects.projects} onRestore={(project) => setArchived(project, false)} />
       </div>
 
       {menu && menuProject && (
@@ -544,7 +583,7 @@ export function Sidebar({
           <button type="button" role="menuitem" onClick={() => { setMenu(null); openEdit(menuProject.id) }} data-testid="sidebar-project-edit">
             <Settings2 size={13} strokeWidth={1.75} />{t('projectTargets.edit')}
           </button>
-          {/* オーケストラの対象・対象外（全体の subagent・巡回・全体への依頼に巻き込まない） */}
+          {/* オーケストラの対象・対象外（全体の subagent・全体への依頼に巻き込まない） */}
           {!menuProject.editorWorkspace && !menuProject.orchestrator && menuProject.source !== 'ssh' && <button type="button" role="menuitem" onClick={() => { setMenu(null); run(() => window.ade.invoke('project:update', { id: menuProject.id, orchestraExcluded: !menuProject.orchestraExcluded })) }} data-testid="sidebar-project-orchestra-toggle">
             <Network size={13} strokeWidth={1.75} />{menuProject.orchestraExcluded ? t('orchestra.include') : t('orchestra.exclude')}
           </button>}
@@ -563,13 +602,22 @@ export function Sidebar({
             {menuProject.orchestrator && !menuProject.editorWorkspace && <button type="button" role="menuitem" onClick={() => { setMenu(null); stopOrchestrator(menuProject) }} data-testid="sidebar-project-orchestrator-menu">
               <Network size={13} strokeWidth={1.75} />{t('orchestrator.off')}
             </button>}
-            <button type="button" role="menuitem" onClick={() => { setMenu(null); openRepoCreate(menuProject.id) }} data-testid="sidebar-project-create-repo">
+            {!isGlobalOrchestra(menuProject) && <button type="button" role="menuitem" onClick={() => { setMenu(null); openRepoCreate(menuProject.id) }} data-testid="sidebar-project-create-repo">
               <FolderGit2 size={13} strokeWidth={1.75} />{t('repoCreate.menu')}
-            </button>
+            </button>}
           </>}
           <div className="sb-menu__sep" role="separator" />
-          {/* 「すべてのプロジェクト」は外せない（Ferret が持つエディタ全体） */}
-          {(!menuProject.editorWorkspace || projects.projects.filter(isOrchestra).length > 1) && <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenu(null); setConfirmRemove(menuProject.id) }}>
+          {/* アーカイブ（しばらく使わない・待ち）。消さずに隠すだけ。work は「隠す」として出す。最後のオーケストラはアーカイブできない */}
+          {menuProject.archived
+            ? <button type="button" role="menuitem" onClick={() => { setMenu(null); setArchived(menuProject, false) }} data-testid="sidebar-project-restore">
+              <ArchiveRestore size={13} strokeWidth={1.75} />{t('archive.restore')}
+            </button>
+            : <button type="button" role="menuitem" disabled={!canArchive(projects.projects, menuProject.id)} title={isOrchestra(menuProject) ? t('archive.withOrchestra') : undefined} onClick={() => { setMenu(null); setArchived(menuProject, true) }} data-testid="sidebar-project-archive">
+              <Archive size={13} strokeWidth={1.75} />{menuProject.work ? t('workProject.hide') : t('archive.archive')}
+            </button>}
+          {/* 「すべてのプロジェクト」は外せない（Ferret が持つエディタ全体）。work も外さない（隠すのはアーカイブ。外しても次の起動で戻るため） */}
+          {/* グローバルも外さない（隠すのはアーカイブ。外しても次の起動で戻るため） */}
+          {!menuProject.work && !isGlobalOrchestra(menuProject) && (!menuProject.editorWorkspace || projects.projects.filter((p) => isOrchestra(p) && !isGlobalOrchestra(p)).length > 1) && <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenu(null); setConfirmRemove(menuProject.id) }}>
             <Trash2 size={13} strokeWidth={1.75} />{t('sidebar.removeFromList')}
           </button>}
         </div>
@@ -624,3 +672,6 @@ function EmptyStackArt() {
     </svg>
   )
 }
+
+/** 親（App）が描き直しても、渡す値が同じなら描き直さない（内蔵ブラウザの状態などの変化で重い部品を描き直さない） */
+export const Sidebar = memo(SidebarImpl)

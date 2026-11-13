@@ -1,37 +1,26 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Columns2, ExternalLink, FileCode, FolderOpen, Globe, Save, Send } from 'lucide-react'
+import { AlertTriangle, Columns2, ExternalLink, FileCode, FolderOpen, Globe, Save } from 'lucide-react'
 import { previewKind, previewUrl } from '@shared/preview'
 import { isRiskyToOpenExternally, isSvgPath } from '@shared/fileViewer'
 import { isHtmlPath } from '@shared/htmlPreview'
 import FileViewer from './FileViewer'
-import { openPublishPanel } from '../lib/publishPanel'
-import { errorMessage } from '../lib/errors'
 import { isMarkdownLanguage } from './language'
 import type { OpenFilesApi, OpenFile } from './useOpenFiles'
 import type { CodeEditorInstance } from './CodeEditor'
 import { registerMarkdownDropTarget } from './markdownDrop'
 import { markdownMediaSnippet, sourceInsertion } from '@shared/markdownMedia'
-import { Button, EmptyState, Spinner, useToast } from '../ui'
+import { Button, EmptyState, Spinner } from '../ui'
 import { useT } from '../lib/i18n'
 import { preloadable } from '../lib/preloadable'
 import { reportHandled } from '@shared/report'
-import { X_MAX_WEIGHT, markdownToPostText, xWeightedLength } from '@shared/xPost'
 
 /** 打鍵が止まってから横のプレビューを描き直すまでの待ち（数百ミリ秒で追従させる） */
 const LIVE_PREVIEW_DELAY_MS = 150
 
 /** Markdown のプレビュー（そのまま編集できる。tiptap を含むので、開いたときだけ読む） */
-const { Component: RichMarkdownEditor, preload: loadRichMarkdownEditor } = preloadable(() => import('./richMarkdown/RichMarkdownEditor'))
+const { Component: RichMarkdownEditor } = preloadable(() => import('./richMarkdown/RichMarkdownEditor'))
 /** ソースの編集（Monaco。数MBあるので、ソースを開いたときだけ読む） */
-const { Component: CodeEditor, preload: loadCodeEditor } = preloadable(() => import('./CodeEditor'))
-
-/**
- * 起動して手が空いたら、Markdown のプレビューの編集と Monaco を先に読んでおく
- * （初めてファイルを開いたときに、読み込みを待たずにすぐ書けるように）。App から呼ぶ
- */
-export function preloadEditors(): void {
-  void loadRichMarkdownEditor().then(() => loadCodeEditor()).catch(() => undefined)
-}
+const { Component: CodeEditor } = preloadable(() => import('./CodeEditor'))
 /** Markdown をソースで開いているファイル（既定はプレビュー。タブを切り替えても残す） */
 const sourceFiles = new Set<string>()
 
@@ -49,7 +38,6 @@ const sourceFiles = new Set<string>()
  */
 export default function FileEditor({ file, editor: api }: { file: OpenFile; editor: OpenFilesApi }) {
   const t = useT()
-  const toast = useToast()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<CodeEditorInstance | null>(null)
@@ -117,24 +105,6 @@ export default function FileEditor({ file, editor: api }: { file: OpenFile; edit
   const htmlPreviewable = isHtmlPath(file.path) && file.status === 'ready' && !file.viewer
   const previewable = previewKind(file.path) !== null && file.language !== 'markdown' && file.status === 'ready' && !file.viewer
   const sourceDroppable = markdown && file.status === 'ready' && !file.viewer && !rich
-  const postable = file.status === 'ready' && !file.viewer
-  /** ソースで範囲を選んでいればその部分、無ければ全体。Markdown は記号を外す */
-  const openXPost = () => {
-    const editor = rich ? null : editorRef.current
-    const selection = editor?.getSelection()
-    const picked = selection && !selection.isEmpty() ? editor?.getModel()?.getValueInRange(selection) : undefined
-    const source = picked ?? api.currentText(file.id) ?? ''
-    const text = markdown ? markdownToPostText(source) : source.trim()
-    // 3件のスレッドに収まる長さなら、そのまま下書きにして「発信」を開く（AI で書き直すこともできる）。
-    // それより長い文書（README など）は下書きにせず、「この文章から AI で作る」を出して開く
-    if (xWeightedLength(text) > X_MAX_WEIGHT * 3) {
-      openPublishPanel({ sourceText: text, sourceLabel: file.name })
-      return
-    }
-    void window.ade.invoke('publish:create', text).then(
-      (draftId) => openPublishPanel({ draftId, sourceText: text, sourceLabel: file.name }),
-      (err) => toast({ tone: 'warning', message: errorMessage(err) }))
-  }
 
   // ソースへ落とした画像・動画を、落とした位置に埋め込む（受けるのは App の中央のペイン。markdownDrop.ts）
   useEffect(() => {
@@ -220,12 +190,7 @@ export default function FileEditor({ file, editor: api }: { file: OpenFile; edit
             )}
           </>
         )}
-        {postable && (
-          <Button variant="ghost" icon={<Send size={13} />} title={t('xPost.buttonTitle')} onClick={openXPost} data-testid="editor-x-post">
-            {t('xPost.button')}
-          </Button>
-        )}
-        {file.status === 'ready' && !file.viewer && (
+        {file.status === 'ready' && (!file.viewer || (file.viewer === 'office' && file.dirty)) && (
           <Button variant="ghost" className="editor-head__save" icon={<Save size={13} />} title={t('common.save')} disabled={!file.dirty && !file.external} onClick={() => void api.save(file.id)} data-testid="editor-save">
             {t('common.save')}
           </Button>
@@ -258,7 +223,10 @@ export default function FileEditor({ file, editor: api }: { file: OpenFile; edit
         ) : file.status === 'unavailable' ? (
           <EmptyState size="sm" title={t('editor.cannotOpen')} description={file.message ?? ''} testId="editor-unavailable" />
         ) : file.viewer ? (
-          <FileViewer path={file.path} name={file.name} viewer={file.viewer} info={file.info} message={file.message} revision={file.revision} />
+          <FileViewer
+            path={file.path} name={file.name} viewer={file.viewer} info={file.info} message={file.message} revision={file.revision}
+            fileId={file.id} onDirty={(dirty) => api.setViewerDirty(file.id, dirty)}
+          />
         ) : rich ? (
           <Suspense fallback={<div className="editor-body__center"><Spinner size={18} /></div>}>
             <RichMarkdownEditor key={file.id} file={file} editor={api} />

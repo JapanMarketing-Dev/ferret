@@ -1,4 +1,3 @@
-import { fakeCapturePath } from './recording/fakeCapture'
 import { isGestureInput, registerRecorderContents } from './captureConsent'
 import { BrowserIdentity, cleanElectronUserAgent, electronUserAgent } from './browserUserAgent'
 import { SHARED_BROWSER_PARTITION } from '@shared/browserProfile'
@@ -141,8 +140,6 @@ function followIdentity(wc: WebContents): void {
 
 let confirmWindowOf: () => BaseWindow | null = () => null
 
-/** E2E の非表示実行（ADE_E2E=1 で ADE_E2E_SHOW が無い）ではポップアップを画面に出さない */
-const HIDE_POPUPS = process.env.ADE_E2E === '1' && process.env.ADE_E2E_SHOW !== '1'
 
 /**
  * ログインのポップアップの子ウインドウ。内蔵ブラウザと同じ永続の session（ログインがそのまま残る）で、
@@ -830,8 +827,7 @@ export class EmbeddedBrowser {
     window.contentView.addChildView(view)
     this.applyBounds()
     try {
-      // E2E の偽の画面・ウインドウ（recording/fakeCapture.ts）なら、本物の取り込みの代わりに canvas の映像を映す
-      await wc.loadFile(htmlPath, { query: { source: sourceId, ...(message ? { message } : {}), ...(fakeCapturePath() ? { synthetic: '1' } : {}) } })
+      await wc.loadFile(htmlPath, { query: { source: sourceId, ...(message ? { message } : {}) } })
     } catch (err) {
       reportHandled(err, { area: 'browser', op: 'load capture mirror' })
       if (this.mirror === view) this.hideMirror()
@@ -874,6 +870,23 @@ export class EmbeddedBrowser {
     // 隠したままでは大きさがページへ伝わらない。同じティックで出して隠し、大きさだけを伝える（画面には描かれない）
     view.setVisible(true)
     view.setVisible(false)
+  }
+
+  /**
+   * 画面に出ている前のタブの、見えている分を撮る（Agent に渡す最新の画面の控え。screenCache.ts）。
+   * 内蔵ブラウザのタブだけで、アプリの画面・映したウインドウ（mirror）は撮らない。隠れている・読み込み中・破棄済みなら null
+   */
+  async captureVisibleTab(): Promise<{ image: import('electron').NativeImage; url: string; title: string } | null> {
+    const tab = this.activeTab
+    const wc = tab?.view.webContents
+    if (!tab || !wc || wc.isDestroyed() || wc.isLoading() || tab.loadError) return null
+    const bounds = tab.view.getBounds()
+    if (bounds.width <= 0 || bounds.height <= 0) return null
+    const url = wc.getURL()
+    const image = await wc.capturePage().catch(() => null)
+    // 撮っている間に別のページへ移った・閉じた
+    if (!image || image.isEmpty() || wc.isDestroyed() || wc.getURL() !== url || this.activeTab !== tab) return null
+    return { image, url, title: wc.getTitle() }
   }
 
   /**
@@ -1062,8 +1075,7 @@ export class EmbeddedBrowser {
     pwc.on('input-event', (_event, input) => { if (isGestureInput(input.type)) this.onPageInput?.(pwc) })
     // 録画中はこのポップアップも録り、前に出たら書き込む先をそちらへ切り替える（recording/controller.ts の attachPopupWindow）
     this.onPopupWindow?.(pwc, url)
-    // E2E の非表示実行では出さない（Playwright からは見える）
-    if (!HIDE_POPUPS) child.once('ready-to-show', () => { if (!child.isDestroyed()) child.show() })
+    child.once('ready-to-show', () => { if (!child.isDestroyed()) child.show() })
   }
 
   /**

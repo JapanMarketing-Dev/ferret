@@ -12,6 +12,16 @@ import { CLOSE_REQUEST_EVENT } from '../components/TerminalPane'
 import { detectLanguage } from './language'
 import { canCloseAfterSave } from './closeAfterSave'
 import { nextActiveAfterClose } from './closeTabs'
+import { LatestRequests, decideExternalChange, diskStampChanged, filesToRecheck, type DiskStamp } from './externalChange'
+
+/**
+ * 開いているタブのディスクの日時と大きさを見る間隔。監視（fs:changed）が届かないとき
+ * （監視の外のフォルダ・監視が止まった・通知を取りこぼした）でも、この間隔で取り込む
+ */
+const ACTIVE_FILE_POLL_MS = 1000
+/** 読めなかった（消えた）ことを覚えておく印 */
+const MISSING_STAMP: DiskStamp = { mtimeMs: -1, size: -1 }
+import { forgetOffice, officeSaverFor } from './officeSave'
 
 /**
  * 開いているファイル（中央のタブ）の状態。
@@ -108,6 +118,8 @@ export interface OpenFilesApi {
   save: (id: string) => Promise<boolean>
   /** Monaco の内容が変わった */
   setDraft: (id: string, value: string) => void
+  /** ビューアで編集している（Office の文書）ファイルの変更ありを知らせる */
+  setViewerDirty: (id: string, dirty: boolean) => void
   getDraft: (id: string) => string | undefined
   togglePreview: (id: string) => void
   /** プレビューを内蔵ブラウザで開く（そのまま録画でレビューできる） */
@@ -151,6 +163,12 @@ export function useOpenFiles({
   /** 閉じる確認を待っているファイル（先頭から1つずつ聞く） */
   const [closeQueue, setCloseQueue] = useState<readonly string[]>([])
   const drafts = useRef(new Map<string, string>())
+  /** ファイルごとに最後に頼んだ読み込みだけを使う（前の読み込みの答えで、新しい内容を上書きしない） */
+  const requests = useRef(new LatestRequests())
+  /** 開いているタブで最後に見たディスクの日時と大きさ */
+  const stamps = useRef(new Map<string, DiskStamp>())
+  /** Office の文書を書いている最中のタブ（自分の書き込みの知らせを「外部の変更」と取り違えない） */
+  const savingOffice = useRef(new Set<string>())
   const filesRef = useRef(allFiles)
   filesRef.current = allFiles
   // 保存してから閉じるときは、書き終わった時点の選択を見る（閉じる操作の時点の値は古い）
@@ -165,11 +183,14 @@ export function useOpenFiles({
   const activeFile = activeTab.startsWith('file:') ? (files.find((f) => fileTabId(f.id) === activeTab) ?? null) : null
 
   const load = useCallback(async (id: string, path: string, asText = false) => {
+    const ticket = requests.current.begin(id)
+    const latest = () => requests.current.isLatest(id, ticket)
     try {
       // 画像・動画・音声・PDF は中身を読まず、大きさだけ見てビューアで開く（中身は ade-media://project/ から）
       const media = asText ? null : mediaKindOf(path)
       if (media) {
         const info = await window.ade.invoke('fs:inspect', path)
+        if (!latest()) return
         const limit = MAX_VIEWER_BYTES[media]
         const tooLarge = info.size > limit
         drafts.current.delete(id)
@@ -179,24 +200,28 @@ export function useOpenFiles({
         }))
         return
       }
-      // Word・Excel・PowerPoint はプレビュー（中身は OfficeViewer が fs:readOffice で読む）。古い形式は案内だけ
+      // Word・Excel・PowerPoint はプレビューと編集（中身は OfficeViewer が fs:openOffice で読む）。
+      // 古い形式・OpenDocument・iWork は main が LibreOffice で変えてから渡す
       if (!asText && (officeKindOf(path) || isLegacyOffice(path))) {
         const info = await window.ade.invoke('fs:inspect', path)
+        if (!latest()) return
         const tooLarge = info.size > MAX_OFFICE_BYTES
         drafts.current.delete(id)
         patch(id, (f) => ({
-          status: 'ready', viewer: officeKindOf(path) && !tooLarge ? 'office' : 'binary', info, saved: '', dirty: false, external: undefined, revision: f.revision + 1,
-          message: isLegacyOffice(path) ? t('viewer.legacyOffice') : tooLarge ? t('viewer.tooLargeToShow', { size: formatByteSize(info.size), limit: formatByteSize(MAX_OFFICE_BYTES) }) : undefined
+          status: 'ready', viewer: tooLarge ? 'binary' : 'office', info, saved: '', dirty: false, external: undefined, revision: f.revision + 1,
+          message: tooLarge ? t('viewer.tooLargeToShow', { size: formatByteSize(info.size), limit: formatByteSize(MAX_OFFICE_BYTES) }) : undefined
         }))
         return
       }
       const result = await window.ade.invoke('fs:read', path)
+      if (!latest()) return
       if (result.kind === 'text') {
         drafts.current.set(id, result.content)
         patch(id, (f) => ({ status: 'ready', saved: result.content, dirty: false, message: undefined, external: undefined, viewer: undefined, info: undefined, revision: f.revision + 1 }))
       } else {
         // バイナリ・大きすぎるファイルは、大きさと先頭の16進数だけ見せる（Monaco には出さない）
         const info = await window.ade.invoke('fs:inspect', path)
+        if (!latest()) return
         drafts.current.delete(id)
         patch(id, (f) => ({
           status: 'ready', viewer: 'binary', info, saved: '', dirty: false, external: undefined, revision: f.revision + 1,
@@ -204,7 +229,7 @@ export function useOpenFiles({
         }))
       }
     } catch (err) {
-      patch(id, { status: 'unavailable', message: errorMessage(err) })
+      if (latest()) patch(id, { status: 'unavailable', message: errorMessage(err) })
     }
   }, [patch])
 
@@ -285,7 +310,7 @@ export function useOpenFiles({
     const list = filesRef.current
     const doomed = new Set(ids.filter((id) => list.some((f) => f.id === id)))
     if (doomed.size === 0) return
-    for (const id of doomed) { drafts.current.delete(id); modelDisposer?.(id) }
+    for (const id of doomed) { drafts.current.delete(id); requests.current.forget(id); stamps.current.delete(id); modelDisposer?.(id); forgetOffice(id) }
     setAllFiles((files) => files.filter((f) => !doomed.has(f.id)))
     const current = activeTabRef.current
     const activeId = list.find((f) => fileTabId(f.id) === current)?.id
@@ -301,8 +326,25 @@ export function useOpenFiles({
 
   const save = useCallback(async (id: string): Promise<boolean> => {
     const file = filesRef.current.find((f) => f.id === id)
-    // ビューアで開いたファイルは書かない（空の内容で上書きして壊さない）
-    if (!file || file.status !== 'ready' || file.root !== root || file.viewer) return false
+    if (!file || file.status !== 'ready' || file.root !== root) return false
+    // Office の文書は OfficeViewer が持つ編集を、そこで OOXML にして書く（fs:writeOffice）
+    if (file.viewer === 'office') {
+      const saver = officeSaverFor(id)
+      if (!saver || !file.dirty) return false
+      savingOffice.current.add(id)
+      try {
+        await saver()
+        patch(id, { dirty: false, external: undefined })
+        return true
+      } catch (err) {
+        onError(t('editor.saveFailed', { error: errorMessage(err) }))
+        return false
+      } finally {
+        savingOffice.current.delete(id)
+      }
+    }
+    // ほかのビューアで開いたファイルは書かない（空の内容で上書きして壊さない）
+    if (file.viewer) return false
     draftFlushers.get(id)?.()
     const content = drafts.current.get(id) ?? file.saved
     try {
@@ -325,6 +367,11 @@ export function useOpenFiles({
   }, [patch])
 
   const getDraft = useCallback((id: string) => drafts.current.get(id), [])
+
+  const setViewerDirty = useCallback((id: string, dirty: boolean) => {
+    const file = filesRef.current.find((f) => f.id === id)
+    if (file && file.viewer === 'office' && file.dirty !== dirty) patch(id, { dirty })
+  }, [patch])
 
   const requestCloseMany = useCallback((ids: readonly string[]) => {
     const targets = filesRef.current.filter((f) => ids.includes(f.id))
@@ -385,40 +432,57 @@ export function useOpenFiles({
   }, [])
 
   /*
-   * 外部の変更（Agent の書き換えなど）。
+   * 外部の変更（Agent の書き換えなど）を確かめ直す。
    * 未保存の変更が無ければ黙って取り込み、あれば上書きせずに知らせる。
    * 自分の保存でも通知は来るが、中身が saved と同じなので何もしない。
+   * 読んでいる途中に次の変更が来たら読み直し、前の読み込みの答えは捨てる（externalChange.ts）
    */
+  const recheck = useCallback((id: string) => {
+    const file = filesRef.current.find((f) => f.id === id)
+    if (!file) return
+    // 自分が書いている最中の知らせは見ない（書いた内容は OfficeViewer が持っている）
+    if (file.viewer === 'office' && savingOffice.current.has(file.id)) return
+    // Office の文書を編集中なら上書きせずに知らせる（「ディスクから読み直す」で取り込む）
+    if (file.viewer === 'office' && file.dirty) {
+      patch(id, { external: 'changed' })
+      return
+    }
+    // ビューアで開いたファイルは編集中の内容が無いので、そのまま開き直す（画像・動画は URL を変えて取り直す）。
+    // 読んでいる途中・読めなかったファイルも、今の内容で読み直す
+    if (file.viewer || file.status !== 'ready') {
+      void load(id, file.path, file.asText)
+      return
+    }
+    const ticket = requests.current.begin(id)
+    void window.ade.invoke('fs:read', file.path).then(
+      (result) => {
+        if (!requests.current.isLatest(id, ticket)) return
+        const current = filesRef.current.find((f) => f.id === id)
+        // 文字として読めなくなった（大きくなりすぎた等）ときは、編集中の内容を消さないよう差し替えない
+        if (!current || result.kind !== 'text') return
+        // プレビューで編集中のまだ写していない分を先に写す（打ってすぐの変更を、取り込みで消さない）
+        draftFlushers.get(id)?.()
+        const decision = decideExternalChange({ saved: current.saved, draft: drafts.current.get(id), external: current.external }, result.content)
+        switch (decision.kind) {
+          case 'none': return
+          case 'restored': patch(id, { external: undefined }); return
+          case 'adopt': patch(id, { saved: result.content, dirty: false, external: undefined }); return
+          case 'conflict': patch(id, { external: 'changed' }); return
+          case 'reload':
+            drafts.current.set(id, result.content)
+            patch(id, (f) => ({ status: 'ready', saved: result.content, dirty: false, message: undefined, external: undefined, revision: f.revision + 1 }))
+        }
+      },
+      // 読めなくなった＝消えた・名前が変わった。内容は残し、保存すれば作り直せる
+      () => { if (requests.current.isLatest(id, ticket)) patch(id, { external: 'deleted' }) }
+    )
+  }, [load, patch])
+
   useEffect(() => {
     return window.ade.on('fs:changed', (event: FsChangedEvent) => {
-      const changed = new Set(event.paths)
-      for (const file of filesRef.current) {
-        if (file.root !== root || file.status === 'loading' || !changed.has(file.path)) continue
-        // ビューアで開いたファイルは編集中の内容が無いので、そのまま開き直す（画像・動画は URL を変えて取り直す）
-        if (file.viewer) {
-          void load(file.id, file.path, file.asText)
-          continue
-        }
-        void window.ade.invoke('fs:read', file.path).then(
-          (result) => {
-            const current = filesRef.current.find((f) => f.id === file.id)
-            if (!current || result.kind !== 'text' || result.content === current.saved) {
-              if (current?.external === 'deleted' && result.kind === 'text') patch(file.id, { external: undefined })
-              return
-            }
-            if (current.dirty) {
-              patch(file.id, { external: 'changed' })
-            } else {
-              drafts.current.set(file.id, result.content)
-              patch(file.id, (f) => ({ status: 'ready', saved: result.content, message: undefined, external: undefined, revision: f.revision + 1 }))
-            }
-          },
-          // 読めなくなった＝消えた・名前が変わった。内容は残し、保存すれば作り直せる
-          () => patch(file.id, { external: 'deleted' })
-        )
-      }
+      for (const file of filesToRecheck(filesRef.current, root, event)) recheck(file.id)
     })
-  }, [root, patch, load])
+  }, [root, recheck])
 
   /*
    * ⌘W。メニューはターミナルを閉じる指示を出すが、TerminalPane はターミナルにフォーカスが無いとき
@@ -426,6 +490,47 @@ export function useOpenFiles({
    * フォーカスがあれば、それを止めてファイルのタブを閉じる（変更ありなら確認を出す）。
    */
   const activeId = activeFile?.id ?? null
+
+  /*
+   * 前に出ているタブは、ディスクの日時と大きさを時々見て、変わっていれば確かめ直す。
+   * 監視の通知が来ない場合（.ferret など監視の外・監視が止まった・取りこぼし）でも、開き直さずに最新になる。
+   * タブを前に出したとき・ウィンドウに戻ったときはすぐ見る
+   */
+  useEffect(() => {
+    if (!activeId) return
+    let stopped = false
+    let busy = false
+    const check = async () => {
+      if (busy || document.visibilityState === 'hidden') return
+      const file = filesRef.current.find((f) => f.id === activeId)
+      if (!file || file.status !== 'ready' || file.viewer) return
+      busy = true
+      try {
+        const info = await window.ade.invoke('fs:inspect', file.path)
+        if (stopped) return
+        const now = { mtimeMs: info.mtimeMs, size: info.size }
+        if (!diskStampChanged(stamps.current.get(activeId), now)) return
+        stamps.current.set(activeId, now)
+        recheck(activeId)
+      } catch {
+        // 消えた・読めない（想定内）。変わったときに1回だけ確かめ直して、消えたことを知らせる
+        if (stopped || stamps.current.get(activeId) === MISSING_STAMP) return
+        stamps.current.set(activeId, MISSING_STAMP)
+        recheck(activeId)
+      } finally {
+        busy = false
+      }
+    }
+    void check()
+    const timer = window.setInterval(() => void check(), ACTIVE_FILE_POLL_MS)
+    const onFocus = () => void check()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [activeId, recheck])
   useEffect(() => {
     if (!activeId) return
     const onCloseRequest = (event: Event) => {
@@ -458,7 +563,26 @@ export function useOpenFiles({
       draftFlushers.get(file.id)?.()
       return { id: file.id, root: file.root, path: file.path, content: drafts.current.get(file.id) ?? file.saved }
     })
-    void window.ade.invoke('editor:quitSave', requestId, entries.map(({ root: r, path, content }) => ({ root: r, path, content }))).then((outcomes) => {
+    // Office の文書は、ここで書いてから「書き終えた」とだけ返す（中身は main へ送らない）
+    const offices = filesRef.current.filter((f) => f.dirty && f.status === 'ready' && f.viewer === 'office')
+    void Promise.all(offices.map(async (file) => {
+      const saver = officeSaverFor(file.id)
+      if (!saver) return null
+      savingOffice.current.add(file.id)
+      try {
+        await saver()
+        patch(file.id, { dirty: false, external: undefined })
+        return { root: file.root, path: file.path, saved: true as const }
+      } catch (err) {
+        onError(t('editor.saveFailed', { error: errorMessage(err) }))
+        return null
+      } finally {
+        savingOffice.current.delete(file.id)
+      }
+    })).then((saved) => window.ade.invoke('editor:quitSave', requestId, [
+      ...entries.map(({ root: r, path, content }) => ({ root: r, path, content })),
+      ...saved.filter((x): x is { root: string; path: string; saved: true } => x !== null)
+    ])).then((outcomes) => {
       for (const outcome of outcomes) {
         if (!outcome.ok) continue
         const entry = entries.find((e) => e.root === outcome.root && e.path === outcome.path)
@@ -498,10 +622,13 @@ export function useOpenFiles({
       .flatMap((f) => { const path = movedPath(f.path, from, to); return path ? [{ file: f, path, id: fileId(root, path) }] : [] })
     if (moves.length === 0) return
     for (const { file, id } of moves) {
+      forgetOffice(file.id)
       // 編集中の内容は新しい id へ移す。Monaco のモデルは id ごとなので、古いものは捨てて新しい id で作り直させる
       const draft = drafts.current.get(file.id)
       drafts.current.delete(file.id)
       if (draft !== undefined) drafts.current.set(id, draft)
+      requests.current.forget(file.id)
+      stamps.current.delete(file.id)
       modelDisposer?.(file.id)
     }
     const byId = new Map(moves.map((m) => [m.file.id, m]))
@@ -521,7 +648,7 @@ export function useOpenFiles({
   const pendingClose = allFiles.find((f) => f.id === pendingCloseId) ?? null
 
   return {
-    files, activeFile, open, openSource, previewHtml, requestClose, requestCloseMany, save, setDraft, getDraft, togglePreview, openPreviewInBrowser, currentText,
+    files, activeFile, open, openSource, previewHtml, requestClose, requestCloseMany, save, setDraft, setViewerDirty, getDraft, togglePreview, openPreviewInBrowser, currentText,
     reloadFromDisk, keepMine, openAsText, reveal, openExternally, pendingClose, resolveClose, dirtyPaths, followRename, closeDeleted
   }
 }

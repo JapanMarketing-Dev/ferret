@@ -13,7 +13,7 @@ import { delay } from '@shared/delay'
 import { formatDateTime, formatTime, t } from '@shared/i18n'
 import { errorKind, flow, reportHandled } from '@shared/report'
 import { currentSettings, updateSettings } from '../settings'
-import { claudeChromeAccounts, listAgentAccounts, selectAgentAccount } from '../accounts'
+import { claudeChromeAccounts, defaultLoginName, listAgentAccounts, selectAgentAccount } from '../accounts'
 import { getAccountUsage } from '../usage/service'
 import { listAgentOptions } from '../agentDetection'
 import type { TerminalManager } from '../terminal'
@@ -115,8 +115,15 @@ let returnTimer: NodeJS.Timeout | null = null
 let nearLimitTimer: NodeJS.Timeout | null = null
 /** 上限の手前の引き継ぎを始めたタブ（同じタブで繰り返さない） */
 const nearLimitStarted = new Set<string>()
-/** 上限の手前の確かめの間隔 */
-const NEAR_LIMIT_CHECK_MS = 60 * 1000
+/**
+ * 上限の手前の確かめの予備の間隔。選択中のアカウントの使用量が変わったとき（onUsageChanged）にも確かめるので、
+ * これは選択中でないアカウントで動いているタブのため。以前は 60 秒ごとに全アカウントの使用量を外へ取りに行っていた
+ */
+const NEAR_LIMIT_CHECK_MS = 10 * 60 * 1000
+/** 上限の手前の確かめで、選択中でないアカウントの使用量をこれより新しければ取り直さない */
+const NEAR_LIMIT_INACTIVE_MAX_AGE_MS = 10 * 60 * 1000
+/** 上限の手前の確かめが走っている（重ねない） */
+let nearLimitChecking = false
 /** 作業中のタブが手を空けるのを待つ上限。過ぎたら Ferret が分かる範囲を書いて引き継ぐ（上限で止まるより先に） */
 const NEAR_LIMIT_IDLE_WAIT_MS = 10 * 60 * 1000
 
@@ -150,9 +157,10 @@ function label(agent: TuiAgent): string {
 }
 
 function accountLabel(agent: AccountAgent, accountId: string | null): string {
-  if (accountId === null) return t('accounts.systemDefault')
+  // null はいつものログイン。「システムの既定」ではなく、そのアカウントの名前（メール）で知らせる
+  if (accountId === null) return defaultLoginName(agent)
   const account = currentSettings().agentAccounts?.[agent].accounts.find((a) => a.id === accountId)
-  return account ? accountDisplayName(account) : t('accounts.systemDefault')
+  return account ? accountDisplayName(account) : defaultLoginName(agent)
 }
 
 function notify(notice: Omit<FailoverNotice, 'at'>): void {
@@ -505,6 +513,8 @@ async function waitIdleForSwitch(id: string, agent: AccountAgent, accountId: str
 export function onUsageChanged(state: UsageState): void {
   const prefs = failoverPrefs()
   if (!prefs.enabled) return
+  // 選択中のアカウントの使用量が新しくなったら、動いているタブが上限の手前かも確かめる（定期の確かめを待たない）
+  if (prefs.handoffPercent < 100) void checkNearLimit().catch((err: unknown) => reportHandled(errorKind(err), { area: 'accounts', op: 'near limit' }))
   const local = localAgents()
   for (const agent of ['claude', 'codex'] as const) {
     // ローカルのモデルで動くなら、アカウントの使用量でアカウントを切り替えない
@@ -605,7 +615,17 @@ async function returnTabsToChrome(prefs: LimitFailoverPrefs): Promise<void> {
  */
 export async function checkNearLimit(): Promise<void> {
   const prefs = failoverPrefs()
-  if (!prefs.enabled || !terminals || prefs.handoffPercent >= 100) return
+  if (!prefs.enabled || !terminals || prefs.handoffPercent >= 100 || nearLimitChecking) return
+  nearLimitChecking = true
+  try {
+    await checkNearLimitNow(prefs)
+  } finally {
+    nearLimitChecking = false
+  }
+}
+
+async function checkNearLimitNow(prefs: LimitFailoverPrefs): Promise<void> {
+  if (!terminals) return
   const tabs: RunningTab[] = []
   for (const info of terminals.list()) {
     const state = await terminals.agentState(info.id).catch(() => null)
@@ -617,7 +637,7 @@ export async function checkNearLimit(): Promise<void> {
   const used = new Map<string, number | null>()
   for (const agent of ['claude', 'codex'] as const) {
     if (!tabs.some((tab) => tab.agent === agent)) continue
-    for (const row of await getAccountUsage(agent).catch(() => [])) used.set(limitKey({ agent, accountId: row.accountId }), maxUsedPercent(row.rateLimits))
+    for (const row of await getAccountUsage(agent, false, NEAR_LIMIT_INACTIVE_MAX_AGE_MS).catch(() => [])) used.set(limitKey({ agent, accountId: row.accountId }), maxUsedPercent(row.rateLimits))
   }
   const due = nearLimitTabs(tabs, (agent, accountId) => used.get(limitKey({ agent, accountId })) ?? null, prefs.handoffPercent, nearLimitStarted, busy, localAgents())
   for (const tab of due) {

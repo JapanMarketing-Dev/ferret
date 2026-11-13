@@ -52,7 +52,7 @@ export function defaultLocaleEnv(env: Record<string, string>, platform: NodeJS.P
 }
 
 /**
- * PATH の先頭にフォルダを足す（Agent どうしの依頼の CLI。src/main/agentMail.ts）。
+ * PATH の先頭にフォルダを足す（内蔵ブラウザの ferret-browser の CLI。src/main/browserAutomation.ts）。
  * Codex は shell_environment_policy.inherit = "core" などで独自の環境変数をコマンドに渡さないことがあるが、PATH は渡す。
  * Windows は大文字小文字の違う Path を1つにまとめて書く
  */

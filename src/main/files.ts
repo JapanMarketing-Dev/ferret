@@ -13,6 +13,7 @@ import {
   hasBinaryExtension,
   isBinaryBuffer,
   isCollapsedByDefault,
+  isSameOrUnder,
   shouldIncludePath,
   type FsChangedEvent,
   type FsEntry,
@@ -22,11 +23,12 @@ import {
   type FsSearchResult,
   type FsWriteResult
 } from '@shared/files'
-import { rankQuickOpenFiles } from '@shared/quickOpen'
+import { prepareQuickOpenFiles, rankPreparedQuickOpenFiles, type PreparedQuickOpenFiles } from '@shared/quickOpen'
 import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
 import { SLOW_OP_MS, noteSlowOp, reportHandled } from '@shared/report'
 import { progressChangedIds } from '@shared/findingProgress'
+import { isVisualReviewPath } from '@shared/visualReview'
 
 /**
  * ファイルエディタの読み書き（fs:list / fs:read / fs:write / fs:files / fs:search / fs:changed）。
@@ -135,13 +137,15 @@ async function openListedDir(root: string, dir: string): Promise<{ path: string;
   }
 }
 
-export async function listDirectory(root: string, relDir: string): Promise<FsEntry[]> {
+export async function listDirectory(root: string, relDir: string,
+  /** 単体テスト用: 読む上限を小さくする（5000 個のファイルを作らずに上限の動きを確かめる） */
+  limit = MAX_DIRECTORY_ENTRIES): Promise<FsEntry[]> {
   const dir = await resolveInside(root, relDir)
   const listed = await openListedDir(root, dir)
   // 上限まで読む（macOS・Linux は opendir で少しずつ。Windows は readdir。dirEntries.ts・FERRET-1Q）
   const entries: FsEntry[] = []
   try {
-    const { entries: dirents } = await readDirEntries(listed.path, MAX_DIRECTORY_ENTRIES)
+    const { entries: dirents } = await readDirEntries(listed.path, limit)
     for (const dirent of dirents) {
       const absolute = join(dir, dirent.name)
       let kind: FsEntry['kind'] | null = dirent.isDirectory() ? 'directory' : dirent.isFile() ? 'file' : null
@@ -269,19 +273,42 @@ export async function findRg(root: string): Promise<string | null> {
   return path
 }
 
+/**
+ * 一覧（クイックオープン・名前の検索）に出さないフォルダ（プロジェクトの根からの相対）。
+ * Agent が作る worktree はリポジトリの丸ごとの写しなので、入れると同じ名前のファイルが worktree の数だけ並び、
+ * 上限もそれで埋まって目当てのファイルが出なくなる（.gitignore に書いていないプロジェクトでも外す）。
+ * 変更の監視（shouldIncludePath）からは外さない（worktree の中のファイルを開いて編集することはある）
+ */
+const LISTING_EXCLUDED_ROOT_DIRS = ['.claude/worktrees']
+
+/** 一覧から外すか（`/` 区切りの相対パス） */
+export function isExcludedFromListing(rel: string): boolean {
+  return !shouldIncludePath(rel) || LISTING_EXCLUDED_ROOT_DIRS.some((dir) => isSameOrUnder(rel, dir))
+}
+
 /** 除外するディレクトリを rg のグロブにする */
-const RG_EXCLUDES = ['.git', 'node_modules', '.ferret', '.ade-movie'].flatMap((dir) => ['--glob', `!**/${dir}/**`])
+const RG_EXCLUDES = [
+  ...['.git', 'node_modules', '.ferret', '.ade-movie'].flatMap((dir) => ['--glob', `!**/${dir}/**`]),
+  ...LISTING_EXCLUDED_ROOT_DIRS.flatMap((dir) => ['--glob', `!/${dir}/**`])
+]
 
 /**
  * rg を走らせ、1行ごとに onLine を呼ぶ。onLine が false を返したら打ち切る。
- * 戻り値は打ち切ったか。
+ * timeoutMs を過ぎても終わらなければ（ネットワークのドライブ・巨大なフォルダ）止めて、そこまでで返す。
+ * 戻り値は打ち切ったか（上限・時間切れ）。
  */
-function runRg(rg: string, cwd: string, args: string[], onLine: (line: string) => boolean): Promise<boolean> {
+function runRg(rg: string, cwd: string, args: string[], onLine: (line: string) => boolean, timeoutMs = Infinity): Promise<boolean> {
   return new Promise((resolvePromise, reject) => {
     // Windows で検索のたびにコンソールの窓が一瞬出ないようにする
     const child = spawn(rg, args, { cwd, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
     let buffer = ''
     let stopped = false
+    const stop = () => {
+      if (stopped) return
+      stopped = true
+      child.kill()
+    }
+    const timer = Number.isFinite(timeoutMs) ? setTimeout(stop, timeoutMs) : null
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => {
       if (stopped) return
@@ -291,29 +318,63 @@ function runRg(rg: string, cwd: string, args: string[], onLine: (line: string) =
         const line = buffer.slice(0, newline)
         buffer = buffer.slice(newline + 1)
         if (line && !onLine(line)) {
-          stopped = true
-          child.kill()
+          stop()
           return
         }
         newline = buffer.indexOf('\n')
       }
     })
-    child.on('error', reject)
+    child.on('error', (err) => {
+      if (timer) clearTimeout(timer)
+      reject(err)
+    })
     child.on('close', () => {
+      if (timer) clearTimeout(timer)
       if (!stopped && buffer) onLine(buffer)
       resolvePromise(stopped)
     })
   })
 }
 
-// ─── ファイル一覧（クイックオープン）─────────────────────
+// ─── ファイル一覧（クイックオープン・名前の検索）─────────────────────
 
-/** rg が無いときの一覧。重いディレクトリは降りない */
-async function walkFiles(root: string, limit: number): Promise<FsFileList> {
+/**
+ * 索引に持つ上限。⌘P へ送るのは MAX_LISTED_FILES まで（IPC を詰まらせない）だが、
+ * 名前の検索（fs:search）はこの上限まで全部から探す（大きなフォルダで、送った分の外にあるファイルも見つける）
+ */
+export const MAX_INDEXED_FILES = 200_000
+/** 一覧を作るのにかける時間の上限。過ぎたらそこまでで返す（いつまでも「読み込み中」にしない） */
+export const LIST_TIMEOUT_MS = 8000
+
+export interface FileIndex {
+  /** 相対パス。浅い・短いものが先（空の問い合わせで上に出るもの） */
+  files: string[]
+  /** 上限・時間切れで打ち切った */
+  truncated: boolean
+}
+
+interface ListOptions {
+  limit: number
+  timeoutMs: number
+}
+
+/** 浅い・短いものが先、同じなら名前順（rg は並列に歩くので、出てくる順は毎回違う） */
+function compareListed(a: string, b: string): number {
+  return a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)
+}
+
+/**
+ * rg が無いときの一覧。重いディレクトリ・worktree は降りない。シンボリックリンクは辿らない（ループしない）。
+ * 上限か時間切れで止める
+ */
+export async function walkFiles(root: string, { limit, timeoutMs }: ListOptions): Promise<FileIndex> {
+  const deadline = Date.now() + timeoutMs
   const files: string[] = []
   const queue = ['']
-  while (queue.length > 0) {
-    const relDir = queue.shift()!
+  // shift() は長い待ち行列で遅いので、読む位置を進める
+  for (let head = 0; head < queue.length; head++) {
+    if (Date.now() > deadline) return { files, truncated: true }
+    const relDir = queue[head]!
     let dirents
     try {
       dirents = await readdir(join(root, relDir), { withFileTypes: true })
@@ -324,7 +385,7 @@ async function walkFiles(root: string, limit: number): Promise<FsFileList> {
     for (const dirent of dirents) {
       const rel = relDir ? `${relDir}/${dirent.name}` : dirent.name
       if (dirent.isDirectory()) {
-        if (!isCollapsedByDefault(dirent.name)) queue.push(rel)
+        if (!isCollapsedByDefault(dirent.name) && !isExcludedFromListing(rel)) queue.push(rel)
       } else if (dirent.isFile()) {
         files.push(rel)
         if (files.length >= limit) return { files, truncated: true }
@@ -334,30 +395,123 @@ async function walkFiles(root: string, limit: number): Promise<FsFileList> {
   return { files, truncated: false }
 }
 
-export async function listFiles(root: string): Promise<FsFileList> {
+/** プロジェクトのファイルを全部（上限・時間の上限まで）並べる。rg があれば .gitignore に従う */
+export async function buildFileIndex(root: string, options: ListOptions = { limit: MAX_INDEXED_FILES, timeoutMs: LIST_TIMEOUT_MS }): Promise<FileIndex> {
   const realRoot = await realpath(root)
+  const started = Date.now()
   const rg = await findRg(realRoot)
-  if (!rg) return walkFiles(realRoot, MAX_LISTED_FILES)
-  const files: string[] = []
-  // .gitignore に従う。隠しファイル（.env.example など）は出す
-  const truncated = await runRg(rg, realRoot, ['--files', '--hidden', ...RG_EXCLUDES], (line) => {
-    const rel = line.replace(/\\/g, '/').replace(/^\.\//, '')
-    if (shouldIncludePath(rel)) files.push(rel)
-    return files.length < MAX_LISTED_FILES
-  }).catch((err: unknown) => { reportHandled(err, { area: 'files', op: 'list files with rg' }); return null })
-  if (truncated === null) return walkFiles(realRoot, MAX_LISTED_FILES)
-  return { files, truncated }
+  let index: FileIndex | null = null
+  if (rg) {
+    const files: string[] = []
+    // .gitignore に従う。隠しファイル（.env.example など）は出す
+    const truncated = await runRg(rg, realRoot, ['--files', '--hidden', ...RG_EXCLUDES], (line) => {
+      const rel = line.replace(/\\/g, '/').replace(/^\.\//, '')
+      if (!isExcludedFromListing(rel)) files.push(rel)
+      return files.length < options.limit
+    }, options.timeoutMs).catch((err: unknown) => { reportHandled(err, { area: 'files', op: 'list files with rg' }); return null })
+    if (truncated !== null) index = { files, truncated }
+  }
+  index ??= await walkFiles(realRoot, { limit: options.limit, timeoutMs: Math.max(1000, options.timeoutMs - (Date.now() - started)) })
+  index.files.sort(compareListed)
+  // 一覧に時間がかかったら手がかりに残す（巨大なフォルダ・ネットワークのドライブ）
+  noteSlowOp('fs-index', Date.now() - started)
+  return index
+}
+
+/**
+ * プロジェクトごとのファイルの索引。⌘P を開くたび・検索欄で打つたびに歩き直さない。
+ *   - 変更の監視（ProjectWatcher）が知らせたら古いことにする（invalidate）。読み直しは次に使うときに行う
+ *   - 古い索引があれば、読み直しが freshWaitMs で終わらないときは古いものをすぐ返し、読み直しは続けて次から使う
+ *   - 監視が止まっていても古いままにならないよう、maxAgeMs を過ぎたら読み直す
+ *   - 同じプロジェクトの読み直しは1本にまとめる
+ */
+export class FileIndexCache {
+  private entries = new Map<string, { index: FileIndex | null; builtAt: number; stale: boolean; building: Promise<FileIndex> | null }>()
+
+  constructor(
+    private readonly build: (root: string) => Promise<FileIndex> = (root) => buildFileIndex(root),
+    private readonly options: { freshWaitMs: number; maxAgeMs: number; maxRoots: number } = { freshWaitMs: 300, maxAgeMs: 60_000, maxRoots: 4 },
+    private readonly now: () => number = Date.now
+  ) {}
+
+  async get(root: string): Promise<FileIndex> {
+    let entry = this.entries.get(root)
+    if (!entry) {
+      entry = { index: null, builtAt: 0, stale: true, building: null }
+      this.entries.set(root, entry)
+      // 開いたプロジェクトの数だけ持たない（古いものから捨てる）
+      while (this.entries.size > this.options.maxRoots) this.entries.delete(this.entries.keys().next().value!)
+    }
+    const old = entry.index
+    if (old && !entry.stale && this.now() - entry.builtAt < this.options.maxAgeMs) return old
+    const building = entry.building ?? this.rebuild(root, entry)
+    if (!old) return building
+    let timer: NodeJS.Timeout | undefined
+    const waited = new Promise<null>((resolveWait) => { timer = setTimeout(() => resolveWait(null), this.options.freshWaitMs) })
+    try {
+      // 読み直しに失敗したら古いものを使う（失敗は rebuild が残す）
+      return (await Promise.race([building.catch(() => old), waited])) ?? old
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** 古いことにする。root を省くと全部 */
+  invalidate(root?: string): void {
+    for (const [key, entry] of this.entries) if (root === undefined || key === root) entry.stale = true
+  }
+
+  private rebuild(root: string, entry: { index: FileIndex | null; builtAt: number; stale: boolean; building: Promise<FileIndex> | null }): Promise<FileIndex> {
+    // 読み直している間に届いた変更は、次の読み直しで拾う（stale を先に下ろしておく）
+    entry.stale = false
+    const startedAt = this.now()
+    const building = this.build(root).then(
+      (index) => {
+        entry.index = index
+        entry.builtAt = startedAt
+        return index
+      },
+      (err: unknown) => {
+        entry.stale = true
+        if (entry.index) reportHandled(err, { area: 'files', op: 'rebuild file index' })
+        throw err
+      }
+    ).finally(() => { if (entry.building === building) entry.building = null })
+    entry.building = building
+    return building
+  }
+}
+
+const fileIndex = new FileIndexCache()
+
+/** 開いているプロジェクトのファイルが増えた・消えた・名前が変わった（変更の監視から呼ぶ） */
+export function invalidateFileIndex(root?: string): void {
+  fileIndex.invalidate(root)
+}
+
+/** ⌘P の一覧。送るのは MAX_LISTED_FILES まで（それより多いときは truncated。絞り込みは fs:search で全部から） */
+export async function listFiles(root: string): Promise<FsFileList> {
+  const index = await fileIndex.get(root)
+  const truncated = index.truncated || index.files.length > MAX_LISTED_FILES
+  return { files: truncated ? index.files.slice(0, MAX_LISTED_FILES) : index.files, truncated }
 }
 
 // ─── ファイル名の検索 ─────────────────────────────
 
+/** 索引ごとに、絞り込み用の下ごしらえを覚えておく（打鍵のたびに数十万件の小文字を作り直さない） */
+const preparedByIndex = new WeakMap<FileIndex, PreparedQuickOpenFiles>()
+
 export async function searchFiles(root: string, query: string, mode: FsSearchMode): Promise<FsSearchResult> {
-  const realRoot = await realpath(root)
   const trimmed = typeof query === 'string' ? query.trim() : ''
   if (!trimmed) return { mode, files: [], truncated: false }
-  const listing = await listFiles(realRoot)
-  const ranked = rankQuickOpenFiles(trimmed, listing.files, MAX_NAME_MATCHES)
-  return { mode, files: ranked.map((r) => r.path), truncated: listing.truncated || ranked.length >= MAX_NAME_MATCHES }
+  const index = await fileIndex.get(root)
+  let prepared = preparedByIndex.get(index)
+  if (!prepared) {
+    prepared = prepareQuickOpenFiles(index.files)
+    preparedByIndex.set(index, prepared)
+  }
+  const ranked = rankPreparedQuickOpenFiles(trimmed, prepared, MAX_NAME_MATCHES)
+  return { mode, files: ranked.map((r) => r.path), truncated: index.truncated || ranked.length >= MAX_NAME_MATCHES }
 }
 
 // ─── 外部の変更の監視 ─────────────────────────────────────
@@ -381,8 +535,12 @@ const REWATCH_MAX_ATTEMPTS = 5
 export class ProjectWatcher {
   private watcher: FSWatcher | LinuxTreeWatcher | null = null
   private pending = new Set<string>()
+  /** このまとまりで上限を超えて捨てた通知があった */
+  private overflow = false
   /** 進み具合（progress.json）が変わったレビューのID。.ferret/ は変更通知の対象外なので別に拾う */
   private progress = new Set<string>()
+  /** ビジュアルレビューの計画のフォルダ（.ferret/visual-review/）が変わった（@shared/visualReview） */
+  private visualReview = false
   private timer: NodeJS.Timeout | null = null
   /** このまとまりで届いた通知の数と、最初の通知の時刻（ビルドや npm install の通知の嵐を、main の停止の手がかりに残す） */
   private burst = { events: 0, since: 0 }
@@ -391,27 +549,40 @@ export class ProjectWatcher {
 
   constructor(private readonly onChange: (event: FsChangedEvent) => void,
     /** Agent が .ferret/reviews/<id>/progress.json を書いたとき（指摘の進み具合。@shared/findingProgress） */
-    private readonly onReviewProgress?: (ids: string[]) => void) {}
+    private readonly onReviewProgress?: (ids: string[]) => void,
+    /** Agent が .ferret/visual-review/ に計画・画像を書いたとき（ビジュアルレビューのタブを読み直す） */
+    private readonly onVisualReview?: () => void) {}
+
+  /** 監視の通知1件（まとめて flush で知らせる） */
+  private readonly onFsEvent = (_event: string, filename: string | Buffer | null): void => {
+    if (this.burst.events++ === 0) this.burst.since = Date.now()
+    if (!filename) return
+    const rel = String(filename).split(sep).join('/')
+    if (this.onReviewProgress) for (const id of progressChangedIds([rel])) {
+      this.progress.add(id)
+      this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
+    }
+    if (this.onVisualReview && isVisualReviewPath(rel)) {
+      this.visualReview = true
+      this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
+    }
+    if (!shouldIncludePath(rel)) return
+    // 通知の嵐で一覧が膨らみすぎないようにする（renderer へ送る量と、受け取ったあとの読み直しを抑える）。
+    // 捨てた分があることは overflow で知らせる（捨てたパスに開いているファイルがあっても、取り込みを漏らさない）
+    if (this.pending.size >= MAX_PENDING_PATHS && !this.pending.has(rel)) {
+      this.overflow = true
+      return
+    }
+    this.pending.add(rel)
+    this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
+  }
 
   watch(root: string | null, attempt = 0): void {
     this.close()
     this.rewatch.attempts = attempt
     if (!root) return
     try {
-      const onEvent = (_event: string, filename: string | Buffer | null): void => {
-        if (this.burst.events++ === 0) this.burst.since = Date.now()
-        if (!filename) return
-        const rel = String(filename).split(sep).join('/')
-        if (this.onReviewProgress) for (const id of progressChangedIds([rel])) {
-          this.progress.add(id)
-          this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
-        }
-        if (!shouldIncludePath(rel)) return
-        // 通知の嵐で一覧が膨らみすぎないようにする（renderer へ送る量と、受け取ったあとの読み直しを抑える）
-        if (this.pending.size >= MAX_PENDING_PATHS) return
-        this.pending.add(rel)
-        this.timer ??= setTimeout(() => this.flush(), CHANGE_BATCH_MS)
-      }
+      const onEvent = this.onFsEvent
       // Linux の recursive は node_modules まで全部に inotify を張るので、対象のフォルダにだけ張る（linuxTreeWatch.ts）
       this.watcher = process.platform === 'linux'
         ? new LinuxTreeWatcher(root, onEvent, (err) => reportHandled(err, { area: 'files', op: 'watch project folder (limit)' }))
@@ -442,7 +613,9 @@ export class ProjectWatcher {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
     this.pending.clear()
+    this.overflow = false
     this.progress.clear()
+    this.visualReview = false
   }
 
   private flush(): void {
@@ -455,9 +628,15 @@ export class ProjectWatcher {
       this.progress.clear()
       this.onReviewProgress?.(ids)
     }
-    if (this.pending.size === 0) return
+    if (this.visualReview) {
+      this.visualReview = false
+      this.onVisualReview?.()
+    }
+    if (this.pending.size === 0 && !this.overflow) return
     const paths = [...this.pending]
+    const overflow = this.overflow
     this.pending.clear()
-    this.onChange({ paths })
+    this.overflow = false
+    this.onChange(overflow ? { paths, overflow } : { paths })
   }
 }

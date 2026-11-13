@@ -11,7 +11,7 @@ import OfficeViewer from './OfficeViewer'
  *   画像 … 拡大・縮小（ボタン・⌘/Ctrl + ホイール）。透明な部分は市松模様
  *   動画・音声 … そのまま再生（ade-media://project/ が Range に答えるので seek できる）
  *   PDF … 内蔵の PDF ビューア
- *   Word・Excel・PowerPoint … HTML にしたプレビュー（OfficeViewer.tsx）
+ *   Word・Excel・PowerPoint … HTML にしたプレビューと、セル・文字の編集（OfficeViewer.tsx。古い形式は LibreOffice で変えて開く）
  *   その他 … 大きさと先頭の16進数だけ（文字化けした内容を Monaco に出さない・保存で壊さない）
  * 中身は main が ade-media://project/ で返す（プロジェクトの外・リンク・パイプは src/main/projectMedia.ts が断る）。
  * 表示に失敗したら（対応していない形式など）、大きさと16進数の表示に切り替える。
@@ -25,6 +25,10 @@ interface FileViewerProps {
   message?: string
   /** ディスクの内容が変わるたびに増える。URL に付けて取り直させる */
   revision: number
+  /** 開いているタブの識別子（Office の文書の保存の口を結び付ける） */
+  fileId?: string
+  /** Office の文書を編集して、保存していない直しができた・無くなった */
+  onDirty?: (dirty: boolean) => void
 }
 
 export default function FileViewer(props: FileViewerProps) {
@@ -35,7 +39,15 @@ export default function FileViewer(props: FileViewerProps) {
   const url = projectMediaUrl(props.path, props.revision)
 
   if (props.viewer === 'binary' || failed) return <BinaryInfo info={props.info} message={failure ?? props.message} failed={failed && !failure} />
-  if (props.viewer === 'office') return <OfficeViewer path={props.path} name={props.name} info={props.info} revision={props.revision} onError={(message) => { setFailure(message); setFailed(true) }} />
+  if (props.viewer === 'office') {
+    return (
+      <OfficeViewer
+        fileId={props.fileId ?? props.path} path={props.path} name={props.name} info={props.info} revision={props.revision}
+        onError={(message) => { setFailure(message); setFailed(true); props.onDirty?.(false) }}
+        onDirty={(dirty) => props.onDirty?.(dirty)}
+      />
+    )
+  }
   if (props.viewer === 'image') return <ImageView url={url} name={props.name} info={props.info} onError={() => setFailed(true)} />
   if (props.viewer === 'pdf') return <PdfView url={url} name={props.name} />
   return (

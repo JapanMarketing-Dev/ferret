@@ -72,3 +72,44 @@ describe('前から使っているアカウントは決して外さない（2026
     expect(duplicateAccountIds([old('a', 'x@example.com', 1), acc('b', 'y@example.com', 2)], 'b', system('z@example.com'))).toEqual([])
   })
 })
+
+import { defaultLoginLabel } from '../../src/shared/accounts'
+import { setLocale } from '../../src/shared/i18n'
+import { sanitizeAgentAccounts } from '../../src/main/accounts/sanitize'
+
+describe('いつものログインの表示名（「システムの既定」という別枠を出さない）', () => {
+  it('ログインしていればメールの名前で出す（前後の空白は外す）', () => {
+    expect(defaultLoginLabel('claude', { signedIn: true, email: ' taro@example.com ' })).toBe('taro@example.com')
+    expect(defaultLoginLabel('codex', { signedIn: true, email: 'hanako@example.com' })).toBe('hanako@example.com')
+  })
+
+  it('メールが分からない・未ログイン・まだ読んでいないときは「いつもの … のログイン」。「システムの既定」とは出さない', () => {
+    setLocale('ja')
+    try {
+      for (const identity of [{ signedIn: true, email: null }, { signedIn: true, email: '  ' }, { signedIn: false, email: 'old@example.com' }, null, undefined]) {
+        const label = defaultLoginLabel('claude', identity)
+        expect(label).toBe('いつもの Claude Code のログイン')
+        expect(label).not.toContain('システムの既定')
+      }
+      expect(defaultLoginLabel('codex', null)).toBe('いつもの Codex のログイン')
+    } finally {
+      setLocale('en')
+    }
+    expect(defaultLoginLabel('codex', null)).toBe('Your usual Codex login')
+  })
+})
+
+describe('前の版で「システムの既定」を選んでいた保存値', () => {
+  const account = { id: '11111111-2222-4333-8444-555555555555', label: '', email: 'b@example.com', workspaceLabel: null, createdAt: 1, updatedAt: 1, lastAuthenticatedAt: 1 }
+
+  it('null はそのまま残り、いつものログインの行（同じアカウント）を指す。追加したアカウントへ勝手に切り替えない', () => {
+    const next = sanitizeAgentAccounts({ claude: { accounts: [account], activeAccountId: null }, codex: { accounts: [], activeAccountId: null } })
+    expect(next.claude.activeAccountId).toBeNull()
+    expect(next.codex.activeAccountId).toBeNull()
+  })
+
+  it('消えたアカウントを指していれば、いつものログインに戻す。残っているアカウントの選択はそのまま', () => {
+    expect(sanitizeAgentAccounts({ claude: { accounts: [account], activeAccountId: '99999999-2222-4333-8444-555555555555' } }).claude.activeAccountId).toBeNull()
+    expect(sanitizeAgentAccounts({ claude: { accounts: [account], activeAccountId: account.id } }).claude.activeAccountId).toBe(account.id)
+  })
+})

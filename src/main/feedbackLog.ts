@@ -5,11 +5,9 @@ import {
   FEEDBACK_EVENTS_FILE,
   FEEDBACK_IMAGES_DIR,
   FEEDBACK_LOG_FILE,
-  FEEDBACK_LOG_PATH,
   MAX_FEEDBACK_IMAGE_BYTES,
   MAX_FINDING_IMAGES,
   PLAYBOOK_FILE,
-  PLAYBOOK_PATH,
   afterImageName,
   findingImageName,
   findingSentEvent,
@@ -212,21 +210,3 @@ export async function seedPlaybook(folder: string, orchestraName: string): Promi
   })
 }
 
-/**
- * 画面から開く前に、そのファイルがあるようにする（記録はまだ何も無ければ空の log.md、プレイブックは雛形）。
- * オーケストラのフォルダからの相対パスを返す
- */
-export async function ensureFeedbackFile(folder: string, orchestraName: string, which: 'log' | 'playbook'): Promise<string> {
-  if (which === 'playbook') {
-    await seedPlaybook(folder, orchestraName)
-    return PLAYBOOK_PATH
-  }
-  await enqueue(folder, async () => {
-    const dir = await feedbackDir(folder)
-    const path = join(dir, FEEDBACK_LOG_FILE)
-    if (await isLink(path)) throw new SubagentLinkError(path)
-    try { await lstat(path); return } catch { /* 無ければ作る（想定内） */ }
-    await writeAtomic(dir, FEEDBACK_LOG_FILE, renderFeedbackLog(foldFeedback(await readEventsIn(dir)), orchestraName))
-  })
-  return FEEDBACK_LOG_PATH
-}

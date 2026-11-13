@@ -41,13 +41,12 @@ export interface RecordingOptions {
    * マイクとは別の系統で録り、文字起こしでは話者「相手」になる
    */
   captureSystemAudio: boolean
-  /** 検証用（ADE_E2E=1 のときだけ）。OS の許可なしで相手の声の経路を通す。本番は常に未指定 */
+  /** 検証用（ADE_SYNTHETIC_MIC=1 の起動）。OS の許可なしで相手の声の経路を通す。本番は常に未指定 */
   syntheticSystemAudio?: import('@shared/systemAudio').SyntheticSystemAudio
   /**
    * 検証用。マイクの代わりに合成音を使う。
    * 実機のマイクを開かないので、OSの権限ダイアログが出ない。本番は常に false。
    */
-  syntheticMicWavBase64?: string
   syntheticMic?: boolean
   /** マイクの入力デバイス。未指定なら既定 */
   micDeviceId?: string

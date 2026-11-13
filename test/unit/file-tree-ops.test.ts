@@ -154,15 +154,18 @@ describe('ファイルツリーの一式の操作（src/main/fileOps.ts）', () 
     })
 
     it(`数が多すぎる（${MAX_COPY_ENTRIES} を超える）ときは何も写さずに知らせる`, async () => {
+      // 1万個を作ると遅いので、上限を小さくして同じ動きを確かめる（上限の数そのものは下で確かめる）
+      const limit = { entries: 20, bytes: MAX_COPY_BYTES }
       const many = join(root, 'many')
       await mkdir(many)
-      // 一度に全部開くと Windows で EMFILE になるので、500 個ずつ作る
-      for (let start = 0; start < MAX_COPY_ENTRIES; start += 500) {
-        await Promise.all(Array.from({ length: Math.min(500, MAX_COPY_ENTRIES - start) }, (_, i) => writeFile(join(many, `f${start + i}`), '')))
-      }
-      await expect(copyEntries(root, ['many'], 'docs')).rejects.toThrow('一度にコピーできるのは 10,000 個まで')
+      await Promise.all(Array.from({ length: limit.entries }, (_, i) => writeFile(join(many, `f${i}`), '')))
+      await expect(copyEntries(root, ['many'], 'docs', limit)).rejects.toThrow('一度にコピーできるのは 10,000 個まで')
       expect(await readdir(join(root, 'docs'))).toEqual([])
-    }, 60_000)
+      // 上限ちょうど（フォルダ自身を含めて20個）なら写す
+      await rm(join(many, 'f0'))
+      await expect(copyEntries(root, ['many'], 'docs', limit)).resolves.toEqual([{ from: 'many', to: 'docs/many' }])
+      expect(MAX_COPY_ENTRIES).toBe(10_000)
+    })
 
     it('大きすぎる（1 GB を超える）ときは何も写さずに知らせる', async () => {
       const handle = await open(join(root, 'huge.bin'), 'w')

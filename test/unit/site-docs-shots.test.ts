@@ -4,7 +4,7 @@ import { basename, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
- * docs のスクリーンショット（tools/docs/build-docs.mjs の shot()。e2e/docs-shots.spec.ts で撮る）。
+ * docs のスクリーンショット（tools/docs/build-docs.mjs の shot()。撮り直すときは人が撮って置く）。
  * 書き出した全言語のページに「準備中」の枠が残っておらず、参照する画像が実在して軽いこと
  */
 const DOCS = resolve(__dirname, '../../site/docs')

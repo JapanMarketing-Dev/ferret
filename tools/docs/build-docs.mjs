@@ -38,7 +38,7 @@ const code = (s) => `<pre><code>${s}</code></pre>`
  */
 const clip = (name, caption) => `{{clip:${name}|${caption}}}`
 /**
- * 画面のスクリーンショット。site/docs/assets/<name>.png を使う（e2e/docs-shots.spec.ts で撮り直せる）。
+ * 画面のスクリーンショット。site/docs/assets/<name>.png を使う（撮り直すときは人が撮って置く）。
  * 本文には {{shot:<name>|<説明>}} の札で書き、書き出すときに開く（説明は訳す。画像が無ければ何も出さない）
  */
 const shot = (name, caption) => `{{shot:${name}|${caption}}}`

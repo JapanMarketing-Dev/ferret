@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifySystemAudioError, syntheticSystemAudio, systemAudioFeatures, systemAudioUnsupported } from '../../src/shared/systemAudio'
+import { classifySystemAudioError, systemAudioFeatures, systemAudioUnsupported } from '../../src/shared/systemAudio'
 
 describe('相手の声（PC の音声）の OS ごとの条件', () => {
   it('macOS は 14.2 から。それより前は試さずに案内する', () => {
@@ -39,15 +39,5 @@ describe('相手の声（PC の音声）の OS ごとの条件', () => {
     expect(classifySystemAudioError('NotReadableError', 'darwin')).toBe('denied')
     expect(classifySystemAudioError('AbortError', 'win32')).toBe('failed')
     expect(classifySystemAudioError('NotFoundError', 'darwin')).toBe('noDevice')
-  })
-
-  it('検証用の口は ADE_E2E=1 のときだけ、決まった値だけを受け付ける', () => {
-    for (const mode of ['page', 'denied', 'no-device', 'ends'] as const) {
-      expect(syntheticSystemAudio(mode, true)).toBe(mode)
-      expect(syntheticSystemAudio(mode, false)).toBeNull()
-    }
-    expect(syntheticSystemAudio(undefined, true)).toBeNull()
-    expect(syntheticSystemAudio('loopback', true)).toBeNull()
-    expect(syntheticSystemAudio('', true)).toBeNull()
   })
 })

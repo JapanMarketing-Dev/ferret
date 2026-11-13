@@ -35,7 +35,6 @@ export const FOOTER_ITEMS = [
   'mic',
   'transcription',
   'resources',
-  'publish',
   'github',
   'page',
   'layout',
@@ -44,6 +43,8 @@ export const FOOTER_ITEMS = [
   'settings'
 ] as const
 export type FooterItemId = (typeof FOOTER_ITEMS)[number]
+/** 削除したフッターの項目（古い設定に残っていても読めるよう、スキーマでは許して読み込みで捨てる） */
+export const REMOVED_FOOTER_ITEMS = ['publish'] as const
 
 interface PanelPlacement {
   dock: Dock
@@ -120,7 +121,7 @@ interface GridTemplate {
  * 狭い窓での最小の大きさ（px）。足りないときは、左右のパネルが先に縮み、中央の列は CENTER_MIN_WIDTH を守る。
  * 窓の最小幅（main の minWidth: 900）で、左右のパネルを両方開き、ターミナルを左右に置いても収まる値にする
  * （SIDE_MIN_WIDTH×2 ＋ 境界 ＋ TERMINAL_MIN_WIDTH ＋ CENTER_MIN_WIDTH ≦ 900）。
- * 値を変えるときは test/unit/layout.test.ts と e2e/layout.spec.ts（900×650 で中央 360px・ターミナル 240px 以上）も一緒に直す。
+ * 値を変えるときは test/unit/layout.test.ts（900×650 で中央 360px・ターミナル 240px 以上）も一緒に直す。
  */
 export const CENTER_MIN_WIDTH = 360
 export const TERMINAL_MIN_WIDTH = 240
@@ -251,9 +252,7 @@ export const FOOTER_PRIORITY: Record<FooterItemId, number> = {
   page: 6,
   resources: 7,
   theme: 8,
-  layout: 9,
-  // 発信（X への投稿の下書き）。押したときに開ければよいので、狭いときは最初に「…」へ移す
-  publish: 10
+  layout: 9
 }
 
 /**

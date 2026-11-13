@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os'
 import { extname, join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { chromium } from '@playwright/test'
+import { chromium } from 'playwright-core'
 import { posterStamp } from './poster-stamp.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')

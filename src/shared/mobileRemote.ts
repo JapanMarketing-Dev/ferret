@@ -290,7 +290,6 @@ export type RemoteRoute =
   | { kind: 'screen'; id: string }
   | { kind: 'send'; id: string }
   | { kind: 'key'; id: string }
-  | { kind: 'checklist' }
 
 /** 要求の行き先。知らない道・メソッドの違いは理由付きで返す */
 export function routeRequest(method: string | undefined, rawUrl: string | undefined): RemoteRoute | { error: 404 | 405 } {
@@ -309,7 +308,6 @@ export function routeRequest(method: string | undefined, rawUrl: string | undefi
   if (pathname === '/' || pathname === '/index.html') return want({ kind: 'page' }, 'GET')
   if (pathname === '/app.js' || pathname === '/app.css' || pathname === '/icon.svg') return want({ kind: 'asset', name: pathname.slice(1) as 'app.js' | 'app.css' | 'icon.svg' }, 'GET')
   if (pathname === '/api/terminals') return want({ kind: 'terminals' }, 'GET')
-  if (pathname === '/api/checklist') return want({ kind: 'checklist' }, 'GET')
   const m = /^\/api\/terminals\/([^/]+)\/(screen|send|key)$/.exec(pathname)
   if (m) {
     let id: string

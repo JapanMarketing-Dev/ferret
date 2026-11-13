@@ -30,7 +30,7 @@ export interface XlsxSheet {
   render: () => Promise<string>
 }
 
-interface CellStyle {
+export interface CellStyle {
   numFmt: string
   css: string
   wrap: boolean
@@ -52,7 +52,7 @@ function argb(value: string | undefined): string | null {
   return /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex.toLowerCase()}` : null
 }
 
-function readStyles(source: string | null): CellStyle[] {
+export function readStyles(source: string | null): CellStyle[] {
   if (!source) return []
   const root = documentElement(parseXml(source))
   const custom = new Map<number, string>()
@@ -90,13 +90,13 @@ function readStyles(source: string | null): CellStyle[] {
   })
 }
 
-function readSharedStrings(source: string | null): string[] {
+export function readSharedStrings(source: string | null): string[] {
   if (!source) return []
   return children(documentElement(parseXml(source)), 'si').map(stringItem)
 }
 
 /** <si>・<is> の文字（ふりがな rPh は外す） */
-function stringItem(node: XmlNode): string {
+export function stringItem(node: XmlNode): string {
   const t = child(node, 't')
   if (t) return t.text
   return children(node, 'r').map((r) => child(r, 't')?.text ?? '').join('')
@@ -300,7 +300,15 @@ export interface XlsxLabels {
   truncated: string
 }
 
-export async function renderXlsx(zip: ZipArchive, labels: XlsxLabels): Promise<XlsxSheet[]> {
+export interface WorkbookInfo {
+  sheets: { name: string; hidden: boolean; part: string }[]
+  shared: string[]
+  styles: CellStyle[]
+  date1904: boolean
+}
+
+/** ブックのシートの並び（表のあるシートだけ）・共有文字列・セルの書式 */
+export async function readWorkbook(zip: ZipArchive): Promise<WorkbookInfo> {
   const source = await zip.text(WORKBOOK)
   if (source === null) throw new Error('xl/workbook.xml is missing')
   const workbook = documentElement(parseXml(source))
@@ -311,14 +319,18 @@ export async function renderXlsx(zip: ZipArchive, labels: XlsxLabels): Promise<X
   const stylesPart = relTarget('styles')
   const shared = readSharedStrings(sharedPart ? await zip.text(resolvePartPath(WORKBOOK, sharedPart)) : await zip.text('xl/sharedStrings.xml'))
   const styles = readStyles(stylesPart ? await zip.text(resolvePartPath(WORKBOOK, stylesPart)) : await zip.text('xl/styles.xml'))
-  const sheets: XlsxSheet[] = []
+  const sheets: WorkbookInfo['sheets'] = []
   for (const sheet of descendants(child(workbook, 'sheets'), 'sheet')) {
     const name = attr(sheet, 'name') ?? `Sheet${sheets.length + 1}`
     const rel = rels.get(sheet.attrs['r:id'] ?? attr(sheet, 'id') ?? '')
     // グラフだけのシート（chartsheet）は表が無いので出さない
     if (!rel || rel.external || !rel.type.endsWith('/worksheet')) continue
-    const part = resolvePartPath(WORKBOOK, rel.target)
-    sheets.push({ name, hidden: (attr(sheet, 'state') ?? 'visible') !== 'visible', render: () => renderSheet(zip, part, shared, styles, date1904, name, labels.truncated) })
+    sheets.push({ name, hidden: (attr(sheet, 'state') ?? 'visible') !== 'visible', part: resolvePartPath(WORKBOOK, rel.target) })
   }
-  return sheets
+  return { sheets, shared, styles, date1904 }
+}
+
+export async function renderXlsx(zip: ZipArchive, labels: XlsxLabels): Promise<XlsxSheet[]> {
+  const { sheets, shared, styles, date1904 } = await readWorkbook(zip)
+  return sheets.map(({ name, hidden, part }) => ({ name, hidden, render: () => renderSheet(zip, part, shared, styles, date1904, name, labels.truncated) }))
 }

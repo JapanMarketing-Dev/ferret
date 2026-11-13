@@ -313,7 +313,8 @@ describe('道', () => {
 
   it('API', () => {
     expect(routeRequest('GET', '/api/terminals')).toEqual({ kind: 'terminals' })
-    expect(routeRequest('GET', '/api/checklist')).toEqual({ kind: 'checklist' })
+    // human.md の確認の一覧は 2026-11-13 に無くした
+    expect(routeRequest('GET', '/api/checklist')).toEqual({ error: 404 })
     expect(routeRequest('GET', '/api/terminals/t1/screen')).toEqual({ kind: 'screen', id: 't1' })
     expect(routeRequest('POST', '/api/terminals/t12/send')).toEqual({ kind: 'send', id: 't12' })
     expect(routeRequest('POST', '/api/terminals/t12/key')).toEqual({ kind: 'key', id: 't12' })

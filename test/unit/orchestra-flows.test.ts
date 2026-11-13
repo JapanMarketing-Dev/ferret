@@ -130,7 +130,7 @@ describe('Chrome の書き出しの CSV で同期する（IPC の入口から）
       pageContents: () => contents as never,
       userDataDir: () => root,
       isPackaged: false,
-      isE2E: false,
+     
       notifyChanged: changed,
       exportDirs: () => [downloads, join(root, 'Desktop')]
     })
@@ -158,12 +158,10 @@ describe('Chrome の書き出しの CSV で同期する（IPC の入口から）
   })
 })
 
-describe('ダッシュボードの「Agent に全部書き出してもらう」（通し）', () => {
+describe('依頼の雛形「Agent に全部書き出してもらう」（通し）', () => {
   it('全体から押すと、全プロダクトを並行して集め human.md の表に書く依頼が、全体の Agent に1回で届く', async () => {
     const { sendAgentRequestsTo } = await import('../../src/main/agentRequestSend')
-    const { readFile } = await import('node:fs/promises')
-    const dashboard = await readFile(new URL('../../src/renderer/components/OrchestraDashboard.tsx', import.meta.url), 'utf8')
-    const id = /'agentRequests:send', \['([a-z-]+)'\]/.exec(dashboard)![1]!
+    const id = 'human-checklist'
     const sent: Array<{ id: string; text: string }> = []
     const result = await sendAgentRequestsTo({
       resolveTarget: async (folder) => (folder === '/all-products' ? 'term-top' : null),
