@@ -30,7 +30,7 @@ A system is complete when every value it promises can be obtained by a real user
 
 ## 1. Draft first — within your first few tool calls
 
-Before reading the code in depth, write \`${VALUE_USECASE_DIR}/<id>.json\` with \`"status": "drafting"\`, the \`title\`, a one-line \`purpose\` and the \`values\` you can already name (names only is fine; \`values\` may even be empty). Use what you already know (the request, README / CLAUDE.md / AGENTS.md). Ferret opens the tab as soon as the draft appears.
+Before reading the code in depth, write \`${VALUE_USECASE_DIR}/<id>.json\` with \`"status": "drafting"\`, the \`title\`, a one-line \`purpose\` and the \`values\` you can already name (names only is fine; \`values\` may even be empty). Use what you already know (the request, README / CLAUDE.md / AGENTS.md). Ferret opens the tab as soon as the draft appears. While filling it in, check the past feedback people gave across projects (skill ferret-feedback) and reflect the related and recurring points (e.g. basics they always expect), so they do not have to repeat them.
 
 If a document already exists for this product, update it instead (same file) — do not start over.
 

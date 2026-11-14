@@ -1,6 +1,7 @@
 import { ExternalDropOverlay, useExternalDrop } from '../hooks/useExternalDrop'
 import { readDrop } from '../lib/externalDrop'
-import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
+import { clampMenuTop } from '../lib/menuPosition'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import {
   Archive,
   ArchiveRestore,
@@ -57,7 +58,7 @@ export { toReviewSession, type ReviewSession }
  *   - プロジェクトの行: 色つきのアイコン・太字の名前・触れたときだけ出る … と折りたたみ
  *     （worktree-list/rows/SectionHeader.tsx, ProjectHeaderActions.tsx）
  *   - 子の行を1段（18px）字下げして並べる（worktree-list/rows/indentation.ts の SIDEBAR_TREE_INDENT）
- *   - 右クリック／… のメニュー（repo-header-project-actions.tsx）。名前の変更と登録解除だけ
+ *   - 右クリック／… のメニュー（repo-header-project-actions.tsx）。名前の変更と削除だけ
  * プロジェクトの行はドラッグ＆ドロップ・Alt+↑↓・メニューの「上へ」「下へ」で並べ替えられる（順は settings の projects の並び）。
  * 並び順（手動・動いている順・最近使った順・名前順・追加した順）と「☆ のみ」は見出しの漏斗のパネルで選ぶ。☆ は上にまとめる。
  * 色・グループ・Finder連携は持ち込まない。
@@ -96,8 +97,8 @@ function loadAgentActiveAt(): Record<string, number> {
 
 /** 右クリック／… で開くメニュー。サイドバーの中に収める（右へはみ出すとネイティブのビューに隠れる） */
 const MENU_WIDTH = 188
-/** メニューのおよその高さ（下端で上へ寄せるのに使う） */
-const MENU_HEIGHT = 208
+/** 開く前のメニューの高さの見込み。開いたあとは実際の高さで位置を直す（項目が増えても下が切れないように） */
+const MENU_HEIGHT = 340
 
 /**
  * プロジェクトの行を並べ替えるドラッグの型。外からのファイル（'Files'）・ファイルツリーの行（treeDrag.ts）とは別の型にして、
@@ -186,8 +187,17 @@ function SidebarImpl({
     if (!box) return
     const x = Math.max(4, Math.min(clientX - box.left, box.width - MENU_WIDTH - 4))
     // 下端では上へ寄せる
-    setMenu({ id, x, y: Math.max(4, Math.min(clientY - box.top, box.height - MENU_HEIGHT)) })
+    setMenu({ id, x, y: clampMenuTop(clientY - box.top, MENU_HEIGHT, box.height) })
   }
+  // 開いたら実際の高さで測り直す（見込みより高いと、下の「アーカイブ」「一覧から外す」がサイドバーの外に切れて押せない）
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = menuRef.current
+    const box = rootRef.current?.getBoundingClientRect()
+    if (!menu || !el || !box) return
+    const top = clampMenuTop(menu.y, el.offsetHeight, box.height)
+    if (top !== menu.y) setMenu({ ...menu, y: top })
+  }, [menu])
 
   /** 並び順と「☆ のみ」。☆ はどの並び順でも上にまとめる */
   const [view, setViewState] = useState<ProjectListView>(loadView)
@@ -558,36 +568,27 @@ function SidebarImpl({
                     </div>
                   )}
 
-                  {confirmRemove === project.id && (
-                    <div className="sb-confirm">
-                      <span>{t(isOrchestra(project) ? 'sidebar.removeOrchestraConfirm' : 'sidebar.removeConfirm', { name: project.name })}</span>
-                      <span className="sb-confirm__actions">
-                        <Button variant="ghost" onClick={() => setConfirmRemove(null)}>{t('sidebar.keep')}</Button>
-                        <Button
-                          variant="danger"
-                          onClick={() => {
-                            setConfirmRemove(null)
-                            run(() => window.ade.invoke('project:remove', project.id))
-                          }}
-                          data-testid="sidebar-project-remove-confirm"
-                        >
-                          {t('sidebar.remove')}
-                        </Button>
-                      </span>
-                    </div>
-                  )}
+                  {confirmRemove === project.id && <RemoveConfirm project={project} onKeep={() => setConfirmRemove(null)} onRemove={() => {
+                    setConfirmRemove(null)
+                    run(() => window.ade.invoke('project:remove', project.id))
+                  }} />}
 
                 </div>
               )
             })}
           </div>
         )}
-        <ArchivedProjects projects={projects.projects} onRestore={(project) => setArchived(project, false)} />
+        <ArchivedProjects projects={projects.projects} onRestore={(project) => setArchived(project, false)}
+          onMenu={(project, x, y) => openMenuAt(project.id, x, y)}
+          confirm={(project) => confirmRemove === project.id ? <RemoveConfirm project={project} onKeep={() => setConfirmRemove(null)} onRemove={() => {
+            setConfirmRemove(null)
+            run(() => window.ade.invoke('project:remove', project.id))
+          }} /> : null} />
         </>}
       </div>
 
       {menu && menuProject && (
-        <div className="sb-menu" role="menu" style={{ left: menu.x, top: menu.y, width: MENU_WIDTH }} data-testid="sidebar-project-context">
+        <div ref={menuRef} className="sb-menu" role="menu" style={{ left: menu.x, top: menu.y, width: MENU_WIDTH }} data-testid="sidebar-project-context">
           <button type="button" role="menuitem" onClick={() => { setMenu(null); setRenaming({ id: menuProject.id, name: menuProject.name }) }}>
             <Pencil size={13} strokeWidth={1.75} />{t('sidebar.rename')}
           </button>
@@ -648,6 +649,18 @@ function SidebarImpl({
       />}
     </aside>
   )
+}
+
+/** 「一覧から外す」の確かめ（一覧の行・アーカイブ済みの行の下に出す） */
+function RemoveConfirm({ project, onKeep, onRemove }: { project: Project; onKeep: () => void; onRemove: () => void }) {
+  const t = useT()
+  return <div className="sb-confirm">
+    <span>{t(isOrchestra(project) ? 'sidebar.removeOrchestraConfirm' : 'sidebar.removeConfirm', { name: project.name })}</span>
+    <span className="sb-confirm__actions">
+      <Button variant="ghost" onClick={onKeep}>{t('sidebar.keep')}</Button>
+      <Button variant="danger" onClick={onRemove} data-testid="sidebar-project-remove-confirm">{t('sidebar.remove')}</Button>
+    </span>
+  </div>
 }
 
 /** 空のときの絵。重なったカードに、ペンの輪 */

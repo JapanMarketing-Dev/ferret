@@ -3686,3 +3686,9 @@ button.sb-more__row:hover {
     border-bottom: 1px solid var(--color-border);
   }
 }
+
+/* 窓が低いときもメニューの最後（削除）まで届くよう、サイドバーより高くしない */
+.sb-menu {
+  max-height: calc(100% - 8px);
+  overflow-y: auto;
+}

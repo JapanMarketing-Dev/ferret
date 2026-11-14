@@ -74,6 +74,7 @@ Now read only the code you need to be precise. Rewrite the **same file** as you 
 - Boxes: \`x, y, w, h\` are fractions (0..1) of the image width/height (pixel values work too when \`width\`/\`height\` are given); mark the exact area. \`kind\`: change | add | remove | move.
 - One box per visible change; say concretely what it looks like and does after (\`after\`), and what it is now (\`before\`) when it changes.
 - Put flow/logic changes in \`behaviour\`, what you will not touch in \`outOfScope\`, and anything you are unsure of in \`questions\` (do not guess silently).
+- Before drafting, read the past feedback people gave across projects (skill ferret-feedback) and build the related and recurring points into the plan, so the person does not have to repeat them.
 - If \`.ferret/value-usecases/\` has an approved or done value use-case document for this product (skill ferret-value-usecases), keep the plan consistent with its values and flows; if the request conflicts with them, say so in \`questions\`.
 - Ferret lists files it cannot read (with the reason) at the bottom of the tab; you can also check with \`node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" <file>\`.
 - Several separate requests → several small plans, not one big one. A follow-up on the same screen → revise the existing plan.

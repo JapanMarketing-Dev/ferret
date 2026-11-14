@@ -1099,6 +1099,10 @@ function scheduleProjectsSkillSync(delayMs = 1000): void {
     void import('./projectsSkill')
       .then(({ syncProjectsSkill }) => syncProjectsSkill(app.getVersion(), currentSettings().projects))
       .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync projects skill' }))
+    // 登録したプロジェクトの人の指摘を集める skill「ferret-feedback」（作る前に読ませ、同じ指摘を人に繰り返させない）
+    void import('./feedbackSkill')
+      .then(({ syncFeedbackSkill }) => syncFeedbackSkill(app.getVersion(), currentSettings().projects))
+      .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync feedback skill' }))
   }, delayMs)
   projectsSkillTimer.unref?.()
 }
