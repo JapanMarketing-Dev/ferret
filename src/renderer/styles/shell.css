@@ -3226,8 +3226,191 @@ button.sb-more__row:hover {
 }
 
 /* SSH のプロジェクトで、ファイルツリーの代わりに出す案内 */
-.apd-remote-files {
-  padding: var(--space-6) var(--space-5);
+/* 左サイドバーの「新しいプロジェクト」（NewProjectPanel.tsx）。場所をたどってフォルダを作る */
+.npp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) var(--space-3) var(--space-5);
+}
+
+.npp__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.npp__title {
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.npp__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.npp__caption {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.npp__list,
+.npp__folders {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.npp__folders {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.npp__item,
+.npp__folder {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+
+.npp__folder {
+  min-height: 26px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.npp__item--registered {
+  border-color: var(--color-accent-line);
+  background: var(--color-accent-wash);
+}
+
+.npp__item:hover:not(:disabled),
+.npp__folder:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.npp__item-name {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.npp__item-hint {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--color-text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.npp__row {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.npp__row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.npp__where,
+.npp__connected {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.npp__path,
+.npp__connected-host {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.npp__connected {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+}
+
+.npp__connected-host {
+  direction: ltr;
+}
+
+.npp__connected-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+}
+
+.npp__note,
+.npp__hint {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.npp__name {
+  margin-top: var(--space-2);
+}
+
+.npp__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.npp__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  text-align: left;
+}
+
+.npp__link:hover:not(:disabled) {
+  text-decoration: underline;
 }
 
 /* マイクの選択と［再読み込み］を並べる（フッター・録画ツールバーのマイクのメニュー） */

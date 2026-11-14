@@ -111,6 +111,8 @@ const STATE_PRIORITY: AgentState[] = ['blocked', 'done', 'working', 'idle', 'unk
 interface Pane {
   key: string
   title: string
+  /** SSH のタブ: リモートの tmux のセッションの印（main が決める）。戻すときに渡して同じセッションにつなぎ直す */
+  tmuxToken?: string
   /** Agentの状態（検知結果） */
   state: AgentState
   /** 起動したAgent。素のシェルなら null */
@@ -149,7 +151,8 @@ function isRestorable(pane: Pane): boolean {
 function toRestorePane(pane: Pane, scrollback: string): RestorePane {
   // 作業の途中（実行中・確認待ち）か。戻したばかりでまだ状態が分からないペインは、前の印を引き継ぐ
   const working = pane.launch && (pane.state === 'working' || pane.state === 'blocked' || (pane.state === 'unknown' && pane.continueWork))
-  return { key: pane.key, title: pane.title, launch: pane.launch, cwd: pane.cwd, accountId: pane.accountId ?? null, scrollback, ...(working ? { working: true as const } : {}) }
+  return { key: pane.key, title: pane.title, launch: pane.launch, cwd: pane.cwd, accountId: pane.accountId ?? null, scrollback, ...(working ? { working: true as const } : {}),
+    ...(pane.tmuxToken ? { tmuxToken: pane.tmuxToken } : {}) }
 }
 
 /** 覚えていたペインから、戻すペインを作る（前の画面の文字を書いてから PTY を作る） */
@@ -161,6 +164,7 @@ function paneFromRestore(saved: RestorePane, banner: string, resume: boolean): P
     launch: saved.launch,
     cwd: saved.cwd,
     accountId: saved.accountId,
+    ...(saved.tmuxToken ? { tmuxToken: saved.tmuxToken } : {}),
     resume,
     ...(resume && saved.working ? { continueWork: true } : {}),
     restoreText: restoreReplayText(saved.scrollback, banner),
@@ -405,8 +409,9 @@ function TerminalPaneImpl({
     return ref
   }, [])
 
+  /** 利用者がペイン・タブを閉じた。SSH のタブならリモートの tmux のセッションも終わらせる */
   const releasePane = useCallback((key: string) => {
-    releaseTerminal(key)
+    releaseTerminal(key, { endRemote: true })
     nodesRef.current.delete(key)
     leafRefs.current.delete(key)
     spawnedRef.current.delete(key)
@@ -923,8 +928,9 @@ function TerminalPaneImpl({
         title: pane.customTitle ?? null,
         autoStart: pane.autoStart === true,
         failoverToken: pane.failoverToken ?? null,
-        // 戻したタブ: 前の会話を続け、前と同じアカウントで開く
+        // 戻したタブ: 前の会話を続け、前と同じアカウントで開く。SSH のタブは同じ tmux のセッションにつなぎ直す
         ...(pane.resume ? { resume: true } : {}),
+        ...(pane.tmuxToken ? { tmuxToken: pane.tmuxToken } : {}),
         ...(pane.accountId !== undefined ? { accountId: pane.accountId } : {})
       })
       .then((info) => {
@@ -944,7 +950,7 @@ function TerminalPaneImpl({
         }
         setPanes((prev) =>
           prev[pane.key]
-            ? { ...prev, [pane.key]: { ...prev[pane.key]!, title: info.title, accountId: info.accountId ?? null, restoreText: null, savedScrollback: null } }
+            ? { ...prev, [pane.key]: { ...prev[pane.key]!, title: info.title, accountId: info.accountId ?? null, restoreText: null, savedScrollback: null, ...(info.tmuxToken ? { tmuxToken: info.tmuxToken } : {}) } }
             : prev
         )
         onReadyRef.current?.()
@@ -1145,6 +1151,7 @@ function TerminalPaneImpl({
         cwd: pane.cwd,
         customTitle: pane.customTitle ?? null,
         accountId: pane.accountId ?? null,
+        ...(pane.tmuxToken ? { tmuxToken: pane.tmuxToken } : {}),
         resume: true,
         restoreText: restoreReplayText(text, banner),
         savedScrollback: text,

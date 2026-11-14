@@ -1,6 +1,7 @@
 import { BROWSER_BIN_ENV } from '@shared/browserAutomationEnv'
 import { delay } from '@shared/delay'
-import { sshShellSpec, type SshTarget } from '@shared/sshCommand'
+import { isValidTmuxSessionName, sshShellSpec, tmuxSessionName, type SshTarget } from '@shared/sshCommand'
+import { randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -248,6 +249,8 @@ interface Session {
   info: TerminalSessionInfo
   /** 直近の出力。画面を読み込み直したあと、つなぎ直したタブに流し直す */
   history: TerminalHistory
+  /** SSH のタブ: リモートの tmux のセッション（利用者がタブを閉じたときに終わらせる） */
+  tmux?: { host: string; session: string }
   /** 起動時の Agent の推定の段階（agent/launchPhase.ts） */
   launchAgent?: LaunchAgentPhase
   /**
@@ -498,7 +501,22 @@ export class TerminalManager {
       this.scheduleSpare(size)
       if (claimed) return claimed
     }
-    let shell = sphere.kind === 'ssh' ? sshShellSpec(sphere.target) : resolveShell()
+    // SSH のタブはリモートの tmux のセッションの中で動かす（Ferret や PC を閉じてもリモートの処理は続く）。
+    // 前に開いたタブを戻すときは同じセッションにつなぎ直し、生きていれば Agent やコマンドを打ち込み直さない
+    let tmux: { host: string; session: string; token: string } | null = null
+    let reattach = false
+    if (sphere.kind === 'ssh') {
+      const given = typeof options.tmuxToken === 'string' && /^[A-Za-z0-9]{4,32}$/.test(options.tmuxToken) ? options.tmuxToken : null
+      const token = given ?? randomBytes(6).toString('hex')
+      const session = tmuxSessionName(sphere.target, token)
+      if (isValidTmuxSessionName(session)) {
+        tmux = { host: sphere.target.host, session, token }
+        if (given) reattach = (await this.tmuxExists(sphere.target.host, session)) === true
+      }
+    }
+    let shell = sphere.kind === 'ssh'
+      ? sshShellSpec(sphere.target, tmux ? { session: tmux.session, notice: t('terminal.ssh.noTmux') } : undefined)
+      : resolveShell()
     const startupShell = startupShellForPath(shell.file)
     let extraEnv: Record<string, string> = {}
     let pendingWrite: string | null = null
@@ -526,7 +544,10 @@ export class TerminalManager {
       if (!resolved.ok) throw new UserFacingError(t('terminal.errors.launch', { agent: label, error: t('settings.agents.notFound') }))
       return trustedLaunchLine(resolved.path, argv.slice(1), startupShell)
     }
-    if (options.accountLogin) {
+    if (reattach) {
+      // つなぎ直し: 中では前の Agent・シェルが動いている。何も打ち込まない
+      if (agent) accountId = tabAccountId(agent, options.accountId)
+    } else if (options.accountLogin) {
       const login = buildAccountLoginLaunch(options.accountLogin, startupShell)
       loginTitle = login.title
       deliver(await trusted(login.argv, login.title), login.env)
@@ -616,7 +637,8 @@ export class TerminalManager {
     const launched = options.accountLogin?.agent ?? agent ?? null
     const session: Session = { id, pty, buffer: [], bufferBytes: 0, timer: null,
       tail: '', readiness: new ComposerReadiness(), sending: false,
-      info: { id, pid: pty.pid, cwd, title, agent: launched }, history: new TerminalHistory(), unacked: 0, paused: false }
+      info: { id, pid: pty.pid, cwd, title, agent: launched }, history: new TerminalHistory(), unacked: 0, paused: false,
+      ...(tmux ? { tmux: { host: tmux.host, session: tmux.session } } : {}) }
     this.sessions.set(id, session)
     if (agent) this.failover?.launched(id, agent, options.failoverToken ?? null, accountId)
     this.wirePty(session, pendingWrite, launched)
@@ -624,7 +646,14 @@ export class TerminalManager {
     // 次に開く素のシェルを裏で先に起動しておく（Agent のタブを開いたあとも）
     this.scheduleSpare(size)
 
-    return { id, title, agent: launched, cwd, ...(accountId !== undefined ? { accountId } : {}), ...(resumed ? { resumed } : {}) }
+    return { id, title, agent: launched, cwd, ...(accountId !== undefined ? { accountId } : {}), ...(resumed ? { resumed } : {}),
+      ...(tmux ? { tmuxToken: tmux.token } : {}), ...(reattach ? { reattached: true } : {}) }
+  }
+
+  /** リモートに tmux のセッションがあるか（main/remoteFiles.ts。テストで差し替える） */
+  private async tmuxExists(host: string, session: string): Promise<boolean | null> {
+    const { tmuxSessionExists } = await import('./remoteFiles')
+    return tmuxSessionExists(host, session)
   }
 
   /** PTY の出力と終了をセッションにつなぐ（普通に開いたタブと、先に起動しておいたシェルで共通） */
@@ -950,9 +979,14 @@ export class TerminalManager {
     }
   }
 
-  close(id: string): void {
+  /** endRemote: 利用者がタブを閉じた。SSH のタブならリモートの tmux のセッションも終わらせる（アプリの終了・休ませるときは残す） */
+  close(id: string, options: { endRemote?: boolean } = {}): void {
     const session = this.sessions.get(id)
     if (!session) return
+    if (options.endRemote && session.tmux) {
+      const { host, session: name } = session.tmux
+      void import('./remoteFiles').then(({ killTmuxSession }) => killTmuxSession(host, name)).catch(() => undefined)
+    }
     this.flush(session)
     this.sessions.delete(id)
     this.hidden.delete(id)

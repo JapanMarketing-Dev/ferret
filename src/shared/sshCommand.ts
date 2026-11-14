@@ -41,9 +41,54 @@ function remotePathExpression(path: string): string {
   return shellQuote(path)
 }
 
-/** リモートで実行する1行（cd してからログインシェルに置き換わる） */
-export function remoteShellCommand(path: string): string {
-  return `cd ${remotePathExpression(path)} && exec "$SHELL" -l`
+/** リモートのパスの式（~ を $HOME に置き換え、残りを引用する）。ほかのリモートのコマンドの組み立てにも使う */
+export function remotePathExpr(path: string): string {
+  return remotePathExpression(path)
+}
+
+/**
+ * リモートで実行する1行。
+ *   - tmux を渡さないとき: cd してからログインシェルに置き換わる
+ *   - tmux を渡したとき: リモートに tmux があれば、その名前のセッションにつなぐ（無ければ作る）。
+ *     Ferret や PC を閉じても、回線が切れても、リモートのシェルと Agent は tmux の中で動き続ける。
+ *     tmux が無ければ notice を1行出して、今まで通りログインシェルで動かす
+ */
+export function remoteShellCommand(path: string, tmux?: { session: string; notice: string }): string {
+  const cd = `cd ${remotePathExpression(path)}`
+  if (!tmux) return `${cd} && exec "$SHELL" -l`
+  const session = checkTmuxSessionName(tmux.session)
+  return `${cd} && if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s ${shellQuote(session)}; ` +
+    `else printf '%s\\r\\n' ${shellQuote(tmux.notice.replace(/[\0-\x1f\x7f]/g, ' '))}; exec "$SHELL" -l; fi`
+}
+
+/** tmux のセッション名として受け付けるか（英数字と _ - だけ。tmux は . と : を名前に使えない） */
+export function isValidTmuxSessionName(name: string): boolean {
+  return /^[A-Za-z0-9_-]{1,100}$/.test(name)
+}
+
+function checkTmuxSessionName(name: string): string {
+  if (!isValidTmuxSessionName(name)) throw new Error('invalid tmux session name')
+  return name
+}
+
+/**
+ * タブの tmux セッション名。ferret-<リモートのフォルダ名>-<接続先とフォルダのハッシュ>-<タブの印>。
+ * タブの印（token）はタブを開いたときに決め、タブを戻すときに同じものを渡す（同じセッションにつなぎ直す）
+ */
+export function tmuxSessionName(target: SshTarget, token: string): string {
+  const base = (target.path.split('/').filter((s) => s && s !== '~').pop() ?? 'home').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'home'
+  const safeToken = token.replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 32) || 'tab'
+  return `ferret-${base}-${fnv1a(`${target.host}\n${target.path}`)}-${safeToken}`
+}
+
+/** tmux のセッションがあるかを確かめる1行（終了コード 0 ならある） */
+export function tmuxHasSessionCommand(session: string): string {
+  return `tmux has-session -t ${shellQuote(`=${checkTmuxSessionName(session)}`)}`
+}
+
+/** tmux のセッションを終わらせる1行（タブを Ferret で閉じたとき） */
+export function tmuxKillSessionCommand(session: string): string {
+  return `tmux kill-session -t ${shellQuote(`=${checkTmuxSessionName(session)}`)}`
 }
 
 type SshTargetCheck = { ok: true; target: SshTarget } | { ok: false; reason: 'host' | 'path' }
@@ -57,11 +102,11 @@ export function checkSshTarget(input: { host: string; path: string }): SshTarget
   return { ok: true, target: { host, path } }
 }
 
-/** ターミナルのタブで spawn するもの。確かめていない値は受け付けない */
-export function sshShellSpec(target: SshTarget): { file: string; args: string[] } {
+/** ターミナルのタブで spawn するもの。確かめていない値は受け付けない。tmux を渡すとそのセッションの中で動かす */
+export function sshShellSpec(target: SshTarget, tmux?: { session: string; notice: string }): { file: string; args: string[] } {
   const checked = checkSshTarget(target)
   if (!checked.ok) throw new Error(`invalid ssh target (${checked.reason})`)
-  return { file: 'ssh', args: ['-t', '--', checked.target.host, remoteShellCommand(checked.target.path)] }
+  return { file: 'ssh', args: ['-t', '--', checked.target.host, remoteShellCommand(checked.target.path, tmux)] }
 }
 
 /** 一覧やタイトルに出す名前 */

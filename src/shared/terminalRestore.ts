@@ -54,6 +54,8 @@ export interface RestorePane {
   scrollback: string
   /** 閉じたとき Agent が作業の途中だった（実行中・確認待ち）。開き直したら会話を続け、続きから再開するよう頼む */
   working?: true
+  /** SSH のタブ: リモートの tmux のセッションの印。開き直したら同じセッションにつなぎ直す */
+  tmuxToken?: string
 }
 
 export interface RestoreTab {
@@ -211,9 +213,13 @@ function parsePane(value: unknown): RestorePane | null {
     cwd,
     accountId,
     scrollback: typeof value.scrollback === 'string' ? capScrollback(value.scrollback) : '',
-    ...(value.working === true && launch ? { working: true as const } : {})
+    ...(value.working === true && launch ? { working: true as const } : {}),
+    ...(typeof value.tmuxToken === 'string' && TMUX_TOKEN_PATTERN.test(value.tmuxToken) ? { tmuxToken: value.tmuxToken } : {})
   }
 }
+
+/** tmux のセッションの印（main が決める英数字） */
+const TMUX_TOKEN_PATTERN = /^[A-Za-z0-9]{4,32}$/
 
 function parseTab(value: unknown): RestoreTab | null {
   if (!isRecord(value) || !isKey(value.key)) return null

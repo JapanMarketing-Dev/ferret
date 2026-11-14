@@ -143,8 +143,11 @@ function FileExplorerImpl({
   onOpenSource,
   onQuickOpen,
   onRenamed,
-  onDeleted
+  onDeleted,
+  readOnly = false
 }: {
+  /** SSH のプロジェクト: ツリーはリモートを読むだけ（作成・名前の変更・削除・貼り付け・ドラッグ・右クリックのメニュー・git の色・⌘P を出さない） */
+  readOnly?: boolean
   /** 開いているプロジェクトのフォルダ。null なら案内だけ */
   root: string | null
   /** 開いているプロジェクト。開いたフォルダをプロジェクトごとに覚える（更新・再起動のあとも閉じない） */
@@ -165,7 +168,7 @@ function FileExplorerImpl({
   const tree = useFileTree(root, { expandedKey: root ? expandedStorageKey('files', projectId ?? root) : null })
   const { expanded, loading, toggleDir } = tree
   // git の色分け（変更・追跡外・.gitignore の対象）。git のリポジトリでなければ何も付けない
-  const git = useGitDecorations(root)
+  const git = useGitDecorations(readOnly ? null : root)
   const [showHidden, setShowHidden] = useState(() => readLocal(SHOW_HIDDEN_KEY) === '1')
   const toggleHidden = () => {
     writeLocal(SHOW_HIDDEN_KEY, showHidden ? '0' : '1')
@@ -221,9 +224,11 @@ function FileExplorerImpl({
       <header className="explorer__head">
         <span className="explorer__title">{t('fileExplorer.title')}</span>
         <span className="editor-head__spacer" />
+        {!readOnly && <>
         <IconButton size="sm" label={t('fileExplorer.newFile')} icon={<FilePlus size={14} />} disabled={!root} onClick={() => ops.startCreate('file', ops.targetDir(null))} data-testid="explorer-new-file" />
         <IconButton size="sm" label={t('fileExplorer.newFolder')} icon={<FolderPlus size={14} />} disabled={!root} onClick={() => ops.startCreate('directory', ops.targetDir(null))} data-testid="explorer-new-folder" />
         <IconButton size="sm" label={t('fileExplorer.quickOpen', { shortcut: SHORTCUTS.quickOpen() })} icon={<FileSearch size={14} />} onClick={onQuickOpen} disabled={!root} />
+        </>}
         <IconButton size="sm" label={t('fileExplorer.refresh')} icon={<RefreshCw size={13} />} disabled={!root} onClick={tree.refresh} />
         <IconButton size="sm" label={t('fileExplorer.collapseAll')} icon={<ListCollapse size={14} />} disabled={!root} onClick={tree.collapseAll} />
       </header>
@@ -249,7 +254,7 @@ function FileExplorerImpl({
         className={`explorer__body${ops.dropTarget === '' ? ' is-drop' : ''}`}
         data-testid="explorer-body"
         // 一覧の下の空いた所も含めて、右クリック・貼り付け・ドロップを受ける（プロジェクト直下が対象）
-        {...(treeMode ? {
+        {...(treeMode && !readOnly ? {
           tabIndex: -1,
           onContextMenu: (e: MouseEvent) => ops.openMenu(e, null),
           onKeyDown: ops.onTreeKeyDown,
@@ -311,12 +316,14 @@ function FileExplorerImpl({
                     className={`explorer__row${entry.path === activePath ? ' is-active' : ''}${selected ? ' is-selected' : ''}${entry.collapsed ? ' is-heavy' : ''}${cut ? ' is-cut' : ''}${dropping ? ' is-drop' : ''}${gitClass(gitState)}`}
                     style={{ '--depth': depth } as React.CSSProperties}
                     onClick={(e) => ops.onRowClick(e, entry, () => (isDir ? toggleDir(entry) : onOpen(entry.path)))}
-                    onContextMenu={(e) => ops.openMenu(e, entry)}
-                    draggable
-                    onDragStart={(e) => ops.onDragStart(e, entry)}
-                    onDragEnd={ops.onDragEnd}
-                    onDragOver={(e) => ops.onDragOver(e, entry)}
-                    onDrop={(e) => ops.onDrop(e, entry)}
+                    {...(readOnly ? { onContextMenu: (e: MouseEvent) => e.preventDefault() } : {
+                      onContextMenu: (e: MouseEvent) => ops.openMenu(e, entry),
+                      draggable: true,
+                      onDragStart: (e: DragEvent) => ops.onDragStart(e, entry),
+                      onDragEnd: ops.onDragEnd,
+                      onDragOver: (e: DragEvent) => ops.onDragOver(e, entry),
+                      onDrop: (e: DragEvent) => ops.onDrop(e, entry)
+                    })}
                     title={gitState === 'ignored' ? `${entry.path}\n${t('fileExplorer.gitIgnored')}` : entry.path}
                     data-testid="explorer-row"
                     data-path={entry.path}
@@ -343,10 +350,10 @@ function FileExplorerImpl({
             <div className="explorer__empty" data-testid="explorer-empty">
               <p className="explorer__empty-title">{t('fileExplorer.emptyFolder')}</p>
               <p className="explorer__empty-hint">{t('fileExplorer.emptyHint')}</p>
-              <div className="explorer__empty-actions">
+              {!readOnly && <div className="explorer__empty-actions">
                 <Button icon={<FilePlus size={13} />} onClick={() => ops.startCreate('file', '')} data-testid="explorer-empty-new-file">{t('fileExplorer.newFile')}</Button>
                 <Button icon={<FolderPlus size={13} />} onClick={() => ops.startCreate('directory', '')} data-testid="explorer-empty-new-folder">{t('fileExplorer.newFolder')}</Button>
-              </div>
+              </div>}
             </div>
           )}
           </>

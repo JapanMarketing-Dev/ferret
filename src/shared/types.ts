@@ -386,6 +386,11 @@ export interface TerminalCreateOptions {
    * 消したアカウントなら今選んでいるアカウント（タブを戻したとき、前と同じアカウントで開くため）
    */
   accountId?: string | null
+  /**
+   * SSH のタブ: リモートの tmux のセッションの印（前に開いたときの TerminalTabInfo.tmuxToken）。
+   * あればそのセッションにつなぎ直し、セッションが生きていれば Agent を起動し直さない。省くと新しい印を決める
+   */
+  tmuxToken?: string | null
 }
 
 /** 復元対象の設定（WS-1 ＋ 分割幅） */
@@ -509,6 +514,10 @@ export interface TerminalTabInfo {
   resumed?: boolean
   /** 先に起動しておいたシェルを渡したときの、それまでの出力（プロンプト）。renderer はつなぐ前に流し直す */
   history?: string
+  /** SSH のタブ: リモートの tmux のセッションの印。タブを戻すときに同じものを渡す（同じセッションにつなぎ直す） */
+  tmuxToken?: string
+  /** SSH のタブ: 前のセッションにつなぎ直した（Agent は起動し直していない） */
+  reattached?: boolean
 }
 
 export interface TerminalSize {

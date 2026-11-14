@@ -51,7 +51,7 @@ import { ensureGlobalFolder, globalFolderPath, withGlobalOrchestra } from './glo
 import { GLOBAL_PROJECTS_FILE, GLOBAL_RULES_FILE } from '@shared/globalOrchestra'
 import { archiveFallback, canArchive, isArchived } from '@shared/projectArchive'
 import { currentOrchestra, isGlobalOrchestra, moveInTree, orchestraList, orchestraMembers, removeOrchestra } from '@shared/orchestras'
-import { checkSshTarget, remoteWorkspaceDirName, sshDefaultName, type SshTarget } from '@shared/sshCommand'
+import { checkSshTarget, isValidSshHost, remoteWorkspaceDirName, sshDefaultName, type SshTarget } from '@shared/sshCommand'
 import { EmbeddedBrowser, browserSession, browserSessions, onBrowserSessionReady, type ProjectTabs, type TabsSnapshot } from './browser'
 import { browserPartition, sanitizeBrowserProfile } from '@shared/browserProfile'
 import { BrowserExtensions } from './browserExtensions'
@@ -875,6 +875,17 @@ function syncMobileRemote(): void {
   if (!prefs?.enabled && !mobileRemote) return
   void mobileRemoteService().then((service) => service.apply(prefs))
     .catch((err: unknown) => reportHandled(errorKind(err), { area: 'mobile-remote', op: 'apply settings' }))
+}
+
+/** 開いている SSH のプロジェクトの接続先（ファイルツリーはリモートを読む）。SSH でなければ null */
+function remoteFilesTarget(): SshTarget | null {
+  const project = currentSettings().projects.find((p) => p.id === workspace.projectId)
+  return project?.source === 'ssh' && project.ssh ? project.ssh : null
+}
+
+/** SSH のプロジェクトでは、ファイルツリーは読むだけ（書き換え・作成・削除は断る） */
+function assertLocalFiles(): void {
+  if (remoteFilesTarget()) throw new UserFacingError(t('remoteFiles.errors.readOnly'))
 }
 
 /** 開いているのが SSH のプロジェクトか（Agent はリモートで動くので、feedback.md は中身を貼って送る） */
@@ -2482,6 +2493,30 @@ function registerIpc(): void {
     },
     'project:cloneCancel': async () => (await import('./projectSources')).cancelClone(),
     'project:addSsh': (target, name) => addSshProject(target, typeof name === 'string' ? name : undefined),
+    // 左サイドバーの「新しいプロジェクト」（src/main/folderBrowse.ts・remoteFiles.ts）
+    'project:browseFolders': async (path) => (await import('./folderBrowse')).browseLocalFolders(typeof path === 'string' ? path : null),
+    'project:createFolder': async (parent, name) => {
+      assertNotRecording()
+      const folder = await (await import('./folderBrowse')).createLocalFolder(String(parent), String(name))
+      openFolderAsProject(folder)
+      return projectsState()
+    },
+    'project:openBrowsed': async (path) => {
+      if (!(await import('./folderBrowse')).isBrowsedFolder(String(path))) throw new UserFacingError(t('newProject.errors.notFolder'))
+      assertNotRecording()
+      openFolderAsProject(String(path))
+      return projectsState()
+    },
+    'project:sshBrowse': async (host, path) => {
+      if (typeof host !== 'string' || !isValidSshHost(host.trim())) throw new UserFacingError(t('projectSource.errors.host'))
+      return (await import('./remoteFiles')).browseRemoteFolders(host.trim(), typeof path === 'string' ? path : null)
+    },
+    'project:sshCreateFolder': async (host, parent, name) => {
+      if (typeof host !== 'string' || !isValidSshHost(host.trim())) throw new UserFacingError(t('projectSource.errors.host'))
+      assertNotRecording()
+      const folder = await (await import('./remoteFiles')).createRemoteFolder(host.trim(), String(parent), String(name))
+      return addSshProject({ host: host.trim(), path: folder })
+    },
     'project:addDropped': async (path) => {
       // 落とされて drop:inspect で確かめたフォルダだけ（renderer から任意のフォルダを登録させない）
       const folder = await droppedFolder(path)
@@ -2756,7 +2791,7 @@ function registerIpc(): void {
     'terminal:write': (id, data) => terminals?.write(id, data),
     'terminal:resize': (id, size) => terminals?.resize(id, size),
     'terminal:ack': (id, chars) => { if (typeof id === 'string' && typeof chars === 'number') terminals?.ack(id, chars) },
-    'terminal:close': (id) => terminals?.close(id),
+    'terminal:close': (id, options) => terminals?.close(id, { endRemote: options?.endRemote === true }),
     'terminal:screen': (id, text) => terminals?.updateScreen(id, text),
     'terminal:agentState': (id) => terminals?.agentState(id) ?? { kind: 'unknown', state: 'unknown' },
     'terminal:agentStates': (ids) => (Array.isArray(ids) ? terminals?.agentStates(ids.filter((id): id is string => typeof id === 'string').slice(0, 512)) : null) ?? [],
@@ -3387,11 +3422,25 @@ function registerIpc(): void {
     },
 
     // ファイルエディタ（src/main/files.ts がプロジェクトの外を断る）
-    'fs:list': (relDir) => listDirectory(projectRoot(), relDir),
-    'fs:read': (relPath) => readTextFile(projectRoot(), relPath),
-    'fs:write': (relPath, content) => writeTextFile(projectRoot(), relPath, content),
+    // SSH のプロジェクトは、ツリーと読み込みをリモートへ（src/main/remoteFiles.ts）。書き換えは断る
+    'fs:list': async (relDir) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).listRemoteDirectory(remote, relDir) : listDirectory(projectRoot(), relDir)
+    },
+    'fs:read': async (relPath) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).readRemoteFile(remote, relPath) : readTextFile(projectRoot(), relPath)
+    },
+    'fs:write': (relPath, content) => { assertLocalFiles(); return writeTextFile(projectRoot(), relPath, content) },
     'fs:files': () => listFiles(projectRoot()),
-    'fs:search': (query, mode) => searchFiles(projectRoot(), query, mode),
+    'fs:search': async (query, mode) => {
+      const remote = remoteFilesTarget()
+      if (remote) {
+        if (mode !== 'names') throw new UserFacingError(t('remoteFiles.errors.readOnly'))
+        return (await import('./remoteFiles')).searchRemoteNames(remote, query)
+      }
+      return searchFiles(projectRoot(), query, mode)
+    },
     'fs:inspect': (relPath) => inspectProjectFile(projectRoot(), relPath),
     'fs:readOffice': (relPath) => readOfficeFile(projectRoot(), relPath),
     // 古い形式などは LibreOffice で変えてから開く・書き戻す（変換の部品は使うときに読む）
@@ -3411,14 +3460,15 @@ function registerIpc(): void {
       const { readGitDecorations } = await import('./gitDecorations')
       return readGitDecorations(root)
     },
-    'fs:create': (parentRel, name, kind) => createEntry(projectRoot(), parentRel, name, kind),
-    'fs:copy': (relPaths, destRel) => copyEntries(projectRoot(), relPaths, destRel),
-    'fs:move': (relPaths, destRel) => moveEntries(projectRoot(), relPaths, destRel),
-    'fs:import': (absolutePaths, destRel) => importEntries(projectRoot(), absolutePaths, destRel),
+    'fs:create': (parentRel, name, kind) => { assertLocalFiles(); return createEntry(projectRoot(), parentRel, name, kind) },
+    'fs:copy': (relPaths, destRel) => { assertLocalFiles(); return copyEntries(projectRoot(), relPaths, destRel) },
+    'fs:move': (relPaths, destRel) => { assertLocalFiles(); return moveEntries(projectRoot(), relPaths, destRel) },
+    'fs:import': (absolutePaths, destRel) => { assertLocalFiles(); return importEntries(projectRoot(), absolutePaths, destRel) },
     // ファイルツリーの貼り付け（⌘V / Ctrl+V）。OS のクリップボードのファイル・画像を main が読んで取り込み、作ったものの相対パスだけを返す
     // （クリップボードの中身・元のパスは renderer へ返さない。押した直後の1回だけ。security-7 [1]）
     'fs:pasteClipboard': async (destRel) => {
       if (typeof destRel !== 'string' || !gestures.consume('paste')) throw new UserFacingError(t('errors.needsUserAction'))
+      assertLocalFiles()
       const root = projectRoot()
       const { readClipboardPaste, writePastedImage } = await import('./clipboardFiles')
       const found = await readClipboardPaste(clipboard)
@@ -3437,8 +3487,8 @@ function registerIpc(): void {
       return text
     },
     'fs:terminalDir': (relPath) => terminalDirFor(projectRoot(), relPath),
-    'fs:rename': (relPath, newName) => renameEntry(projectRoot(), relPath, newName),
-    'fs:trash': (relPaths) => trashEntries(projectRoot(), relPaths, (absolute) => shell.trashItem(absolute)),
+    'fs:rename': (relPath, newName) => { assertLocalFiles(); return renameEntry(projectRoot(), relPath, newName) },
+    'fs:trash': (relPaths) => { assertLocalFiles(); return trashEntries(projectRoot(), relPaths, (absolute) => shell.trashItem(absolute)) },
     'fs:reveal': async (relPath) => shell.showItemInFolder(await resolveInside(projectRoot(), relPath)),
     'fs:openExternal': async (relPath) => {
       const file = await resolveInside(projectRoot(), relPath)

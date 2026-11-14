@@ -61,7 +61,6 @@ import { feedbackPressStartsRecording, planNewReview } from './lib/newReview'
 import { useProjectActivity } from './terminal/agentActivity'
 import { OrchestraDock } from './components/OrchestraDock'
 import { currentDockGroup, groupDockTargets } from '@shared/dockGroups'
-import { RemoteFilesNotice } from './components/AddProjectDialog'
 import { targetFromSource } from '@shared/captureTarget'
 import { ErrorBoundary, ToastProvider, setToastNoticeFallback, useToast } from './ui'
 import { sanitizeAgentPreferences } from '@shared/agentCatalog'
@@ -372,7 +371,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   }, [liveProblem, live.status.run, live.status.message, toast, showNotice, t])
   const liveAlert = liveProblem && !(targetsOpen && shownSideTab === 'transcript') ? t('liveTranscript.alert') : null
   const fileError = useCallback((message: string) => toast({ tone: 'danger', message }), [toast])
-  const files = useOpenFiles({ root: workspace.folderPath, activeTab: centerTab, setActiveTab: setCenterTab, onError: fileError })
+  // SSH のプロジェクト: ファイルはリモートを読むだけ（ツリーとエディタを読み取り専用にする）
+  const remoteWorkspace = projects.projects.some((p) => p.id === workspace.projectId && p.source === 'ssh')
+  const files = useOpenFiles({ root: workspace.folderPath, readOnly: remoteWorkspace, activeTab: centerTab, setActiveTab: setCenterTab, onError: fileError })
   // 外からエディタの領域へ落としたファイルを開く。プロジェクトの外のファイルはプロジェクトの根へコピーしてから開き、フォルダはプロジェクトとして開く。
   // Markdown のエディタ（ソース・プレビュー）の上に落とした画像・動画は、開かずにその位置へ埋め込む（外のものは隣の assets/ などへコピー。markdownDrop.ts）
   const importMedia = useCallback((markdownRel: string, paths: string[]) => window.ade.invoke('fs:importMedia', markdownRel, paths), [])
@@ -1377,8 +1378,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           {/* 右のファイルツリー。閉じたら列の幅を 0 にして隠す（.sidebar-slot と同じ） */}
           <div className="explorer-slot" aria-hidden={!explorerOpen} style={{ gridArea: 'files' }}>
             <ErrorBoundary name="file-tree">
-            {/* SSH のプロジェクトは、ローカルにはレビューの置き場しか無いので、ファイルツリーの代わりに案内を出す */}
-            {(() => { const remote = projects.projects.find((p) => p.id === workspace.projectId && p.source === 'ssh'); return remote ? <RemoteFilesNotice project={remote} /> : null })() ?? <FileExplorer
+            {/* SSH のプロジェクトは、リモートのフォルダを読むだけのツリーにする（main の fs:list / fs:read が ssh で読む） */}
+            <FileExplorer
+              readOnly={remoteWorkspace}
               root={workspace.folderPath}
               projectId={workspace.projectId ?? null}
               activePath={files.activeFile?.path ?? null}
@@ -1388,7 +1390,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
               onQuickOpen={openQuickOpen}
               onRenamed={files.followRename}
               onDeleted={files.closeDeleted}
-            />}
+            />
             </ErrorBoundary>
           </div>
         </div>

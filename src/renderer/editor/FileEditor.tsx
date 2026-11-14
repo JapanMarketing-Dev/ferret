@@ -95,7 +95,8 @@ export default function FileEditor({ file, editor: api }: { file: OpenFile; edit
   // （MDX は JSX を含むので、ソースだけで編集し、読み取り専用のプレビューで見る）
   const richable = file.language === 'markdown' && file.status === 'ready' && !file.viewer
   // 人は Markdown をほぼ手で直さない（声で Agent に頼む）ので、開いたら読みやすいプレビューを既定にする（ソースへ切り替えられる）
-  const rich = richable && !sourceFiles.has(file.id)
+  // 読むだけのファイル（SSH）はリッチな Markdown エディタ（編集前提）ではなくコードで見せる
+  const rich = richable && !file.readOnly && !sourceFiles.has(file.id)
   const setRich = (on: boolean) => {
     if (on) sourceFiles.delete(file.id)
     else sourceFiles.add(file.id)

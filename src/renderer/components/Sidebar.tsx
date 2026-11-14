@@ -31,6 +31,7 @@ import { Button, EmptyState, Field, IconButton, useToast } from '../ui'
 import { ProjectEditDialog } from './ProjectTargetsEditor'
 import { CreateRepoDialog } from './CreateRepoDialog'
 import { AddProjectDialog, ProjectSourceIcon } from './AddProjectDialog'
+import { NewProjectPanel, type NewProjectKind } from './NewProjectPanel'
 import type { ProjectSource } from '@shared/projectSource'
 import { sshTargetLabel } from '@shared/sshCommand'
 import type { TranslationKey } from '@shared/i18n'
@@ -295,6 +296,8 @@ function SidebarImpl({
   // 足したら、種類と確認先を決めてもらうため「プロジェクトを編集」を開く
   // 「プロジェクトを追加」は、自分の PC / GitHub から取得 / SSH を選ぶダイアログ（AddProjectDialog）
   const [adding, setAdding] = useState(false)
+  /** 左サイドバーの「新しいプロジェクト」（PC / SSH。場所を選んでフォルダを作る）。開いている間は一覧の代わりに出す */
+  const [newProject, setNewProject] = useState<NewProjectKind | null>(null)
   const addProject = () => {
     setAdding(true)
     onOverlayChange?.(true)
@@ -335,6 +338,13 @@ function SidebarImpl({
     <aside className="sidebar" aria-label={t('sidebar.projects')} data-testid="sidebar" ref={rootRef} data-file-drop={projectDrop.over || undefined} {...projectDrop.props}>
       {projectDrop.over && <ExternalDropOverlay label={t('drop.sidebar.hint')} testId="sidebar-file-drop" />}
       <div className="sidebar__list">
+        {newProject ? <NewProjectPanel
+          kind={newProject}
+          projects={projects.projects}
+          onKindChange={setNewProject}
+          onClose={() => setNewProject(null)}
+          onAdded={(state, source) => { onAdded(new Set(projects.projects.map((p) => p.id)))(state, source); setNewProject(null) }}
+        /> : <>
         <div className="sb-head">
           <span className="sb-head__title">{t('sidebar.projects')}</span>
           {/* Tooltip はサイドバーの右端からはみ出して横スクロールを生むので、OS標準の title にする */}
@@ -573,6 +583,7 @@ function SidebarImpl({
           </div>
         )}
         <ArchivedProjects projects={projects.projects} onRestore={(project) => setArchived(project, false)} />
+        </>}
       </div>
 
       {menu && menuProject && (
@@ -632,6 +643,7 @@ function SidebarImpl({
       })()}
       {adding && <AddProjectDialog
         onClose={() => { setAdding(false); onOverlayChange?.(false) }}
+        onStartNew={(kind) => { setAdding(false); onOverlayChange?.(false); setNewProject(kind) }}
         onAdded={onAdded(new Set(projects.projects.map((p) => p.id)))}
       />}
     </aside>

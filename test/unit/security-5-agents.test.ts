@@ -208,7 +208,7 @@ describe('security-5 [3] アカウントのログインは SSH のプロジェ�
     const terminal = read('src/main/terminal.ts')
     expect(terminal).toMatch(/executionSphere\(\{ accountLogin: Boolean\(options\.accountLogin\), remote: this\.remote \}\)/)
     expect(terminal.match(/sshShellSpec\(/g)).toHaveLength(1)
-    expect(terminal).toMatch(/sshShellSpec\(sphere\.target\)/)
+    expect(terminal).toMatch(/sshShellSpec\(sphere\.target[,)]/)
   })
 
   posixOnly('SSH のプロジェクトを開いていても、ログインのタブは手元のシェルで、ホームから、手元の絶対パスで動く', async () => {
@@ -236,6 +236,95 @@ describe('security-5 [3] アカウントのログインは SSH のプロジェ�
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('SSH のタブはリモートの tmux の中で動き、戻すときはつなぎ直す', () => {
+  const agentDir = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ferret-tmux-agent-'))
+    writeFileSync(join(dir, 'claude'), '#!/bin/sh\nexit 0\n')
+    chmodSync(join(dir, 'claude'), 0o755)
+    return dir
+  }
+
+  posixOnly('新しいタブ: 印を決めて tmux のセッションを作り、Agent を打ち込む', async () => {
+    const dir = agentDir()
+    try {
+      state.dirs = [dir]
+      state.spawns.length = 0
+      const { TerminalManager } = await import('../../src/main/terminal')
+      const proto = TerminalManager.prototype as unknown as { tmuxExists: () => Promise<boolean | null>; scheduleStartupWrite: (...args: unknown[]) => unknown }
+      const exists = vi.spyOn(proto, 'tmuxExists').mockResolvedValue(true)
+      const write = vi.spyOn(proto, 'scheduleStartupWrite')
+      const manager = new TerminalManager(() => {}, () => {})
+      manager.setRemote(REMOTE)
+      const info = await manager.create({ size: { cols: 80, rows: 24 }, agent: 'claude' })
+      expect(info.tmuxToken).toMatch(/^[0-9a-f]{12}$/)
+      expect(info.reattached).toBeUndefined()
+      // 印を渡していないので、セッションの有無は確かめない（新しいセッション）
+      expect(exists).not.toHaveBeenCalled()
+      expect(state.spawns[0]!.args.join(' ')).toContain(`tmux new-session -A -s 'ferret-acme-shop-`)
+      expect(state.spawns[0]!.args.join(' ')).toContain(info.tmuxToken!)
+      expect(write).toHaveBeenCalledTimes(1)
+      manager.disposeAll()
+      exists.mockRestore()
+      write.mockRestore()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  posixOnly('戻したタブ: セッションが生きていれば同じセッションにつなぎ、Agent を打ち込み直さない。無ければ起動する', async () => {
+    const dir = agentDir()
+    try {
+      state.dirs = [dir]
+      state.spawns.length = 0
+      const { TerminalManager } = await import('../../src/main/terminal')
+      const proto = TerminalManager.prototype as unknown as { tmuxExists: () => Promise<boolean | null>; scheduleStartupWrite: (...args: unknown[]) => unknown }
+      const exists = vi.spyOn(proto, 'tmuxExists').mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValueOnce(null)
+      const write = vi.spyOn(proto, 'scheduleStartupWrite')
+      const manager = new TerminalManager(() => {}, () => {})
+      manager.setRemote(REMOTE)
+      const alive = await manager.create({ size: { cols: 80, rows: 24 }, agent: 'claude', tmuxToken: 'abcd1234' })
+      expect(alive).toMatchObject({ tmuxToken: 'abcd1234', reattached: true, agent: 'claude' })
+      expect(write).not.toHaveBeenCalled()
+      expect(state.spawns[0]!.args.join(' ')).toMatch(/tmux new-session -A -s 'ferret-acme-shop-[0-9a-f]{8}-abcd1234'/)
+      const gone = await manager.create({ size: { cols: 80, rows: 24 }, agent: 'claude', tmuxToken: 'abcd1234' })
+      expect(gone.reattached).toBeUndefined()
+      // つながらず分からないときも、今まで通り起動する
+      await manager.create({ size: { cols: 80, rows: 24 }, agent: 'claude', tmuxToken: 'abcd1234' })
+      expect(write).toHaveBeenCalledTimes(2)
+      // 形の違う印は使わず、新しく決める（確かめもしない）
+      const bad = await manager.create({ size: { cols: 80, rows: 24 }, tmuxToken: "x'; rm -rf ~" })
+      expect(bad.tmuxToken).not.toContain("'")
+      expect(exists).toHaveBeenCalledTimes(3)
+      manager.disposeAll()
+      exists.mockRestore()
+      write.mockRestore()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  posixOnly('利用者が閉じたときだけ tmux のセッションを終わらせる（アプリの終了では残す）', async () => {
+    state.spawns.length = 0
+    const remoteFiles = await import('../../src/main/remoteFiles')
+    const kill = vi.spyOn(remoteFiles, 'killTmuxSession').mockImplementation(() => {})
+    const { TerminalManager } = await import('../../src/main/terminal')
+    const manager = new TerminalManager(() => {}, () => {})
+    manager.setRemote(REMOTE)
+    const a = await manager.create({ size: { cols: 80, rows: 24 } })
+    const b = await manager.create({ size: { cols: 80, rows: 24 } })
+    manager.close(a.id, { endRemote: true })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(kill).toHaveBeenCalledTimes(1)
+    expect(kill.mock.calls[0]![0]).toBe('dev-box')
+    expect(kill.mock.calls[0]![1]).toContain(a.tmuxToken!)
+    manager.close(b.id)
+    manager.disposeAll()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(kill).toHaveBeenCalledTimes(1)
+    kill.mockRestore()
   })
 })
 

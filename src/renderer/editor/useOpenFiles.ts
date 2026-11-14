@@ -65,6 +65,8 @@ export interface OpenFile {
   info?: FsFileInfo
   /** SVG を（画像ではなく）コードとして開いている */
   asText?: boolean
+  /** 読むだけ（SSH のプロジェクトのファイル。編集・保存をさせない） */
+  readOnly?: boolean
 }
 
 export type FileTabId = `file:${string}`
@@ -149,11 +151,14 @@ export interface OpenFilesApi {
 
 export function useOpenFiles({
   root,
+  readOnly = false,
   activeTab,
   setActiveTab,
   onError
 }: {
   root: string | null
+  /** SSH のプロジェクト: ファイルはリモートを読むだけ。文字のファイルだけを読み取り専用で開く（画像・Office・HTML のプレビューは出さない） */
+  readOnly?: boolean
   /** 中央のタブの選択（CenterTab）。file: で始まればファイル */
   activeTab: string
   setActiveTab: (tab: 'browser' | FileTabId) => void
@@ -171,6 +176,8 @@ export function useOpenFiles({
   const savingOffice = useRef(new Set<string>())
   const filesRef = useRef(allFiles)
   filesRef.current = allFiles
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
   // 保存してから閉じるときは、書き終わった時点の選択を見る（閉じる操作の時点の値は古い）
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
@@ -186,6 +193,19 @@ export function useOpenFiles({
     const ticket = requests.current.begin(id)
     const latest = () => requests.current.isLatest(id, ticket)
     try {
+      // SSH のプロジェクト: リモートの文字のファイルだけを読む（ビューア・Office は手元のファイルを前提にしているので使わない）
+      if (readOnlyRef.current) {
+        const result = await window.ade.invoke('fs:read', path)
+        if (!latest()) return
+        if (result.kind === 'text') {
+          drafts.current.set(id, result.content)
+          patch(id, (f) => ({ status: 'ready', saved: result.content, dirty: false, message: undefined, external: undefined, viewer: undefined, info: undefined, readOnly: true, revision: f.revision + 1 }))
+        } else {
+          drafts.current.delete(id)
+          patch(id, { status: 'unavailable', message: result.reason, readOnly: true })
+        }
+        return
+      }
       // 画像・動画・音声・PDF は中身を読まず、大きさだけ見てビューアで開く（中身は ade-media://project/ から）
       const media = asText ? null : mediaKindOf(path)
       if (media) {
@@ -300,7 +320,8 @@ export function useOpenFiles({
   }, [setActiveTab, onError, showInBrowser])
 
   const open = useCallback((path: string) => {
-    if (isHtmlPath(path)) previewHtml(path)
+    if (readOnlyRef.current) openSource(path)
+    else if (isHtmlPath(path)) previewHtml(path)
     else if (isGoogleFile(path)) openGoogle(path)
     else openSource(path)
   }, [previewHtml, openGoogle, openSource])
@@ -326,7 +347,7 @@ export function useOpenFiles({
 
   const save = useCallback(async (id: string): Promise<boolean> => {
     const file = filesRef.current.find((f) => f.id === id)
-    if (!file || file.status !== 'ready' || file.root !== root) return false
+    if (!file || file.status !== 'ready' || file.root !== root || file.readOnly) return false
     // Office の文書は OfficeViewer が持つ編集を、そこで OOXML にして書く（fs:writeOffice）
     if (file.viewer === 'office') {
       const saver = officeSaverFor(id)

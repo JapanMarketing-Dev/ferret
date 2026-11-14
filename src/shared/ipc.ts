@@ -13,6 +13,7 @@ import type { AgentSkillAgent, AgentSkillStatus } from './agentSkill'
 import type { SendRequest } from './sendTarget'
 import type { CloneFailureKind, CloneProgress, GitHubRepoList, SshConfigHost } from './projectSource'
 import type { SshTarget } from './sshCommand'
+import type { FolderListing } from './remoteFiles'
 import type { QuitSaveEntry, QuitSaveOutcome, UnsavedFileRef, UnsavedReveal } from './quitUnsaved'
 import type { ClosedTerminal, TerminalRestoreSnapshot } from './terminalRestore'
 import type {
@@ -187,6 +188,16 @@ export interface IpcRequests {
   'project:cloneCancel': () => void
   /** SSH の接続先とリモートのフォルダを登録して開く（鍵やパスワードは扱わない） */
   'project:addSsh': (target: SshTarget, name?: string) => ProjectsState
+  /** 左サイドバーの「新しいプロジェクト」（PC）。場所の一覧（path が null ならホーム。フォルダだけ・. で始まるものは出さない） */
+  'project:browseFolders': (path: string | null) => FolderListing
+  /** 一覧に出した場所の下にフォルダを作り、プロジェクトとして開く */
+  'project:createFolder': (parent: string, name: string) => ProjectsState
+  /** 一覧に出した場所をそのままプロジェクトとして開く */
+  'project:openBrowsed': (path: string) => ProjectsState
+  /** 「新しいプロジェクト」（SSH）。リモートの場所の一覧（path が null ならホーム） */
+  'project:sshBrowse': (host: string, path: string | null) => FolderListing
+  /** リモートの場所の下にフォルダを作り、SSH のプロジェクトとして開く */
+  'project:sshCreateFolder': (host: string, parent: string, name: string) => ProjectsState
   /** 外から落としたフォルダ（drop:inspect で確かめたもの）をプロジェクトとして登録して開く。登録済みならそれに切り替える */
   'project:addDropped': (path: string) => ProjectsState
   /** 一覧の並べ替え。ids は新しい並び（知らない ID は捨て、無いプロジェクトはその位置のまま） */
@@ -333,7 +344,8 @@ export interface IpcRequests {
   'terminal:create': (options: TerminalCreateOptions) => TerminalTabInfo
   'terminal:write': (id: string, data: string) => void
   'terminal:resize': (id: string, size: TerminalSize) => void
-  'terminal:close': (id: string) => void
+  /** endRemote: 利用者がタブを閉じた（SSH のタブなら、リモートの tmux のセッションも終わらせる） */
+  'terminal:close': (id: string, options?: { endRemote?: boolean }) => void
   'terminal:screen': (id: string, text: string) => void
   'terminal:agentState': (id: string) => { kind: string; state: string; agent?: TuiAgent | null }
   /** 複数のターミナルの状態をまとめて調べる（ペインごとの毎秒の問い合わせを1回に）。返す順は ids と同じ */
@@ -754,6 +766,11 @@ export const IPC_REQUEST_CHANNELS = [
   'project:clone',
   'project:cloneCancel',
   'project:addSsh',
+  'project:browseFolders',
+  'project:createFolder',
+  'project:openBrowsed',
+  'project:sshBrowse',
+  'project:sshCreateFolder',
   'project:addDropped',
   'project:reorder',
   'project:move',

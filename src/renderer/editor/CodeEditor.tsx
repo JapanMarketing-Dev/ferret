@@ -76,6 +76,8 @@ export default function CodeEditor({ file, editor: api, wordWrap, onEditor, onCh
         tabSize: 2,
         wordWrap: wordWrap ? 'on' : 'off',
         contextmenu: true,
+        // SSH のプロジェクトのファイルは読むだけ
+        readOnly: file.readOnly === true,
         // 日本語の全角の括弧や記号を「紛らわしい文字」として枠で囲まない
         unicodeHighlight: { ambiguousCharacters: false, invisibleCharacters: false, nonBasicASCII: false },
         // Monaco 0.57 の既定（EditContext）では、Windows の Microsoft Pinyin などが候補窓を出さない。

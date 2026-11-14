@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Folder, FolderGit2, KeyRound, Laptop, Lock, Network, Server, X } from 'lucide-react'
+import { ArrowLeft, Folder, FolderGit2, Laptop, Lock, Network, Server, X } from 'lucide-react'
 import type { Project, ProjectsState } from '@shared/types'
-import { cloneRepoName, normalizeCloneUrl, tildePath, type CloneFailureKind, type GitHubRepoList, type ProjectSource, type SshConfigHost } from '@shared/projectSource'
-import { checkSshTarget } from '@shared/sshCommand'
+import { cloneRepoName, normalizeCloneUrl, tildePath, type CloneFailureKind, type GitHubRepoList, type ProjectSource } from '@shared/projectSource'
+import type { NewProjectKind } from './NewProjectPanel'
 import type { TranslationKey } from '@shared/i18n'
 import { errorMessage } from '../lib/errors'
 import { useT } from '../lib/i18n'
@@ -19,7 +19,7 @@ import { Button, Field, IconButton, Modal, Progress, useToast } from '../ui'
  *
  * 開いている間は、呼び出し側が内蔵ブラウザのビューを隠す（Modal はネイティブのビューの下になるため）。
  */
-type Step = 'choose' | 'github' | 'ssh' | 'orchestra'
+type Step = 'choose' | 'github' | 'orchestra'
 
 /** 前回の保存先（この端末だけの好み） */
 const PARENT_KEY = 'ferret.cloneParent'
@@ -30,40 +30,33 @@ function saveParent(parent: string): void {
   try { localStorage.setItem(PARENT_KEY, parent) } catch { /* 保存できなくても次回は既定から */ }
 }
 
-export function AddProjectDialog({ onClose, onAdded }: {
+export function AddProjectDialog({ onClose, onAdded, onStartNew }: {
   onClose: () => void
   /** 追加して開いたあと。source はどの開き方か */
   onAdded: (state: ProjectsState, source: ProjectSource) => void
+  /** PC / SSH を選んだ。ダイアログを閉じ、左サイドバーの「新しいプロジェクト」で場所を選んでもらう */
+  onStartNew: (kind: NewProjectKind) => void
 }) {
   const t = useT()
-  const toast = useToast()
   const [step, setStep] = useState<Step>('choose')
-
-  const addLocal = () => {
-    onClose()
-    void window.ade.invoke('project:add')
-      .then((state) => { if (state) onAdded(state, 'local') })
-      .catch((err) => toast({ tone: 'warning', message: errorMessage(err) }))
-  }
 
   return <Modal className="rv-modal" label={t('projectSource.addChooseTitle')} onClose={onClose}>
     <div className="rv-modal__panel apd" data-testid="add-project-dialog">
       <header className="rv-modal__head apd__head">
         {step !== 'choose' && <IconButton size="sm" label={t('projectSource.back')} icon={<ArrowLeft size={14} strokeWidth={1.5} />} onClick={() => setStep('choose')} data-testid="add-project-back" />}
-        <h2>{t(step === 'github' ? 'projectSource.choose.github' : step === 'ssh' ? 'projectSource.choose.ssh' : step === 'orchestra' ? 'orchestra.create' : 'projectSource.addChooseTitle')}</h2>
+        <h2>{t(step === 'github' ? 'projectSource.choose.github' : step === 'orchestra' ? 'orchestra.create' : 'projectSource.addChooseTitle')}</h2>
         <IconButton label={t('common.close')} icon={<X size={16} />} onClick={onClose} />
       </header>
       {step === 'choose' && <div className="apd__choices">
         <p className="apd__group">{t('projectSource.groupProject')}</p>
-        <ChoiceButton icon={<Laptop size={18} strokeWidth={1.5} />} title={t('projectSource.choose.local')} hint={t('projectSource.choose.localHint')} onClick={addLocal} testId="add-project-local" />
+        <ChoiceButton icon={<Laptop size={18} strokeWidth={1.5} />} title={t('projectSource.choose.local')} hint={t('projectSource.choose.localHint')} onClick={() => onStartNew('pc')} testId="add-project-local" />
         <ChoiceButton icon={<FolderGit2 size={18} strokeWidth={1.5} />} title={t('projectSource.choose.github')} hint={t('projectSource.choose.githubHint')} onClick={() => setStep('github')} testId="add-project-github" />
-        <ChoiceButton icon={<Server size={18} strokeWidth={1.5} />} title={t('projectSource.choose.ssh')} hint={t('projectSource.choose.sshHint')} onClick={() => setStep('ssh')} testId="add-project-ssh" />
+        <ChoiceButton icon={<Server size={18} strokeWidth={1.5} />} title={t('projectSource.choose.ssh')} hint={t('projectSource.choose.sshHint')} onClick={() => onStartNew('ssh')} testId="add-project-ssh" />
         <p className="apd__group">{t('projectSource.groupOrchestra')}</p>
         <ChoiceButton icon={<Network size={18} strokeWidth={1.5} />} title={t('orchestra.create')} hint={t('orchestra.createHint')} onClick={() => setStep('orchestra')} testId="add-orchestra" />
       </div>}
       {step === 'orchestra' && <OrchestraStep onDone={(state) => { onClose(); onAdded(state, 'local') }} />}
       {step === 'github' && <GitHubStep onDone={(state) => { onClose(); onAdded(state, 'github') }} />}
-      {step === 'ssh' && <SshStep onDone={(state) => { onClose(); onAdded(state, 'ssh') }} />}
     </div>
   </Modal>
 }
@@ -170,71 +163,11 @@ function GitHubStep({ onDone }: { onDone: (state: ProjectsState) => void }) {
   </div>
 }
 
-function SshStep({ onDone }: { onDone: (state: ProjectsState) => void }) {
-  const t = useT()
-  const toast = useToast()
-  const [hosts, setHosts] = useState<SshConfigHost[] | null>(null)
-  const [host, setHost] = useState('')
-  const [path, setPath] = useState('')
-  const [name, setName] = useState('')
-  const [busy, setBusy] = useState(false)
-  useEffect(() => {
-    void window.ade.invoke('project:sshHosts').then(setHosts).catch(() => setHosts([]))
-  }, [])
-  const checked = checkSshTarget({ host, path })
-  const hostError = host.trim() !== '' && !checked.ok && checked.reason === 'host'
-  const pathError = path.trim() !== '' && !checked.ok && checked.reason === 'path'
-
-  const add = () => {
-    if (!checked.ok) return
-    setBusy(true)
-    void window.ade.invoke('project:addSsh', checked.target, name.trim() || undefined)
-      .then(onDone)
-      .catch((err) => { setBusy(false); toast({ tone: 'warning', message: errorMessage(err) }) })
-  }
-
-  return <div className="apd__body">
-    <label className="pt-field">
-      <span>{t('projectSource.ssh.host')}</span>
-      <Field mono autoFocus list="apd-ssh-hosts" placeholder={t('projectSource.ssh.hostPlaceholder')} value={host} invalid={hostError} autoComplete="off" spellCheck={false}
-        onChange={(e) => setHost(e.target.value)} data-testid="ssh-host" />
-      <datalist id="apd-ssh-hosts">
-        {(hosts ?? []).map((h) => <option key={h.host} value={h.host}>{[h.user, h.hostname].filter(Boolean).join('@')}</option>)}
-      </datalist>
-    </label>
-    <p className="st-note">{hosts && hosts.length === 0 ? t('projectSource.ssh.noHosts') : t('projectSource.ssh.hostHint')}</p>
-    {hostError && <p className="st-note st-note--warn">{t('projectSource.errors.host')}</p>}
-    <label className="pt-field">
-      <span>{t('projectSource.ssh.path')}</span>
-      <Field mono placeholder={t('projectSource.ssh.pathPlaceholder')} value={path} invalid={pathError} autoComplete="off" spellCheck={false}
-        onChange={(e) => setPath(e.target.value)} data-testid="ssh-path" />
-    </label>
-    {pathError && <p className="st-note st-note--warn">{t('projectSource.errors.path')}</p>}
-    <label className="pt-field">
-      <span>{t('projectSource.ssh.name')}</span>
-      <Field value={name} onChange={(e) => setName(e.target.value)} data-testid="ssh-name" />
-    </label>
-    <p className="st-note"><KeyRound size={11} aria-hidden="true" />{t('projectSource.ssh.auth')}</p>
-    <p className="st-note">{t('projectSource.ssh.limits')}</p>
-    <div className="apd__actions">
-      <Button variant="primary" disabled={!checked.ok} busy={busy} onClick={add} data-testid="ssh-add">{t('projectSource.ssh.add')}</Button>
-    </div>
-  </div>
-}
-
 /** 一覧に出す、プロジェクトの出どころの印（ローカルは今までのフォルダの印のまま） */
 export function ProjectSourceIcon({ project, open, size = 14 }: { project: Project; open?: boolean; size?: number }) {
   if (project.source === 'ssh') return <Server size={size} strokeWidth={1.5} />
   if (project.source === 'github') return <FolderGit2 size={size} strokeWidth={1.5} />
   return open ? <Folder size={size} strokeWidth={1.5} fill="currentColor" fillOpacity={0.12} /> : <Folder size={size} strokeWidth={1.5} />
-}
-
-/** SSH のプロジェクトでは、右のファイルツリーの代わりにこれを出す */
-export function RemoteFilesNotice({ project }: { project: Project }) {
-  const t = useT()
-  return <aside className="explorer apd-remote-files" data-testid="remote-files-notice">
-    <p className="st-note"><Server size={12} aria-hidden="true" />{t('projectSource.remoteFiles', { host: project.ssh?.host ?? '' })}</p>
-  </aside>
 }
 
 

@@ -108,7 +108,8 @@ describe('security-4 [5][9] project file I/O is bound to the opened file and bou
     // 上限は既定で MAX_DIRECTORY_ENTRIES（引数はテストが小さくするためだけ。IPC の fs:list は渡さない）
     expect(list).toMatch(/limit = MAX_DIRECTORY_ENTRIES\): Promise<FsEntry\[\]>/)
     expect(list).toMatch(/readDirEntries\(listed\.path, limit\)/)
-    expect(read('src/main/index.ts')).toMatch(/'fs:list': \(relDir\) => listDirectory\(projectRoot\(\), relDir\)/)
+    // SSH のプロジェクトはリモートの一覧（remoteFiles.ts の上限）。手元は上限を渡さずに読む
+    expect(read('src/main/index.ts')).toMatch(/'fs:list': async \(relDir\) => \{[^}]*listRemoteDirectory\(remote, relDir\) : listDirectory\(projectRoot\(\), relDir\)\n/)
     expect(list).not.toMatch(/readdir\(|opendir\(/)
     const dirEntries = read('src/main/dirEntries.ts')
     expect(dirEntries).toMatch(/if \(platform === 'win32'\) \{\n\s+const all = await readdir\(path, \{ withFileTypes: true \}\)\n\s+return \{ entries: all\.slice\(0, max\)/)

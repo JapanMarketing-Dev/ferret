@@ -730,11 +730,12 @@ export function acquireTerminal(key: string): TerminalHandle {
   return handle
 }
 
-export function releaseTerminal(key: string): void {
+/** endRemote: 利用者が閉じた（SSH のタブならリモートの tmux のセッションも終わらせる）。休ませる・アプリの終了では渡さない */
+export function releaseTerminal(key: string, options: { endRemote?: boolean } = {}): void {
   const handle = handles.get(key)
   if (!handle) return
   handles.delete(key)
-  if (handle.ptyId) void window.ade.invoke('terminal:close', handle.ptyId)
+  if (handle.ptyId) void window.ade.invoke('terminal:close', handle.ptyId, options.endRemote ? { endRemote: true } : undefined)
   handle.dispose()
   reportVisibility()
 }
