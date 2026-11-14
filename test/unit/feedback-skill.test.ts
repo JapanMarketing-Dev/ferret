@@ -233,3 +233,16 @@ describe('集める・入れる', () => {
     expect(await syncFeedbackSkill('1.0.0', [], home3, {})).toBe(0)
   })
 })
+
+describe('価値ユースケース・ビジュアルレビューの skill の決まり（完成の定義・細かく・画面を必ず・ずれはビジュアルレビューへ）', async () => {
+  const { renderValueUseCaseSkill } = await import('../../src/shared/valueUseCaseSkill')
+  const value = renderValueUseCaseSkill('1.0.0')
+  const visual = renderVisualReviewSkill('1.0.0')
+  it('価値ユースケースは完成の定義で、細かく・ほぼ全部の手順に画面を入れる', () => {
+    for (const word of ['definition of done', 'fine-grained', 'Screenshots on (almost) every step', 'mockup PNG', 'Do not skip or merge steps']) expect(value).toContain(word)
+  })
+  it('本来と違うところは1つずつ詳しいビジュアルレビューにする', () => {
+    expect(value).toContain('Register every gap as a visual review')
+    expect(visual).toContain('Plenty of plans is good')
+  })
+})

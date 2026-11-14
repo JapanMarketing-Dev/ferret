@@ -328,10 +328,20 @@ function watchMainHealth(): void {
   setInterval(tick, 30_000).unref?.()
 }
 
+/** 落ちたレンダラが何だったか（アプリの画面・内蔵ブラウザのタブ・そのほか）。index.ts が入れる */
+let rendererRole: ((contents: Electron.WebContents) => string) | null = null
+export function setRendererRoleResolver(resolve: (contents: Electron.WebContents) => string): void {
+  rendererRole = resolve
+}
+
 function installProcessHooks(): void {
-  app.on('render-process-gone', (_e, _contents, details) => {
+  app.on('render-process-gone', (_e, contents, details) => {
     if (!shouldReportProcessGone(details.reason)) return
-    reportMessage(`render-process-gone: ${details.reason}`, 'error', { kind: 'render-process-gone', reason: details.reason, exitCode: String(details.exitCode) })
+    // どのレンダラが落ちたかを残す（ネイティブのクラッシュの報告は後から届くので、スコープにも付けておく。FERRET-29）
+    let role = 'other'
+    try { role = rendererRole?.(contents) ?? 'other' } catch { /* 分からなければ other */ }
+    Sentry.setTag('renderer.gone', `${role}:${details.reason}`)
+    reportMessage(`render-process-gone: ${details.reason}`, 'error', { kind: 'render-process-gone', reason: details.reason, exitCode: String(details.exitCode), 'renderer.role': role })
   })
   const gpuContextLost = createGpuContextLostGate()
   app.on('child-process-gone', (_e, details) => {

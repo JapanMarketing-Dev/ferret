@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { isCdpScope, splitScope } from './browserScope'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer, type WebSocket } from 'ws'
@@ -58,6 +59,11 @@ export interface CdpCookie {
 }
 
 export interface BrowserCdpDeps {
+  /**
+   * つないできたターミナルのプロジェクト（URL の /p/<scope>。無ければ null）で、いま内蔵ブラウザを使ってよいか。
+   * だめなら Agent に返す理由（英語）。プロジェクトをまたいで、見ている別のプロジェクトの内蔵ブラウザを動かさない
+   */
+  scopeError?(scope: string | null): string | null
   /** 内蔵ブラウザの今のタブ（閉じたものは入れない） */
   tabs(): CdpTab[]
   /** タブが増えた・減った・URL や題名が変わった（Target.setDiscoverTargets・setAutoAttach の知らせに使う）。外す関数を返す */
@@ -407,7 +413,8 @@ export class BrowserCdpServer {
         socket.destroy()
         return
       }
-      wss.handleUpgrade(req, socket, head, (ws) => this.onSocket(ws))
+      const scope = this.scopeOf(req)
+      wss.handleUpgrade(req, socket, head, (ws) => this.onSocket(ws, scope))
     })
     const listen = (port: number) => new Promise<void>((resolve, reject) => {
       const onError = (err: Error) => reject(err)
@@ -429,8 +436,10 @@ export class BrowserCdpServer {
     return this.url()
   }
 
-  url(): string {
-    return `http://127.0.0.1:${this.port}/${this.token}`
+  /** BU_CDP_URL に入れる URL。scope（ターミナルのプロジェクト）を付けると、そのプロジェクトを開いている間だけ動かせる */
+  url(scope?: string): string {
+    const base = `http://127.0.0.1:${this.port}/${this.token}`
+    return scope && isCdpScope(scope) ? `${base}/p/${scope}` : base
   }
 
   listeningPort(): number {
@@ -457,7 +466,11 @@ export class BrowserCdpServer {
   }
 
   private pathOf(req: IncomingMessage): string {
-    return ((req.url ?? '').split('?')[0] ?? '').slice(this.token.length + 1) || '/'
+    return splitScope(((req.url ?? '').split('?')[0] ?? '').slice(this.token.length + 1) || '/').path
+  }
+
+  private scopeOf(req: IncomingMessage): string | null {
+    return splitScope(((req.url ?? '').split('?')[0] ?? '').slice(this.token.length + 1) || '/').scope
   }
 
   private onHttp(req: IncomingMessage, res: ServerResponse): void {
@@ -473,21 +486,38 @@ export class BrowserCdpServer {
       return
     }
     if (req.method !== 'GET') return json(405, { error: 'method not allowed' })
-    const ws = `ws://127.0.0.1:${this.port}/${this.token}/devtools/browser/ferret`
+    const scope = this.scopeOf(req)
+    const ws = `ws://127.0.0.1:${this.port}/${this.token}${scope ? `/p/${scope}` : ''}/devtools/browser/ferret`
     if (path === '/json/version') {
       return json(200, { Browser: 'Ferret/BuiltInBrowser', 'Protocol-Version': '1.3', 'User-Agent': '', 'V8-Version': '', 'WebKit-Version': '', webSocketDebuggerUrl: ws })
     }
     if (path === '/json' || path === '/json/list') {
+      // 別のプロジェクトのタブは見せない
+      const denied = this.deps.scopeError?.(scope) ?? null
+      if (denied) return json(409, { error: denied })
       return json(200, this.deps.tabs().filter((tab) => !tab.contents.isDestroyed()).map((tab) => ({ id: tab.id, type: 'page', title: tab.contents.getTitle(), url: tab.contents.getURL() || 'about:blank' })))
     }
     json(404, { error: 'not found' })
   }
 
-  private onSocket(ws: WebSocket): void {
+  private onSocket(ws: WebSocket, scope: string | null = null): void {
+    const denied = () => this.deps.scopeError?.(scope) ?? null
     const conn = this.router.connect((message) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(message))
+      // 別のプロジェクトを開いている間は、タブの知らせも送らない
+      if (ws.readyState === ws.OPEN && !denied()) ws.send(JSON.stringify(message))
     })
-    ws.on('message', (data) => void conn.handle(data.toString()))
+    ws.on('message', (data) => {
+      const raw = data.toString()
+      const reason = denied()
+      if (reason) {
+        // 別のプロジェクトを開いている間は何もしない（タブを開く・前に出す・読むのどれも）。理由を返す
+        let id: unknown
+        try { id = (JSON.parse(raw) as { id?: unknown }).id } catch { /* 読めない */ }
+        if (typeof id === 'number' && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ id, error: { code: -32000, message: reason } }))
+        return
+      }
+      void conn.handle(raw)
+    })
     ws.on('close', () => conn.close())
     ws.on('error', () => conn.close())
   }

@@ -50,9 +50,10 @@ vi.mock('electron', () => {
       getTitle: () => '',
       isLoading: () => false,
       isFocused: () => false,
+      isCurrentlyAudible: () => false,
       focus: () => undefined,
       close: () => { this.webContents.closed = true },
-      navigationHistory: { canGoBack: () => false, canGoForward: () => false }
+      navigationHistory: { canGoBack: () => false, canGoForward: () => false, getAllEntries: () => [], getActiveIndex: () => -1, restore: async () => undefined }
     }
     constructor(options: { webPreferences: { session: unknown } & Record<string, unknown> }) {
       state.order.push(options.webPreferences.session === fakeSession ? 'view-with-policy-session' : 'view-with-other-session')
@@ -149,17 +150,33 @@ describe('ログインのポップアップ', () => {
     expect(child.loaded).toEqual(['https://accounts.example/next'])
   })
 
-  it('普通の別タブ（target=_blank）は子ウインドウにせず、利用者が押した直後なら内蔵ブラウザの新しいタブで開く', () => {
+  it('普通の別タブ（target=_blank）は子ウインドウにせず、利用者が押した直後なら、手元の開発中のページは内蔵ブラウザの新しいタブで開く', () => {
     attach()
     const opener = state.views.at(-1)!
     gesture(opener)
     state.loaded.length = 0
-    expect(opener.webContents.windowOpen!({ url: 'https://example.com/tab', disposition: 'foreground-tab' }).action).toBe('deny')
+    expect(opener.webContents.windowOpen!({ url: 'http://localhost:3000/tab', disposition: 'foreground-tab' }).action).toBe('deny')
     const tab = state.views.at(-1)!
     expect(tab).not.toBe(opener)
-    expect(tab.webContents.loaded).toEqual(['https://example.com/tab'])
+    expect(tab.webContents.loaded).toEqual(['http://localhost:3000/tab'])
     expect(tab.visible).toBe(true)
     expect(opener.visible).toBe(false)
+    expect(state.openExternal).toEqual([])
+  })
+
+  it('外のサイトへの別タブのリンクは、押した直後なら外部ブラウザで開く（内蔵ブラウザのタブを増やさない）。操作が無ければ外へは出さない', async () => {
+    attach()
+    const opener = state.views.at(-1)!
+    const before = state.views.length
+    opener.webContents.windowOpen!({ url: 'https://github.com/x/y', disposition: 'foreground-tab' })
+    await flush()
+    expect(state.openExternal).toEqual([])
+    gesture(opener)
+    expect(opener.webContents.windowOpen!({ url: 'https://github.com/x/y', disposition: 'foreground-tab' }).action).toBe('deny')
+    opener.webContents.windowOpen!({ url: 'https://github.com/x/z', disposition: 'foreground-tab' })
+    await flush()
+    expect(state.openExternal).toEqual(['https://github.com/x/y'])
+    expect(state.views.length).toBe(before)
   })
 
   it('ページのスクリプトだけ（利用者の操作が無い）の window.open は、タブを増やさず同じタブで開く。1回の操作で開けるのは1枚', () => {
@@ -170,10 +187,10 @@ describe('ログインのポップアップ', () => {
     expect(state.views.length).toBe(before)
     expect(opener.webContents.loaded).toContain('https://example.com/spam')
     gesture(opener)
-    opener.webContents.windowOpen!({ url: 'https://example.com/one', disposition: 'foreground-tab' })
-    opener.webContents.windowOpen!({ url: 'https://example.com/two', disposition: 'foreground-tab' })
+    opener.webContents.windowOpen!({ url: 'http://localhost:3000/one', disposition: 'foreground-tab' })
+    opener.webContents.windowOpen!({ url: 'http://localhost:3000/two', disposition: 'foreground-tab' })
     expect(state.views.length).toBe(before + 1)
-    expect(opener.webContents.loaded).toContain('https://example.com/two')
+    expect(opener.webContents.loaded).toContain('http://localhost:3000/two')
   })
 })
 

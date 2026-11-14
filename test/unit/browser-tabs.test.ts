@@ -9,7 +9,7 @@ const key = (k: string, mods: Partial<TabKeyInput> = {}): TabKeyInput => ({ key:
 
 describe('タブを開く', () => {
   it('上限までは開ける', () => {
-    expect(MAX_BROWSER_TABS).toBe(20)
+    expect(MAX_BROWSER_TABS).toBe(10)
     expect(canOpenTab(0)).toBe(true)
     expect(canOpenTab(MAX_BROWSER_TABS - 1)).toBe(true)
     expect(canOpenTab(MAX_BROWSER_TABS)).toBe(false)

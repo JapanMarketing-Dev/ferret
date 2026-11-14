@@ -26,6 +26,12 @@ ${VALUE_USECASE_SKILL_MARKER}
 
 A system is complete when every value it promises can be obtained by a real user, step by step, from the first screen. So before building, write down **all** the values and, for each one, exactly which screen and which button the user goes through, from the very first screen to the moment they have the value. When the person approves it, build the system so every flow works exactly as written.
 
+**This document is the definition of done.** When every value's flow in it works, the system is complete — nothing more, nothing less. So make it **fine-grained, more than feels necessary**: list every value including the basics people always expect (sign-up / login / logout, settings, empty states, errors and retries, permissions, notifications, admin work, data import/export where relevant), and break each flow into one step per screen, click or input.
+
+**Screenshots on (almost) every step.** The person understands a flow only when they can see it. Give nearly every step an \`image\` with the \`target\` box on the button or field. Use Ferret's screen cache; if a screen is missing, open it in Ferret's browser (skill ferret-browser) and capture it; for a screen that does not exist yet, draw a simple mockup PNG (e.g. HTML rendered with a headless browser) instead of leaving \`image\` out.
+
+**Register every gap as a visual review.** While you walk the flows, each place where the product differs from how it should be (missing, wrong, confusing, slow, ugly) becomes its own detailed visual review plan (skill ferret-visual-review): the current screenshot, a box on the exact spot, and what it should look like and do. File many small plans — one per gap — not one big list; set that value's \`status\` to \`partial\`, \`broken\` or \`not-built\` accordingly.
+
 **Show it early, fill it in as you go.** The person reads the tab while you work; a partial document now beats a perfect one later.
 
 ## 1. Draft first — within your first few tool calls
@@ -40,7 +46,8 @@ If a document already exists for this product, update it instead (same file) —
   - \`${SCREENS_DIR}/${SCREENS_LATEST}\` — the page shown now
   - \`${SCREENS_DIR}/${SCREENS_PAGES_DIR}/<host><path>.jpg\` — the latest of each page
   - \`${SCREENS_DIR}/${SCREENS_INDEX}\` — \`{ latest, pages: [{ file, url, title, capturedAt, width, height }] }\`
-  Read the images directly. If a screen you need is missing, open it in Ferret's browser (skill ferret-browser) or ask the person, then read the cache again. For a screen that does not exist yet, leave \`image\` out (or draw a simple mockup PNG/SVG).
+  Read the images directly. If a screen you need is missing, open it in Ferret's browser (skill ferret-browser) or ask the person, then read the cache again. For a screen that does not exist yet, draw a simple mockup PNG/SVG — leave \`image\` out only when a picture really adds nothing.
+- As you go, file a visual review plan for each gap you find (see above) before moving on to the next value.
 - **Save the file after each value's flow** (same \`revision\`, new \`updatedAt\`) so the person sees it grow. When every value has its flow, set \`"status": "proposed"\` — that is what enables "approve".
 - Do not spend long on details you are unsure of: put them in \`questions\`.
 
@@ -81,7 +88,8 @@ Copy the screenshots you use into \`${VALUE_USECASE_DIR}/<id>/\` (the cache is o
 
 - \`status\` of the document: \`drafting\` while you are still writing (cannot be approved yet), \`proposed\` when ready.
 - **Every value**: list all the values the system must deliver (not features — what the user gains). If every flow works, the system is complete; if something is missing from the list, it will not be built.
-- **Full flow from the very first screen** (launch / top page / login): one step per screen or action — the screen name, the exact button or field (\`action\`), and what the user sees next (\`expected\`). Do not skip steps.
+- **Full flow from the very first screen** (launch / top page / login): one step per screen or action — the screen name, the exact button or field (\`action\`), and what the user sees next (\`expected\`). Do not skip or merge steps; a flow with 3 steps is usually too coarse.
+- \`image\` on nearly every step (current screenshot, or a mockup for a screen not built yet), with \`target\` on the exact button or field.
 - \`target\`: where the button is on the screenshot, as fractions (0..1) of the image width/height; Ferret draws it as a numbered box. Only with an \`image\`.
 - \`status\` of each value — check honestly against the code and screens: \`works\` (the whole flow works now), \`partial\`, \`broken\`, or \`not-built\`. Do not mark \`works\` without walking the flow.
 - Put what is deliberately not included in \`outOfScope\`, and anything unclear in \`questions\` (do not guess silently).

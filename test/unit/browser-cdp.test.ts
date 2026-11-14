@@ -252,6 +252,40 @@ describe('BrowserCdpServer（127.0.0.1 の口）', () => {
     await expect(new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })).rejects.toThrow()
   })
 
+  it('プロジェクトの印（/p/<scope>）付きの URL は、そのプロジェクトを開いている間だけ動かせる。別のプロジェクトでは開く・読むのどれもしない', async () => {
+    const h = setup()
+    let open = 'proj-a'
+    let created = 0
+    server = new BrowserCdpServer({
+      tabs: () => h.tabs, createTab: async () => { created++; return 'x' }, closeTab: () => {}, activateTab: () => {},
+      scopeError: (scope) => (scope === open ? null : 'other project')
+    }, 'secret-token')
+    await server.start()
+    const port = server.listeningPort()
+    expect(server.url('proj-a')).toBe(`http://127.0.0.1:${port}/secret-token/p/proj-a`)
+    expect(server.url('bad scope!')).toBe(`http://127.0.0.1:${port}/secret-token`)
+    const version = JSON.parse((await get(port, '/secret-token/p/proj-a/json/version')).body) as { webSocketDebuggerUrl: string }
+    expect(version.webSocketDebuggerUrl).toBe(`ws://127.0.0.1:${port}/secret-token/p/proj-a/devtools/browser/ferret`)
+    expect((await get(port, '/secret-token/p/proj-a/json/list')).status).toBe(200)
+    const ws = new WebSocket(version.webSocketDebuggerUrl)
+    await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
+    const call = (id: number, method: string, params: object = {}) => {
+      const reply = new Promise<Record<string, unknown>>((resolve) => ws.once('message', (d) => resolve(JSON.parse(d.toString()))))
+      ws.send(JSON.stringify({ id, method, params }))
+      return reply
+    }
+    expect(await call(1, 'Target.createTarget', { url: 'https://example.com' })).toMatchObject({ id: 1, result: { targetId: 'x' } })
+    // 見ているプロジェクトが変わった
+    open = 'proj-b'
+    expect(await call(2, 'Target.createTarget', { url: 'https://example.com' })).toEqual({ id: 2, error: { code: -32000, message: 'other project' } })
+    expect(await call(3, 'Target.getTargets')).toMatchObject({ id: 3, error: { message: 'other project' } })
+    expect(created).toBe(1)
+    expect((await get(port, '/secret-token/p/proj-a/json/list')).status).toBe(409)
+    // 印の無い URL も、開いているプロジェクトと違えば同じ
+    expect((await get(port, '/secret-token/json/list')).status).toBe(409)
+    ws.close()
+  })
+
   it('前の番号が使えなければ空いている番号で待ち受ける', async () => {
     const first = new BrowserCdpServer({ tabs: () => [], createTab: async () => 'x', closeTab: () => {}, activateTab: () => {} })
     await first.start()

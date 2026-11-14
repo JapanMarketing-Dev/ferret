@@ -40,6 +40,7 @@ vi.mock('electron', () => {
       setUserAgent: () => undefined,
       isLoading: () => false,
       isFocused: () => false,
+      isCurrentlyAudible: () => false,
       focus: () => undefined,
       enableDeviceEmulation: () => { state.log.push(`emulate ${this.id}`) },
       disableDeviceEmulation: () => undefined,
@@ -85,6 +86,9 @@ function attach(): InstanceType<typeof EmbeddedBrowser> {
   const browser = new EmbeddedBrowser()
   browser.attach(window, { urls: ['https://example.com/shop', 'https://example.com/shop2'], active: 0 }, 'desktop')
   browser.setBounds({ x: 0, y: 0, width: 800, height: 600 })
+  // 前のタブ以外は眠らせて並べる（@shared/browserMemory）。2枚目を一度前に出して起こしておく（3枚までは眠らせない）
+  browser.activateTab('tab-2')
+  browser.activateTab('tab-1')
   return browser
 }
 
@@ -261,5 +265,96 @@ describe('読み込みの中断（ERR_ABORTED）は送らない（FERRET-1R）',
     expect(state.reported).toContain('restore tab history')
     state.views.push = originalPush
     await nextTick()
+  })
+})
+
+describe('後ろのタブを眠らせる（@shared/browserMemory）', () => {
+  function attachMany(urls: string[], active = 0): InstanceType<typeof EmbeddedBrowser> {
+    const window = {
+      contentView: { addChildView: (v: { id: number }) => { state.log.push(`add ${v.id}`) }, removeChildView: (v: { id: number }) => { state.log.push(`remove ${v.id}`) }, children: [] },
+      isDestroyed: () => false
+    } as unknown as Parameters<InstanceType<typeof EmbeddedBrowser>['attach']>[0]
+    const browser = new EmbeddedBrowser()
+    browser.attach(window, { urls, active }, 'desktop')
+    browser.setBounds({ x: 0, y: 0, width: 800, height: 600 })
+    return browser
+  }
+  const live = () => state.views.filter((v) => !v.webContents.closed).length
+
+  it('起動・切り替えで読み込むのは前のタブだけ。ほかは題名・URL を残して眠らせる', () => {
+    const browser = attachMany(['https://a.example/', 'https://b.example/', 'https://c.example/'], 1)
+    expect(state.views).toHaveLength(1)
+    const tabs = browser.state().tabs!
+    expect(tabs.map((t) => [t.url, !!t.sleeping])).toEqual([['https://a.example/', true], ['https://b.example/', false], ['https://c.example/', true]])
+  })
+
+  it('眠らせたタブを押すと、ビューを作って履歴ごと戻す', () => {
+    const browser = attachMany(['https://a.example/', 'https://b.example/'])
+    browser.activateTab('tab-2')
+    expect(state.views).toHaveLength(2)
+    expect(browser.state().activeTabId).toBe('tab-2')
+    expect(browser.state().tabs!.every((t) => !t.sleeping)).toBe(true)
+  })
+
+  it('4枚目を開くと、いちばん使っていないタブを眠らせ、close は次のティック', async () => {
+    const browser = attachMany(['https://a.example/'])
+    await browser.newTab('https://b.example/')
+    await browser.newTab('https://c.example/')
+    expect(live()).toBe(3)
+    await browser.newTab('https://d.example/')
+    await nextTick()
+    expect(live()).toBe(3)
+    const first = browser.state().tabs![0]!
+    expect(first.sleeping).toBe(true)
+    expect(first.url).toBe('https://a.example/')
+    // 眠らせたタブを閉じても、もう一度 close しない（偽物が投げる）
+    browser.closeTab(first.id)
+    await nextTick()
+    expect(browser.state().tabs).toHaveLength(3)
+  })
+
+  it('メモリが多いときは前のタブ以外を眠らせる。Agent が操作中・録画中・音が出ているタブは残す', async () => {
+    const browser = attachMany(['https://a.example/'])
+    await browser.newTab('https://b.example/')
+    await browser.newTab('https://c.example/')
+    const ids = browser.state().tabs!.map((t) => t.id)
+    browser.holdForAutomation(ids[0]!, true)
+    expect(browser.sleepBackgroundTabs()).toBe(1)
+    await nextTick()
+    const tabs = browser.state().tabs!
+    expect(tabs.map((t) => !!t.sleeping)).toEqual([false, true, false])
+    browser.holdForAutomation(ids[0]!, false)
+    browser.keepClosedTab = () => true
+    expect(browser.sleepBackgroundTabs()).toBe(0)
+  })
+
+  it('ページのレンダラが落ちたら（メモリ不足など。FERRET-29）、後ろのタブは眠らせ、前のタブは理由を出す。終わり方が普通なら何もしない', async () => {
+    const browser = attachMany(['https://a.example/'])
+    await browser.newTab('https://b.example/')
+    const [back, front] = state.views
+    back!.webContents.events.get('render-process-gone')!({}, { reason: 'oom' })
+    await nextTick()
+    await nextTick()
+    expect(browser.state().tabs![0]!.sleeping).toBe(true)
+    expect(back!.webContents.closed).toBe(true)
+    front!.webContents.events.get('render-process-gone')!({}, { reason: 'clean-exit' })
+    await nextTick()
+    expect(browser.state().loadError).toBeUndefined()
+    front!.webContents.events.get('render-process-gone')!({}, { reason: 'oom' })
+    await nextTick()
+    expect(browser.state().loadError).toMatch(/memory|メモリ/)
+    front!.webContents.events.get('render-process-gone')!({}, { reason: 'crashed' })
+    await nextTick()
+    expect(browser.state().loadError).not.toMatch(/memory ran out|メモリ/)
+  })
+
+  it('眠らせたタブも写し（snapshot）に履歴ごと入る', async () => {
+    const browser = attachMany(['https://a.example/'])
+    await browser.newTab('https://b.example/')
+    browser.sleepBackgroundTabs()
+    const snap = browser.snapshotTabs()
+    expect(snap.tabs).toHaveLength(2)
+    expect(snap.tabs[0]!.entries).toEqual([{ url: 'https://example.com/a', title: '' }])
+    expect(snap.active).toBe(1)
   })
 })

@@ -4,6 +4,7 @@ import { SHARED_BROWSER_PARTITION } from '@shared/browserProfile'
 import { WebContentsView, dialog, session, shell, type BaseWindow, type BrowserWindow, type Session, type WebContents } from 'electron'
 import { join } from 'node:path'
 import { MOBILE_PRESET, type BrowserState, type ViewBounds, type Viewport } from '@shared/types'
+import { LIVE_TABS, pageTabDestination, tabsToSleep } from '@shared/browserMemory'
 import { MAX_BROWSER_TABS, browserTabKeyAction, canOpenTab, cycleTab, nextTabId, tabAfterClose, tabAtNumber, type BrowserTabInfo, type BrowserTabKeyAction } from '@shared/browserTabs'
 import { t } from '@shared/i18n'
 import { UserFacingError } from '@shared/errors'
@@ -202,12 +203,32 @@ export interface TabsSnapshot {
   active: number
 }
 
+/** 起きていて閉じかけでないタブのページ。眠らせた・閉じたタブは null */
+function liveContents(tab: BrowserTab): WebContents | null {
+  if (tab.destroyed || !tab.view) return null
+  const wc = tab.view.webContents
+  return wc.isDestroyed() ? null : wc
+}
+
 const isRecordableTabUrl = (url: string): boolean => !!url && url !== 'about:blank' && isNavigableUrl(url)
 
 /** 内蔵ブラウザのタブ1枚 */
+/** 眠らせたタブに残すもの（ページは捨て、押したら読み直す。@shared/browserMemory） */
+interface SleepingPage {
+  url: string
+  title: string
+  entries: import('electron').NavigationEntry[]
+  index: number
+}
+
 interface BrowserTab {
   id: string
-  view: WebContentsView
+  /** ページのビュー。眠らせている間は null（sleeping に履歴を残す） */
+  view: WebContentsView | null
+  /** 眠らせたタブの題名・URL・履歴。起きていれば null */
+  sleeping: SleepingPage | null
+  /** 最後に前に出した順の番号（大きいほど最近。眠らせる順） */
+  lastActiveAt: number
   /**
    * レンダラ（フレームウィジェット）ができているか。
    *
@@ -236,6 +257,8 @@ export class EmbeddedBrowser {
   private tabs: BrowserTab[] = []
   private activeId = ''
   private tabCounter = 0
+  /** 前に出した順の番号（眠らせる順。時刻だと同じミリ秒で並びが決まらない） */
+  private activeSeq = 0
   /** 閉じたが、録画が使っているので録画が終わるまで残すタブの中身（releaseClosedTabs で閉じる） */
   private retired = new Set<WebContents>()
   private window: BaseWindow | null = null
@@ -291,12 +314,18 @@ export class EmbeddedBrowser {
 
   /** 外の自動操作（browser-use。browserCdp.ts）に見せるタブ。閉じかけ・閉じたものは入れない */
   automationTabs(): Array<{ id: string; contents: WebContents }> {
-    return this.tabs.filter((tab) => !tab.destroyed && !tab.view.webContents.isDestroyed()).map((tab) => ({ id: tab.id, contents: tab.view.webContents }))
+    return this.tabs.flatMap((tab) => {
+      const contents = liveContents(tab)
+      return contents ? [{ id: tab.id, contents }] : []
+    })
   }
 
   /** 開いているタブの中身すべて（並び順） */
   allContents(): WebContents[] {
-    return this.tabs.map((tab) => tab.view.webContents).filter((wc) => !wc.isDestroyed())
+    return this.tabs.flatMap((tab) => {
+      const contents = liveContents(tab)
+      return contents ? [contents] : []
+    })
   }
 
   /** 内蔵ブラウザのどれかのタブのページに焦点があるか */
@@ -340,7 +369,7 @@ export class EmbeddedBrowser {
   /** ページが描く前に見える地の色。配色の切り替えに合わせる */
   setBackgroundColor(color: string): void {
     this.background = color
-    for (const tab of this.tabs) tab.view.setBackgroundColor(color)
+    for (const tab of this.tabs) tab.view?.setBackgroundColor(color)
   }
 
   /** いま開いているプロジェクトのログインの組（session の名前）。新しいタブ・ポップアップはこの組で作る */
@@ -375,11 +404,13 @@ export class EmbeddedBrowser {
    * プロジェクトを切り替えるときに main が前のプロジェクトの分として持っておき、戻ってきたら replaceTabs で開き直す
    */
   snapshotTabs(): TabsSnapshot {
-    const tabs = this.tabs.filter((tab) => !tab.view.webContents.isDestroyed())
+    const tabs = this.tabs.filter((tab) => tab.sleeping || liveContents(tab))
     return {
       tabs: tabs.map((tab) => {
-        const history = tab.view.webContents.navigationHistory
-        return { url: tab.view.webContents.getURL(), entries: history.getAllEntries(), index: history.getActiveIndex() }
+        if (tab.sleeping) return { url: tab.sleeping.url, entries: tab.sleeping.entries, index: tab.sleeping.index }
+        const wc = liveContents(tab)!
+        const history = wc.navigationHistory
+        return { url: wc.getURL(), entries: history.getAllEntries(), index: history.getActiveIndex() }
       }),
       active: Math.max(0, tabs.findIndex((tab) => tab.id === this.activeId))
     }
@@ -405,44 +436,52 @@ export class EmbeddedBrowser {
   /** URL の並びでタブを開き、active 番目を前に出す。開けない URL のタブは空のまま（URL 欄から直せる） */
   private openTabs({ urls, active }: ProjectTabs): void {
     const list = (urls.length ? urls : ['']).slice(0, MAX_BROWSER_TABS)
-    const created = list.map(() => this.createTab())
-    this.activateFirst(created[Math.min(Math.max(0, active), created.length - 1)]!)
-    list.forEach((url, i) => {
-      const wc = created[i]!.view.webContents
+    const front = Math.min(Math.max(0, active), list.length - 1)
+    // ページを読み込むのは前のタブだけ。ほかは眠らせたまま並べ、押したときに読む（全部いっせいに読み込まない）
+    const created = list.map((url, i) => {
       const target = url ? normalizeUrl(url) : ''
       // 前回の URL が開けない（形式が違う・許さないスキーム）なら空のまま
-      if (target && isNavigableUrl(target) && isTypedNavigationAllowed(target)) void this.load(wc, target).then(() => this.emitState())
+      const ok = !!target && isNavigableUrl(target) && isTypedNavigationAllowed(target)
+      return i === front ? this.createTab() : this.createSleepingTab({ url: ok ? target : '', title: '', entries: [], index: -1 })
     })
+    this.activateFirst(created[front]!)
+    const target = list[front] ? normalizeUrl(list[front]!) : ''
+    if (target && isNavigableUrl(target) && isTypedNavigationAllowed(target)) void this.load(created[front]!.view!.webContents, target).then(() => this.emitState())
   }
 
   /** 写したタブを、戻る・進むの履歴ごと開き直す。開いてよい URL の項目だけを戻す */
   private restoreSnapshot(snapshot: TabsSnapshot): void {
     const list = snapshot.tabs.slice(0, MAX_BROWSER_TABS)
-    const created = list.map(() => this.createTab())
-    this.activateFirst(created[Math.min(Math.max(0, snapshot.active), created.length - 1)]!)
-    list.forEach((saved, i) => {
-      const wc = created[i]!.view.webContents
-      const history = restorableHistory(saved.entries, saved.index, (url) => isNavigableUrl(url) && isTypedNavigationAllowed(url))
-      if (history) {
-        void wc.navigationHistory.restore(history).then(() => this.emitState()).catch((err: unknown) => {
-          // 次の読み込み・タブの入れ替えで中断された（ERR_ABORTED）・閉じたタブは想定内。送らず、開き直しもしない（FERRET-1R）
-          if (isAbortedNavigation(err) || wc.isDestroyed()) return
-          reportHandled(err, { area: 'browser', op: 'restore tab history' })
-          if (isRecordableTabUrl(saved.url)) void this.load(wc, saved.url).then(() => this.emitState())
-        })
-      } else if (isRecordableTabUrl(saved.url) && isTypedNavigationAllowed(saved.url)) {
-        void this.load(wc, saved.url).then(() => this.emitState())
-      }
-    })
+    const front = Math.min(Math.max(0, snapshot.active), list.length - 1)
+    // 読み込むのは前のタブだけ。ほかは履歴ごと眠らせておく
+    const created = list.map((saved, i) => (i === front ? this.createTab() : this.createSleepingTab({ url: saved.url, title: '', entries: saved.entries, index: saved.index })))
+    this.activateFirst(created[front]!)
+    this.restoreInto(created[front]!.view!.webContents, list[front]!)
+  }
+
+  /** 写した履歴（無ければ URL）をタブへ戻す。開いてよい URL の項目だけ */
+  private restoreInto(wc: WebContents, saved: { url: string; entries: import('electron').NavigationEntry[]; index: number }): void {
+    const history = saved.entries.length ? restorableHistory(saved.entries, saved.index, (url) => isNavigableUrl(url) && isTypedNavigationAllowed(url)) : null
+    if (history) {
+      void wc.navigationHistory.restore(history).then(() => this.emitState()).catch((err: unknown) => {
+        // 次の読み込み・タブの入れ替えで中断された（ERR_ABORTED）・閉じたタブは想定内。送らず、開き直しもしない（FERRET-1R）
+        if (isAbortedNavigation(err) || wc.isDestroyed()) return
+        reportHandled(err, { area: 'browser', op: 'restore tab history' })
+        if (isRecordableTabUrl(saved.url)) void this.load(wc, saved.url).then(() => this.emitState())
+      })
+    } else if (isRecordableTabUrl(saved.url) && isTypedNavigationAllowed(saved.url)) {
+      void this.load(wc, saved.url).then(() => this.emitState())
+    }
   }
 
   /** 作ったばかりのタブを前に出す（attach・入れ替えの直後。activateTab と違い前のタブを見ない） */
   private activateFirst(tab: BrowserTab): void {
     this.activeId = tab.id
+    tab.lastActiveAt = ++this.activeSeq
     this.placeViews()
     this.onLayout?.()
     this.applyEmulation(tab)
-    this.onActiveTab?.(tab.view.webContents)
+    if (tab.view) this.onActiveTab?.(tab.view.webContents)
   }
 
   /**
@@ -450,6 +489,22 @@ export class EmbeddedBrowser {
    * 権限の決まりを入れた永続の session・注入スクリプトだけの preload・sandbox・遷移と転送の決まり・window.open の扱い
    */
   private createTab(): BrowserTab {
+    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), view: null, sleeping: null, lastActiveAt: ++this.activeSeq, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
+    this.attachView(tab)
+    this.tabs.push(tab)
+    return tab
+  }
+
+  /** 眠らせたままのタブを1枚作る（ページは読まない。押したときに attachView で作る） */
+  private createSleepingTab(page: SleepingPage): BrowserTab {
+    if (!this.window || this.window.isDestroyed()) throw new UserFacingError(t('browser.errors.generic'))
+    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), view: null, sleeping: page, lastActiveAt: 0, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
+    this.tabs.push(tab)
+    return tab
+  }
+
+  /** タブにページのビューを作って付ける（新しいタブ・眠らせたタブを起こすとき） */
+  private attachView(tab: BrowserTab): void {
     const window = this.window
     if (!window || window.isDestroyed()) throw new UserFacingError(t('browser.errors.generic'))
     const view = new WebContentsView({
@@ -467,17 +522,18 @@ export class EmbeddedBrowser {
         webSecurity: true
       }
     })
-    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), view, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
+    tab.view = view
+    tab.rendererReady = false
+    tab.emulating = false
     view.setBackgroundColor(this.background)
     // 映した映像・拡張機能のポップアップより下に置く（いちばん下のタブの位置に差し込む）
     const children = window.contentView.children ?? []
-    const lowest = this.tabs.map((other) => children.indexOf(other.view)).filter((i) => i >= 0)
+    const lowest = this.tabs.flatMap((other) => (other.view && other !== tab ? [children.indexOf(other.view)] : [])).filter((i) => i >= 0)
     if (lowest.length > 0) window.contentView.addChildView(view, Math.min(...lowest))
     else window.contentView.addChildView(view)
     // bounds が renderer から届くまでは描画させない（0サイズ）。前に出すまでは隠す
     view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     view.setVisible(false)
-    this.tabs.push(tab)
 
     const wc = view.webContents
     // ページのコピーは、利用者がこのビューをクリック・キー入力した直後だけ（ポップアップの入力では許さない。security-5 [14]）
@@ -564,9 +620,89 @@ export class EmbeddedBrowser {
       tab.emulating = false
       // 利用者のページのレンダラの終了。アプリの不具合ではないので送らない（アプリ自身の画面は telemetry.ts が拾う）
       console.warn(`[browser] レンダラが終了しました: ${details.reason}`)
+      if (details.reason === 'clean-exit' || details.reason === 'killed') return
+      // 落ちたページを白いまま残さない（メモリ不足 FERRET-29 など）。後ろのタブは眠らせて履歴を残し、押したら読み直す。
+      // 前のタブは理由を出して再読み込みを促す。この終了の中でビューを外さず、次のティックで行う（browserExtensions.ts と同じ）
+      setImmediate(() => {
+        if (tab.destroyed || tab.view?.webContents !== wc || wc.isDestroyed()) return
+        if (tab.id !== this.activeId) {
+          if (this.sleepTab(tab)) this.emitState()
+          return
+        }
+        tab.loadError = t(details.reason === 'oom' ? 'browser.errors.outOfMemory' : 'browser.errors.crashed')
+        this.emitState()
+      })
     })
     this.onTabCreated?.(wc)
-    return tab
+  }
+
+  /**
+   * タブを眠らせる（ページを捨て、題名・URL・履歴だけ残す）。前のタブ・自動操作がつないでいるタブ・録画が使っているタブ・
+   * 音が出ているタブは眠らせない。眠らせたら true
+   */
+  private sleepTab(tab: BrowserTab): boolean {
+    const wc = liveContents(tab)
+    const view = tab.view
+    if (!wc || !view || tab.id === this.activeId || this.automationHeld.has(tab.id)) return false
+    if (this.keepClosedTab?.(wc) || wc.isCurrentlyAudible()) return false
+    const history = wc.navigationHistory
+    tab.sleeping = { url: wc.getURL(), title: wc.getTitle(), entries: history.getAllEntries(), index: history.getActiveIndex() }
+    tab.view = null
+    tab.rendererReady = false
+    tab.emulating = false
+    try {
+      view.setVisible(false)
+      view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+      if (this.window && !this.window.isDestroyed()) this.window.contentView.removeChildView(view)
+      this.onTabClosed?.(wc)
+    } catch (err) {
+      reportHandled(err, { area: 'browser', op: 'sleep tab' })
+    }
+    // 外す処理と close を同じ流れで重ねない（destroyTab と同じ）
+    setImmediate(() => {
+      try {
+        if (!wc.isDestroyed()) wc.close()
+      } catch (err) {
+        reportHandled(err, { area: 'browser', op: 'sleep tab' })
+      }
+    })
+    return true
+  }
+
+  /** 眠らせたタブを起こす（ビューを作り、履歴ごと読み直す） */
+  private wakeTab(tab: BrowserTab): boolean {
+    const saved = tab.sleeping
+    if (!saved || tab.destroyed) return false
+    try {
+      this.attachView(tab)
+    } catch (err) {
+      reportHandled(err, { area: 'browser', op: 'wake tab' })
+      return false
+    }
+    tab.sleeping = null
+    this.restoreInto(tab.view!.webContents, saved)
+    return true
+  }
+
+  /** ページを持たせるタブを keepLive 枚までにする（後ろの、使っていない順に眠らせる）。眠らせた数を返す */
+  private enforceLiveTabs(keepLive: number = LIVE_TABS): number {
+    const info = this.tabs.filter((tab) => !tab.destroyed).map((tab) => {
+      const wc = liveContents(tab)
+      const pinned = !!wc && (this.automationHeld.has(tab.id) || (this.keepClosedTab?.(wc) ?? false) || wc.isCurrentlyAudible())
+      return { id: tab.id, lastActiveAt: tab.lastActiveAt, sleeping: !wc, pinned }
+    })
+    let slept = 0
+    for (const id of tabsToSleep(info, this.activeId, keepLive)) {
+      const tab = this.tabs.find((candidate) => candidate.id === id)
+      if (tab && this.sleepTab(tab)) slept++
+    }
+    if (slept) this.emitState()
+    return slept
+  }
+
+  /** メモリが多いとき（index.ts の見張り）。前のタブ以外を眠らせる。眠らせた数を返す */
+  sleepBackgroundTabs(): number {
+    return this.enforceLiveTabs(1)
   }
 
   /** 前に出ているタブ */
@@ -595,7 +731,8 @@ export class EmbeddedBrowser {
     if (url && (!isNavigableUrl(url) || !isTypedNavigationAllowed(url))) throw new UserFacingError(t('browser.errors.invalidUrl'))
     const tab = this.createTab()
     this.activateTab(tab.id)
-    if (url) await this.load(tab.view.webContents, url)
+    this.enforceLiveTabs()
+    if (url) await this.load(tab.view!.webContents, url)
     this.emitState()
     return tab.id
   }
@@ -606,9 +743,16 @@ export class EmbeddedBrowser {
    */
   private openTabFromPage(opener: BrowserTab, url: string, foreground: boolean): void {
     const fresh = Date.now() - opener.gestureAt <= PAGE_TAB_GESTURE_MS
+    const openerContents = liveContents(opener)
+    // 手元の開発中のページ（localhost など）でなければ、外部ブラウザで開く（内蔵ブラウザのタブを増やさない。@shared/browserMemory）
+    if (fresh && pageTabDestination(url) === 'external') {
+      opener.gestureAt = 0
+      void shell.openExternal(url).catch((err: unknown) => reportHandled(err, { area: 'browser', op: 'open link in external browser' }))
+      return
+    }
     if (!fresh || !canOpenTab(this.tabs.length)) {
       if (fresh) this.onNotice?.(t('browser.tabs.limitSameTab', { n: MAX_BROWSER_TABS }))
-      void opener.view.webContents.loadURL(url).catch(() => undefined)
+      void openerContents?.loadURL(url).catch(() => undefined)
       return
     }
     // 1回の操作で開けるのは1枚だけ
@@ -622,28 +766,35 @@ export class EmbeddedBrowser {
     }
     if (foreground) this.activateTab(tab.id)
     else this.emitState()
-    void this.load(tab.view.webContents, url)
+    const wc = tab.view!.webContents
+    this.enforceLiveTabs()
+    void this.load(wc, url)
   }
 
   /** その中身のタブを前に出す（録画のトラックの切り替えから） */
   activateContents(contents: WebContents): void {
-    const tab = this.tabs.find((candidate) => candidate.view.webContents === contents)
+    const tab = this.tabs.find((candidate) => candidate.view?.webContents === contents)
     if (tab) this.activateTab(tab.id)
   }
 
   /** そのタブを前に出す。録画中なら録画もそのタブへ移る（onActiveTab） */
   activateTab(id: string): void {
     const tab = this.tabs.find((candidate) => candidate.id === id)
-    if (!tab || tab.view.webContents.isDestroyed()) return
+    if (!tab || tab.destroyed) return
+    // 眠らせたタブは起こしてから前に出す
+    if (tab.sleeping && !this.wakeTab(tab)) return
+    if (!liveContents(tab)) return
     const changed = this.activeId !== id
     this.activeId = id
+    tab.lastActiveAt = ++this.activeSeq
     this.placeViews()
     this.onLayout?.()
     this.emitState()
     if (changed) {
       // 表示幅（スマホ幅）はタブをまたいで同じ。前に出たタブにも掛ける
       this.applyEmulation(tab)
-      this.onActiveTab?.(tab.view.webContents)
+      this.onActiveTab?.(tab.view!.webContents)
+      this.enforceLiveTabs()
     }
   }
 
@@ -694,6 +845,8 @@ export class EmbeddedBrowser {
   private destroyTab(tab: BrowserTab): void {
     if (tab.destroyed) return
     tab.destroyed = true
+    // 眠らせたタブはページが無い（もう閉じてある）
+    if (!tab.view) return
     const wc = tab.view.webContents
     try {
       // 録画が使っているタブは、録画が終わるまで中身を残す（隠すと録っている映像が止まるので、表示のまま外すだけ）
@@ -745,9 +898,10 @@ export class EmbeddedBrowser {
 
   /** 画面へ出すタブの一覧 */
   private tabInfos(): BrowserTabInfo[] {
-    return this.tabs.filter((tab) => !tab.view.webContents.isDestroyed()).map((tab) => {
-      const wc = tab.view.webContents
-      return { id: tab.id, title: wc.getTitle(), url: wc.getURL(), loading: wc.isLoading() }
+    return this.tabs.flatMap((tab) => {
+      if (tab.sleeping) return [{ id: tab.id, title: tab.sleeping.title, url: tab.sleeping.url, loading: false, sleeping: true }]
+      const wc = liveContents(tab)
+      return wc ? [{ id: tab.id, title: wc.getTitle(), url: wc.getURL(), loading: wc.isLoading() }] : []
     })
   }
 
@@ -878,8 +1032,8 @@ export class EmbeddedBrowser {
    */
   async captureVisibleTab(): Promise<{ image: import('electron').NativeImage; url: string; title: string } | null> {
     const tab = this.activeTab
-    const wc = tab?.view.webContents
-    if (!tab || !wc || wc.isDestroyed() || wc.isLoading() || tab.loadError) return null
+    const wc = tab ? liveContents(tab) : null
+    if (!tab || !tab.view || !wc || wc.isLoading() || tab.loadError) return null
     const bounds = tab.view.getBounds()
     if (bounds.width <= 0 || bounds.height <= 0) return null
     const url = wc.getURL()
@@ -894,14 +1048,14 @@ export class EmbeddedBrowser {
    */
   async captureTab(id: string, options: { format?: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number } }): Promise<string> {
     const tab = this.tabs.find((candidate) => candidate.id === id && !candidate.destroyed)
-    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('No target with given id found')
+    if (!tab || !liveContents(tab)) throw new Error('No target with given id found')
     // 内蔵ブラウザが画面に出ていて、撮るタブが前に出ていなければ前に出す（エージェントがいま作業しているタブを見せる）
     if (tab.id !== this.activeId && this.bounds && this.bounds.width > 0 && this.bounds.height > 0) {
       this.activateTab(tab.id)
       await new Promise((resolve) => setTimeout(resolve, 150))
     }
     const rect = options.clip ? { x: Math.round(options.clip.x), y: Math.round(options.clip.y), width: Math.round(options.clip.width), height: Math.round(options.clip.height) } : undefined
-    const image = await tab.view.webContents.capturePage(rect, { stayHidden: true }).catch(() => {
+    const image = await tab.view!.webContents.capturePage(rect, { stayHidden: true }).catch(() => {
       // 一度も画面に出ていないタブは、撮る元の画面が無い
       throw new Error("Ferret's built-in browser is not on screen, so this tab cannot be captured. Show the browser in Ferret (or ask the person to), then retry.")
     })
@@ -917,7 +1071,7 @@ export class EmbeddedBrowser {
   private placeViews(): void {
     // 前に出ていないタブは隠す（ページはそのまま。切り替えても読み込み直さない）
     for (const tab of this.tabs) {
-      if (tab.id === this.activeId || tab.destroyed || tab.view.webContents.isDestroyed()) continue
+      if (tab.id === this.activeId || tab.destroyed || !tab.view || tab.view.webContents.isDestroyed()) continue
       if (this.automationHeld.has(tab.id)) {
         this.holdHidden(tab.view)
         continue
@@ -981,8 +1135,8 @@ export class EmbeddedBrowser {
    * `dom-ready` のたびに掛け直す。
    */
   private applyEmulation(tab: BrowserTab): void {
-    const wc = tab.view.webContents
-    if (tab.destroyed || wc.isDestroyed() || !tab.rendererReady) return
+    const wc = liveContents(tab)
+    if (!wc || !tab.rendererReady) return
     try {
       if (this.viewport === 'mobile') {
         if (tab.emulating) return
@@ -1094,7 +1248,7 @@ export class EmbeddedBrowser {
     this.activeId = ''
     for (const tab of tabs) {
       tab.destroyed = true
-      retireView(this.window, tab.view, 'destroy view')
+      if (tab.view) retireView(this.window, tab.view, 'destroy view')
     }
     this.releaseClosedTabs()
     this.window = null

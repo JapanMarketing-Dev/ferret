@@ -9,7 +9,7 @@
  */
 
 /** 一度に開けるタブの数 */
-export const MAX_BROWSER_TABS = 20
+export const MAX_BROWSER_TABS = 10
 
 /** 画面へ出すタブ1枚 */
 export interface BrowserTabInfo {
@@ -17,6 +17,8 @@ export interface BrowserTabInfo {
   title: string
   url: string
   loading: boolean
+  /** 眠らせている（ページを捨てて題名・URL・履歴だけ残している。押すと読み直す。@shared/browserMemory） */
+  sleeping?: boolean
 }
 
 /** 次のタブの id（tab-1, tab-2 …。閉じた番号は使い直さない） */

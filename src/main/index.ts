@@ -12,7 +12,7 @@ import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
 import { existsSync, realpathSync, watch } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, totalmem } from 'node:os'
 import type { SessionPaths } from './sessions/paths'
 import type { IncrementalTranscriber } from './pipeline/stt/engine'
 import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
@@ -64,6 +64,7 @@ import type { PcmBlock, RecordingController } from './recording'
 import { installMenu } from './menu'
 import { allowCrashReload } from './crashReload'
 import { applyLocalePreference } from './locale'
+import { CDP_OTHER_PROJECT_ERROR, cdpScopeOf } from './browserScope'
 import { PRODUCT_NAME, getLocale, t } from '@shared/i18n'
 import { UserFacingError, isStaleChunkError, toUserFacingFileError } from '@shared/errors'
 import { IS_PACKAGED } from './runtime'
@@ -199,6 +200,8 @@ async function browserAutomation(): Promise<import('./browserAutomation').Browse
       configFile: join(app.getPath('userData'), 'browser-cdp.json'),
       toolDir: join(app.getPath('userData'), 'browser-use'),
       tabs: () => browser?.automationTabs() ?? [],
+      // つないできたターミナルのプロジェクトと、いま開いているプロジェクトが違えば動かさない（FERRET のプロジェクトをまたがない）
+      scopeError: (scope) => (scope === cdpScopeOf(workspace.projectId) ? null : CDP_OTHER_PROJECT_ERROR),
       createTab: async (url) => {
         if (!browser) throw new UserFacingError(t('browser.errors.invalidUrl'))
         return browser.newTab(url)
@@ -1081,6 +1084,37 @@ function ensureWorkProject(): void {
   if (next !== projects) updateSettings({ projects: next })
   const work = next.find((p) => p.work)
   if (work && !work.archived) ensureWorkFolder(work.folderPath)
+}
+
+let memoryWatchTimer: NodeJS.Timeout | null = null
+let memoryNoticeAt: number | null = null
+/** 前の確認で眠らせたか（眠らせても下がらないときだけ知らせる） */
+let memorySlept = false
+
+/**
+ * Ferret 全体のメモリを30秒ごとに見る（Electron が持っている数値を足すだけで軽い。@shared/browserMemory）。
+ * PC のメモリの割合で決める: 多ければ内蔵ブラウザの後ろのタブを眠らせ、それでも多ければ一度だけ知らせる（30分は繰り返さない）
+ */
+function startMemoryWatch(): void {
+  if (memoryWatchTimer) return
+  void import('@shared/browserMemory').then(({ MEMORY_CHECK_MS, memoryAction, formatGb }) => {
+    const total = totalmem()
+    memoryWatchTimer = setInterval(() => {
+      try {
+        const used = app.getAppMetrics().reduce((sum, metric) => sum + (metric.memory?.workingSetSize ?? 0) * 1024, 0)
+        const action = memoryAction(used, total, Date.now(), memoryNoticeAt, memorySlept)
+        if (action.sleep) browser?.sleepBackgroundTabs()
+        memorySlept = action.sleep
+        if (action.notice) {
+          memoryNoticeAt = Date.now()
+          send('browser:notice', t('browser.memory.notice', { gb: formatGb(used), percent: Math.round((used / total) * 100) }))
+        }
+      } catch (err) {
+        reportHandled(err, { area: 'browser', op: 'memory watch' })
+      }
+    }, MEMORY_CHECK_MS)
+    memoryWatchTimer.unref?.()
+  })
 }
 
 let projectsSkillTimer: NodeJS.Timeout | null = null
@@ -3877,7 +3911,8 @@ async function main(): Promise<void> {
       ? await (await decision()).launchEnv({ ...(workspace.projectId ? { projectId: workspace.projectId } : {}), ...(meta.agent ? { agent: meta.agent } : {}), sessionId: meta.sessionId })
       : {}),
     // browser-use で内蔵ブラウザを動かす（BU_CDP_URL。src/main/browserAutomation.ts）
-    ...(await (await browserAutomation()).env().catch((err: unknown) => { reportHandled(err, { area: 'browser', op: 'automation env' }); return {} })),
+    // このタブのプロジェクトを開いている間だけ動かせる（プロジェクトをまたいで、見ている別のプロジェクトの内蔵ブラウザを動かさない）
+    ...(await (await browserAutomation()).env(cdpScopeOf(workspace.projectId) ?? undefined).catch((err: unknown) => { reportHandled(err, { area: 'browser', op: 'automation env' }); return {} })),
     // このタブの印。Agent がビジュアルレビューの計画に書き、承認・フィードバックをこのタブへ送り返す（skill ferret-visual-review）
     FERRET_TERMINAL_ID: meta.sessionId
   })
@@ -3978,6 +4013,14 @@ async function main(): Promise<void> {
     send('menu:command', 'focusUrl')
   }
   browser.onNotice = (message) => send('browser:notice', message)
+  startMemoryWatch()
+  // 落ちたレンダラが何かを Sentry に残す（アプリの画面か、内蔵ブラウザのタブか。FERRET-29）
+  void import('./telemetry').then(({ setRendererRoleResolver }) => setRendererRoleResolver((contents) => {
+    if (mainWindow && !mainWindow.isDestroyed() && contents === mainWindow.webContents) return 'app'
+    if (browser?.allContents().includes(contents)) return 'browser-tab'
+    if (browser?.popupContents().includes(contents)) return 'browser-popup'
+    return 'other'
+  }))
   // 表示幅の切替を操作ログへ残す（WS-3 → viewport イベント）
   browser.onViewportChange = (width) => recording?.recordViewport(width)
   // 文字で指摘の静止画は、そのビューへの本物の入力の直後だけ（noteInputs）

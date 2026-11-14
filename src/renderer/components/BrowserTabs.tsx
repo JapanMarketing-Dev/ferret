@@ -59,9 +59,9 @@ export function BrowserTabs({
         const label = tabLabel(tab) || t('browser.tabs.new')
         const selected = tab.id === active
         return (
-          <div key={tab.id} className={`browser-tab${selected ? ' is-active' : ''}`} data-testid={`${testId}-tab-${index + 1}`} data-tab-id={tab.id}
+          <div key={tab.id} className={`browser-tab${selected ? ' is-active' : ''}${tab.sleeping ? ' is-sleeping' : ''}`} data-testid={`${testId}-tab-${index + 1}`} data-tab-id={tab.id}
             onContextMenu={(event) => { event.preventDefault(); void window.ade.invoke('browser:tabMenu', tab.id, { x: event.clientX, y: event.clientY }) }}
-            title={tab.url && tab.url !== 'about:blank' ? `${label}\n${tab.url}` : label}>
+            title={[label, tab.url && tab.url !== 'about:blank' ? tab.url : '', tab.sleeping ? t('browser.tabs.sleeping') : ''].filter(Boolean).join('\n')}>
             <button
               type="button"
               role="tab"
@@ -74,6 +74,7 @@ export function BrowserTabs({
                 ? <LoaderCircle size={12} strokeWidth={2} className="browser-tab__icon is-spinning" aria-hidden="true" />
                 : <Globe size={12} strokeWidth={1.9} className="browser-tab__icon" aria-hidden="true" />}
               <span className="browser-tab__label">{label}</span>
+              {tab.sleeping && <span className="browser-tab__zz" aria-label={t('browser.tabs.sleeping')}>💤</span>}
             </button>
             <button
               type="button"

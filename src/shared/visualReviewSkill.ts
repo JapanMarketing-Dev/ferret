@@ -78,6 +78,7 @@ Now read only the code you need to be precise. Rewrite the **same file** as you 
 - If \`.ferret/value-usecases/\` has an approved or done value use-case document for this product (skill ferret-value-usecases), keep the plan consistent with its values and flows; if the request conflicts with them, say so in \`questions\`.
 - Ferret lists files it cannot read (with the reason) at the bottom of the tab; you can also check with \`node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" <file>\`.
 - Several separate requests → several small plans, not one big one. A follow-up on the same screen → revise the existing plan.
+- **Plenty of plans is good.** Whenever you find something that differs from how the product should be — especially while defining or checking value use cases (skill ferret-value-usecases) — file a separate, detailed plan for each gap (screenshot, a box on the exact spot, concrete before/after), even if nobody asked for that change yet. The person would rather review many small, precise plans than discover the gaps later.
 
 ## 3. Stop and wait
 

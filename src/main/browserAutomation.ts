@@ -33,6 +33,8 @@ export interface BrowserAutomationDeps {
   session(): Session
   notice(message: string): void
   attachedMessage(): string
+  /** つないできたターミナルのプロジェクトで、いま内蔵ブラウザを使ってよいか（だめなら Agent に返す理由） */
+  scopeError?(scope: string | null): string | null
   /** 画面へ「エージェントが内蔵ブラウザを動かし始めた」を知らせる（エディタなら中央を内蔵ブラウザにする） */
   reveal(): void
   /** API で動かすときの LLM のキー（Ferret に保存したもの・設定の環境変数）。ターミナルには渡さない */
@@ -70,10 +72,14 @@ export class BrowserAutomation {
 
   constructor(private readonly deps: BrowserAutomationDeps) {}
 
-  /** ターミナルへ渡す環境変数。中継を起動できなければ空（browser-use は利用者の Chrome につなぐ、いつもの動き） */
-  async env(): Promise<Record<string, string>> {
-    const url = await this.start()
-    if (!url) return {}
+  /**
+   * ターミナルへ渡す環境変数。中継を起動できなければ空（browser-use は利用者の Chrome につなぐ、いつもの動き）。
+   * scope はターミナルのプロジェクト。そのプロジェクトを開いている間だけ内蔵ブラウザを動かせる（プロジェクトをまたがない）
+   */
+  async env(scope?: string): Promise<Record<string, string>> {
+    const started = await this.start()
+    if (!started) return {}
+    const url = this.server ? this.server.url(scope) : started
     const bin = await this.prepareBin().catch((err: unknown) => {
       reportHandled(err, { area: 'browser', op: 'automation bin' })
       return null
@@ -123,6 +129,7 @@ export class BrowserAutomation {
       closeTab: (id) => this.deps.closeTab(id),
       activateTab: (id) => this.deps.activateTab(id),
       onTabsChanged: (listener) => this.deps.onTabsChanged(listener),
+      scopeError: (scope) => this.deps.scopeError?.(scope) ?? null,
       cookies: {
         get: async () => (await this.deps.session().cookies.get({})).map(toCdpCookie),
         set: async (cookies) => {

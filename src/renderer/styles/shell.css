@@ -3692,3 +3692,15 @@ button.sb-more__row:hover {
   max-height: calc(100% - 8px);
   overflow-y: auto;
 }
+
+/* 眠らせたタブ（ページを捨てて履歴だけ残している。押すと読み直す。@shared/browserMemory） */
+.browser-tab.is-sleeping .browser-tab__main {
+  color: var(--color-text-muted);
+}
+
+.browser-tab__zz {
+  flex: none;
+  margin-left: 2px;
+  font-size: 9px;
+  opacity: 0.7;
+}
