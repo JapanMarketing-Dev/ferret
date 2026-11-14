@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { posix } from 'node:path'
 import { UserFacingError } from '@shared/errors'
 import { hasBinaryExtension, isBinaryBuffer, MAX_TEXT_FILE_SIZE, type FsEntry, type FsReadResult, type FsSearchResult } from '@shared/files'
 import { t } from '@shared/i18n'
@@ -39,7 +39,7 @@ export type SshRunner = (host: string, command: string, options?: { timeoutMs?: 
 /** 接続を使い回す ssh のオプション（Windows では空） */
 export function sshMultiplexOptions(platform: NodeJS.Platform = process.platform, home: string = homedir()): string[] {
   if (platform === 'win32') return []
-  return ['-o', 'ControlMaster=auto', '-o', `ControlPath=${join(home, '.ssh', 'ferret-cm-%C')}`, '-o', 'ControlPersist=120']
+  return ['-o', 'ControlMaster=auto', '-o', `ControlPath=${posix.join(home, '.ssh', 'ferret-cm-%C')}`, '-o', 'ControlPersist=120']
 }
 
 /** ssh -o BatchMode=yes -- <host> <1行> を動かす。終了コードと出力を返す（失敗でも例外にしない） */
