@@ -1,4 +1,4 @@
-import { readdir, stat } from 'node:fs/promises'
+import { lstat, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   LIMITS,
@@ -62,12 +62,27 @@ export async function listReviewDocs<T>(root: string, dirRel: string, parse: Par
       if (parsed.ok) entries.push({ plan: parsed.value, mtime: info.mtimeMs })
       else invalid.push({ file: name, reason: parsed.reason })
     } catch {
-      invalid.push({ file: name, reason: 'cannot read (too large, a link, or not a regular file)' })
+      invalid.push({ file: name, reason: await unreadableReason(file, opts.maxBytes) })
     }
   }))
   invalid.sort((a, b) => a.file.localeCompare(b.file))
   return { entries, invalid }
 }
+
+/** 読めなかった理由を1つに絞る（Agent が読んで直せるように、大きすぎるならその大きさと上限を書く） */
+async function unreadableReason(file: string, maxBytes: number): Promise<string> {
+  try {
+    const info = await lstat(file)
+    if (info.isSymbolicLink()) return 'is a link (write a regular file instead)'
+    if (!info.isFile()) return 'not a regular file'
+    if (info.size > maxBytes) return `too large (${mb(info.size)} MB; up to ${mb(maxBytes)} MB). Split it into several files or shorten it`
+    return 'cannot read (it may be in the middle of being written; it is read again when it changes)'
+  } catch {
+    return 'cannot read (it may have been removed or renamed)'
+  }
+}
+
+const mb = (bytes: number): string => (bytes / 1024 / 1024).toFixed(1).replace(/\.0$/, '')
 
 /** 文書1つ（生の JSON と読んだもの）。読めなければ null */
 export async function readReviewDoc<T>(root: string, dirRel: string, id: string, parse: Parse<T>, maxBytes: number): Promise<{ raw: Record<string, unknown>; value: T } | null> {

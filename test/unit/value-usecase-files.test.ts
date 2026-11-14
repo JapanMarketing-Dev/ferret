@@ -43,6 +43,17 @@ async function writeDoc(id: string, text: string): Promise<void> {
 }
 
 describe('価値ユースケースの一覧', () => {
+  it('完成の定義として細かく書いた文書（数百の価値・1MB 超え）も読める', async () => {
+    const step = { screen: 'Home', action: 'press '.repeat(40), expected: 'ok '.repeat(80), image: '.ferret/value-usecases/many/1.png' }
+    const values = Array.from({ length: 410 }, (_, i) => ({ id: `v${i}`, name: `value ${i}`, why: 'w'.repeat(2000), flow: [step, step] }))
+    const text = docJson('many', { values })
+    expect(Buffer.byteLength(text)).toBeGreaterThan(1024 * 1024)
+    await writeDoc('many', text)
+    const listing = await listValueUseCases(root)
+    expect(listing.invalid).toEqual([])
+    expect(listing.docs[0].values).toHaveLength(410)
+  })
+
   it('無ければ空', async () => {
     expect(await listValueUseCases(root)).toEqual({ docs: [], invalid: [] })
   })
@@ -69,6 +80,7 @@ describe('価値ユースケースの一覧', () => {
     expect(listing.docs).toEqual([])
     // リンクは普通のファイルでないので数えない（一覧にも出さない）。大きすぎるものは理由付き
     expect(listing.invalid.map((i) => i.file)).toEqual(['big.json'])
+    expect(listing.invalid[0].reason).toMatch(/^too large \(16(\.\d)? MB; up to 16 MB\)/)
 
     const other = await mkdtemp(join(tmpdir(), 'ferret-vuc-link-'))
     try {

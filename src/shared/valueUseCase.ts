@@ -111,11 +111,12 @@ export interface ValueUseCaseListing {
 }
 
 export const VALUE_LIMITS = {
-  docBytes: 1024 * 1024,
-  values: 30,
+  /** 価値ユースケースは完成の定義として細かく書く（数百の価値・手順）ので、文書1つは 16MB まで読む */
+  docBytes: 16 * 1024 * 1024,
+  values: 1000,
   steps: 30,
   /** 手順を通しで数えた数の上限（フィードバックの囲みの画像の番号） */
-  totalSteps: 30 * 30,
+  totalSteps: 1000 * 30,
   docs: 200
 } as const
 
