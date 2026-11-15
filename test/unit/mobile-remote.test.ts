@@ -14,22 +14,21 @@ import {
   hostName,
   isAllowedHost,
   isIPv4,
-  isPrivateLanIPv4,
   isRemoteKey,
   isSameOrigin,
   isTailscaleIPv4,
+  isTailscaleIPv6,
   isValidPort,
   isWellFormedToken,
   normalizeAgentState,
   parseKeyBody,
   parseSendBody,
   projectNameFor,
-  reachableIPv4s,
   remotePort,
   remoteUrl,
-  remoteUrls,
   routeRequest,
   sanitizeMobileRemotePrefs,
+  tailscaleAddress,
   tokenFromBytes,
   tokensEqual
 } from '@shared/mobileRemote'
@@ -202,45 +201,69 @@ describe('合言葉の誤りの制限', () => {
   })
 })
 
-describe('URL', () => {
-  const ifaces = {
-    lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }, { address: '::1', family: 'IPv6', internal: true }],
-    en0: [{ address: 'fe80::1', family: 'IPv6', internal: false }, { address: '192.168.1.23', family: 'IPv4', internal: false }],
-    utun4: [{ address: '100.101.102.103', family: 'IPv4', internal: false }],
-    bridge: [{ address: '169.254.10.2', family: 'IPv4', internal: false }],
-    docker: [{ address: '203.0.113.9', family: 4, internal: false }],
-    dup: [{ address: '192.168.1.23', family: 'IPv4', internal: false }],
-    off: undefined
-  }
+describe('URL と待ち受ける Tailscale の IP', () => {
+  const v4 = (address: string, internal = false) => ({ address, family: 'IPv4', internal })
+  const v6 = (address: string, internal = false) => ({ address, family: 'IPv6', internal })
 
-  it('内部・リンクローカル・IPv6 を除き、LAN → Tailscale → そのほかの順', () => {
-    expect(reachableIPv4s(ifaces)).toEqual(['192.168.1.23', '100.101.102.103', '203.0.113.9'])
+  it('インターフェースが無ければ null（口を開かない）', () => {
+    expect(tailscaleAddress({})).toBeNull()
+    expect(tailscaleAddress({ off: undefined, empty: [] })).toBeNull()
   })
 
-  it('アドレスが無ければ空', () => {
-    expect(reachableIPv4s({})).toEqual([])
-    expect(reachableIPv4s({ lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }] })).toEqual([])
+  it('LAN・内部・リンクローカル・そのほかの公開 IP だけなら null（LAN には開かない）', () => {
+    expect(tailscaleAddress({
+      lo0: [v4('127.0.0.1', true), v6('::1', true)],
+      en0: [v6('fe80::1'), v4('192.168.1.23')],
+      en1: [v4('10.0.0.5'), v4('172.16.0.1')],
+      bridge: [v4('169.254.10.2')],
+      docker: [{ address: '203.0.113.9', family: 4, internal: false }]
+    })).toBeNull()
   })
 
-  it('合言葉はフラグメントに置く', () => {
-    expect(remoteUrl('192.168.1.23', 47615, TOKEN)).toBe(`http://192.168.1.23:47615/#t=${TOKEN}`)
-    expect(remoteUrls(['10.0.0.1', '100.64.0.1'], 50000, TOKEN)).toEqual([`http://10.0.0.1:50000/#t=${TOKEN}`, `http://100.64.0.1:50000/#t=${TOKEN}`])
-    const url = new URL(remoteUrl('192.168.1.23', 47615, TOKEN))
-    expect(url.pathname + url.search).toBe('/')
+  it('LAN と並んでいても Tailscale の IPv4 を選ぶ', () => {
+    expect(tailscaleAddress({ en0: [v4('192.168.1.23')], utun4: [v4('100.101.102.103')] })).toBe('100.101.102.103')
+    expect(tailscaleAddress({ utun4: [{ address: '100.64.0.1', family: 4, internal: false }] })).toBe('100.64.0.1')
   })
 
-  it('Tailscale と LAN の範囲の境目', () => {
+  it('100.64.0.0/10 の境目（100.63.255.255 と 100.128.0.0 は外）', () => {
+    expect(tailscaleAddress({ a: [v4('100.63.255.255')] })).toBeNull()
+    expect(tailscaleAddress({ a: [v4('100.128.0.0')] })).toBeNull()
+    expect(tailscaleAddress({ a: [v4('100.64.0.0')] })).toBe('100.64.0.0')
+    expect(tailscaleAddress({ a: [v4('100.127.255.255')] })).toBe('100.127.255.255')
     expect(isTailscaleIPv4('100.64.0.0')).toBe(true)
     expect(isTailscaleIPv4('100.127.255.255')).toBe(true)
     expect(isTailscaleIPv4('100.63.255.255')).toBe(false)
     expect(isTailscaleIPv4('100.128.0.0')).toBe(false)
-    expect(isPrivateLanIPv4('172.16.0.1')).toBe(true)
-    expect(isPrivateLanIPv4('172.31.255.255')).toBe(true)
-    expect(isPrivateLanIPv4('172.15.0.1')).toBe(false)
-    expect(isPrivateLanIPv4('172.32.0.1')).toBe(false)
-    expect(isPrivateLanIPv4('192.169.0.1')).toBe(false)
-    expect(isPrivateLanIPv4('10.255.255.255')).toBe(true)
-    expect(isPrivateLanIPv4('nope')).toBe(false)
+    expect(isTailscaleIPv4('101.64.0.1')).toBe(false)
+    expect(isTailscaleIPv4('100.064.0.1')).toBe(false)
+    expect(isTailscaleIPv4('nope')).toBe(false)
+  })
+
+  it('内部（internal）の Tailscale らしい IP は使わない', () => {
+    expect(tailscaleAddress({ a: [v4('100.100.100.100', true)] })).toBeNull()
+  })
+
+  it('IPv4 が無ければ Tailscale の IPv6（fd7a:115c:a1e0::/48）。IPv4 があればそちらを先に', () => {
+    expect(tailscaleAddress({ utun4: [v6('fd7a:115c:a1e0::1234:abcd')] })).toBe('fd7a:115c:a1e0::1234:abcd')
+    expect(tailscaleAddress({ utun4: [v6('FD7A:115C:A1E0:AB12::1')] })).toBe('fd7a:115c:a1e0:ab12::1')
+    expect(tailscaleAddress({ utun4: [v6('fd7a:115c:a1e0::1'), v4('100.101.102.103')] })).toBe('100.101.102.103')
+    expect(tailscaleAddress({ utun4: [{ address: 'fd7a:115c:a1e0::9', family: 6, internal: false }] })).toBe('fd7a:115c:a1e0::9')
+  })
+
+  it('/48 の外の IPv6・スコープ付きは Tailscale ではない', () => {
+    expect(isTailscaleIPv6('fd7a:115c:a1e1::1')).toBe(false)
+    expect(isTailscaleIPv6('fd7a:115c::1')).toBe(false)
+    expect(isTailscaleIPv6('fd7b:115c:a1e0::1')).toBe(false)
+    expect(isTailscaleIPv6('fe80::1')).toBe(false)
+    expect(isTailscaleIPv6('fd7a:115c:a1e0::1%utun4')).toBe(false)
+    expect(isTailscaleIPv6('fd7a:115c:a1e0::1')).toBe(true)
+  })
+
+  it('合言葉はフラグメントに置く。IPv6 は [] で囲む', () => {
+    expect(remoteUrl('100.101.102.103', 47615, TOKEN)).toBe(`http://100.101.102.103:47615/#t=${TOKEN}`)
+    expect(remoteUrl('fd7a:115c:a1e0::1', 50000, TOKEN)).toBe(`http://[fd7a:115c:a1e0::1]:50000/#t=${TOKEN}`)
+    const url = new URL(remoteUrl('100.101.102.103', 47615, TOKEN))
+    expect(url.pathname + url.search).toBe('/')
   })
 })
 

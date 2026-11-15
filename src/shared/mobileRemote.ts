@@ -2,8 +2,9 @@
  * スマホから操作（Mobile remote）の画面に依存しない部分。main の HTTP サーバー（src/main/mobileRemote.ts）と
  * 設定の画面が使い、単体テストの対象にする。
  *
- * 仕組み: 設定で入れると、Ferret が同じ Wi‑Fi・Tailscale から届く HTTP の口を開く。
- * スマホは `http://<この PC の IP>:<ポート>/#t=<合言葉>` を開き、ページの JS が合言葉を
+ * 仕組み: 設定で入れると、Ferret がこの PC の Tailscale の IP だけで HTTP の口を開く（同じ Wi‑Fi の LAN には開かない）。
+ * Tailscale の IP が無ければ口は開かず、設定の画面に理由と入れ方を出す。通信は Tailscale（WireGuard）で暗号化される。
+ * スマホは `http://<この PC の Tailscale の IP>:<ポート>/#t=<合言葉>` を開き、ページの JS が合言葉を
  * `Authorization: Bearer` で送って、開いているターミナルの一覧・画面の文字を読み、文字やキーを送る。
  * 合言葉は URL の # の後ろ（フラグメント）に置くので、サーバーのログ・Referer には出ない。
  *
@@ -36,8 +37,8 @@ export interface MobileRemotePrefs {
   port?: number
 }
 
-/** 開けなかった理由（画面の文言は renderer が選ぶ） */
-export type MobileRemoteError = 'portInUse' | 'permission' | 'failed'
+/** 開けなかった理由（画面の文言は renderer が選ぶ）。noTailscale は Tailscale の IP が無いので開かなかった */
+export type MobileRemoteError = 'portInUse' | 'permission' | 'failed' | 'noTailscale'
 
 /** 設定の画面に出す状態（main → renderer） */
 export interface MobileRemoteState {
@@ -45,7 +46,7 @@ export interface MobileRemoteState {
   port: number
   /** 実際に待ち受けているか */
   running: boolean
-  /** スマホで開く URL（合言葉付き）。LAN の IP を先に、Tailscale の IP を後に */
+  /** スマホで開く URL（合言葉付き）。待ち受けている Tailscale の IP の1つだけ */
   urls: string[]
   /** 最初の URL の QR（SVG の path と、余白込みの1辺の大きさ）。URL が無ければ null */
   qr: { path: string; size: number } | null
@@ -163,45 +164,42 @@ export interface NetInterfaceInfo {
   internal: boolean
 }
 
-/** Tailscale（CGNAT の 100.64.0.0/10）の IP か */
+/** Tailscale（CGNAT の 100.64.0.0/10。100.64.0.0〜100.127.255.255）の IP か */
 export function isTailscaleIPv4(address: string): boolean {
   if (!isIPv4(address)) return false
   const [a, b] = address.split('.').map(Number) as [number, number]
   return a === 100 && b >= 64 && b <= 127
 }
 
-/** LAN の IP（10/8・172.16/12・192.168/16）か */
-export function isPrivateLanIPv4(address: string): boolean {
-  if (!isIPv4(address)) return false
-  const [a, b] = address.split('.').map(Number) as [number, number]
-  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+/** Tailscale の IPv6（fd7a:115c:a1e0::/48）か。os.networkInterfaces() は省略した書き方で返す */
+export function isTailscaleIPv6(address: string): boolean {
+  if (typeof address !== 'string' || address.includes('%')) return false
+  const a = address.toLowerCase()
+  return /^fd7a:115c:a1e0:[0-9a-f:]*$/.test(a)
 }
 
 /**
- * スマホから届く IPv4 の一覧。内部（127.x）・リンクローカル（169.254.x）を除き、重複を除く。
- * 並びは LAN → Tailscale → そのほか（QR は最初の URL なので、同じ Wi‑Fi の IP を先に）
+ * 待ち受ける Tailscale の IP。IPv4（100.64.0.0/10）を先に、無ければ IPv6（fd7a:115c:a1e0::/48）。
+ * 内部のものは使わない。どちらも無ければ null（口を開かない）。
+ * 同じ Wi‑Fi の LAN（192.168.x など）には開かない（平文の HTTP を LAN の他人に見せない）
  */
-export function reachableIPv4s(interfaces: Record<string, readonly NetInterfaceInfo[] | undefined>): string[] {
-  const seen = new Set<string>()
+export function tailscaleAddress(interfaces: Record<string, readonly NetInterfaceInfo[] | undefined>): string | null {
+  let v6: string | null = null
   for (const list of Object.values(interfaces)) {
     for (const info of list ?? []) {
-      const v4 = info.family === 'IPv4' || info.family === 4
-      if (!v4 || info.internal || !isIPv4(info.address)) continue
-      if (info.address.startsWith('127.') || info.address.startsWith('169.254.')) continue
-      seen.add(info.address)
+      if (info.internal || typeof info.address !== 'string') continue
+      const family = info.family
+      if ((family === 'IPv4' || family === 4) && isTailscaleIPv4(info.address)) return info.address
+      if ((family === 'IPv6' || family === 6) && !v6 && isTailscaleIPv6(info.address)) v6 = info.address.toLowerCase()
     }
   }
-  const rank = (ip: string) => (isPrivateLanIPv4(ip) ? 0 : isTailscaleIPv4(ip) ? 1 : 2)
-  return [...seen].sort((a, b) => rank(a) - rank(b))
+  return v6
 }
 
 /** スマホで開く URL（合言葉はフラグメントに） */
 export function remoteUrl(address: string, port: number, token: string): string {
-  return `http://${address}:${port}/#t=${token}`
-}
-
-export function remoteUrls(addresses: readonly string[], port: number, token: string): string[] {
-  return addresses.map((ip) => remoteUrl(ip, port, token))
+  const host = address.includes(':') ? `[${address}]` : address
+  return `http://${host}:${port}/#t=${token}`
 }
 
 /**

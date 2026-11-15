@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 公開リポジトリ（既定: origin = JapanMarketing-Dev/MOVIE-ADE）へ、履歴を1コミットにまとめて出す準備をする。
+# 公開リポジトリ（既定: origin = JapanMarketing-Dev/ferret）へ、履歴を1コミットにまとめて出す準備をする。
 #
 #   scripts/publish-squash.sh [元にする ref（既定: main）]
 #
@@ -12,7 +12,8 @@
 #      同じ tree を CI と同じ CodeQL で調べて警告が0件だったかも確かめる（scripts/codeql-local.sh の記録）
 #   1. 公開先の main を取得し、一時的な worktree を作る
 #   2. 元の ref の中身を git archive で写し、公開しないもの（docs/qa など）を外す
-#   3. pnpm-lock.yaml を作り直す
+#   3. pnpm-lock.yaml を作り直し、依存の既知の脆弱性を調べる（High・Critical があれば止める。
+#      osv-scanner があれば lockfile すべてを scripts/vuln-gate.mjs で判定、無ければ pnpm audit --audit-level high）
 #   4. 実名・自宅のパスなどが残っていないか調べる
 #   5. GitHub の noreply アドレスを作者にしてコミットする
 #   6. gitleaks で、作ったコミットと中身を調べる
@@ -50,6 +51,8 @@ EXCLUDES=(
   test-results
   e2e-artifacts
   playwright-report
+  # Ferret と関係のない事業の実験用 Worker（公開しない。手元には残す）
+  workers/experiment-pages
 )
 
 # どの環境でも止める文字列（自宅のパス・社内のメール）。テストで使う架空のパスは除く
@@ -120,6 +123,26 @@ say "pnpm-lock.yaml を作り直します"
   cd "$STAGE"
   pnpm install --lockfile-only --ignore-scripts --silent
 )
+
+# --- 3b. 依存の既知の脆弱性 --------------------------------------------------
+# 公開する lockfile（作り直したもの）に High・Critical の既知の脆弱性があれば止める（dry run でも止める）。
+# osv-scanner があれば作業場所の lockfile すべて（workers/* を含む）を調べ、重さは scripts/vuln-gate.mjs が決める。
+# 無ければ pnpm audit（直下の pnpm-lock.yaml だけ）
+say "依存の既知の脆弱性を調べます"
+if command -v osv-scanner >/dev/null 2>&1; then
+  OSV_JSON="$(mktemp "${TMPDIR:-/tmp}/ferret-osv.XXXXXX")"
+  osv_status=0
+  osv-scanner --format json -r "$STAGE" >"$OSV_JSON" 2>/dev/null || osv_status=$?
+  # 0 = 見つからない、1 = 見つかった。それ以外は調べられなかった
+  [ "$osv_status" = "0" ] || [ "$osv_status" = "1" ] || die "osv-scanner で調べられませんでした（終了コード ${osv_status}）"
+  node "$ROOT/scripts/vuln-gate.mjs" <"$OSV_JSON" \
+    || die "High・Critical の既知の脆弱性がある依存を直してから、もう一度実行してください（作業場所は $STAGE に残しています）"
+  rm -f "$OSV_JSON"
+else
+  echo "osv-scanner が無いので pnpm audit で調べます（brew install osv-scanner で workers/* の lockfile も調べられます）"
+  (cd "$STAGE" && pnpm audit --audit-level high) \
+    || die "pnpm audit が High・Critical の既知の脆弱性を見つけました（作業場所は $STAGE に残しています）"
+fi
 
 # --- 4. 個人・社内の情報が残っていないか ------------------------------------
 say "実名・自宅のパスなどが残っていないか調べます"

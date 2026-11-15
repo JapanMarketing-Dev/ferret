@@ -122,6 +122,25 @@ describe('security-3 [1] Agent の権限確認は設定の skipPermissions で�
     expect(typed.ok && typed.argv).toEqual(['claude', '--dangerously-skip-permissions', '--add-dir', 'a  b'])
   })
 
+  it('security-3 [1] settings.json の既定は入、agents.skipPermissions: false は読み込み後も切で、既定の起動に省く引数・信頼が入らない。設定の画面に切り替えがある', async () => {
+    const { sanitize } = await import('../../src/main/settings')
+    const fresh = sanitize({}).agents
+    expect(fresh.skipPermissions).toBe(true)
+    const on = resolveAgentLaunchPolicy({ agent: 'claude', ...fresh.launch.claude, projectId: 'p1', skipPermissions: fresh.skipPermissions, shell: 'posix' })
+    expect(on.ok && on.argv).toContain('--dangerously-skip-permissions')
+    const off = sanitize({ agents: { skipPermissions: false } }).agents
+    expect(off.skipPermissions).toBe(false)
+    for (const agent of SKIP_PERMISSION_AGENTS) {
+      const result = resolveAgentLaunchPolicy({ agent, ...off.launch[agent], projectId: 'p1', skipPermissions: off.skipPermissions, shell: 'posix' })
+      expect(result.ok, agent).toBe(true)
+      if (!result.ok) continue
+      expect(result.trustFolder, agent).toBe(false)
+      expect(result.argv.join(' '), agent).not.toContain(AGENT_CATALOG[agent].yoloArgs)
+      if (AGENT_CATALOG[agent].trustArgs) expect(result.argv.join(' '), agent).not.toContain(AGENT_CATALOG[agent].trustArgs)
+    }
+    expect(read('src/renderer/components/SettingsPage.tsx')).toMatch(/checked=\{value\.skipPermissions\} onChange=\{\(skipPermissions\) => onChange\(\{ \.\.\.value, skipPermissions \}\)\}/)
+  })
+
   it('security-3 [1] 引数で確認の仕方を選んでいれば、省く引数を二重に足さない・混ぜない', () => {
     const on = { skipPermissions: true, projectId: null }
     for (const args of ['--dangerously-skip-permissions --chrome', '--permission-mode plan', '--permission-mode=acceptEdits', '--allow-dangerously-skip-permissions']) {

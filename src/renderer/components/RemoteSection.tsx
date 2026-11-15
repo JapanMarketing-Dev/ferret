@@ -6,8 +6,8 @@ import { useT } from '../lib/i18n'
 import { Button, Field, useToast } from '../ui'
 
 /**
- * 設定の「スマホから操作」。入れると main（src/main/mobileRemote.ts）が同じ Wi‑Fi・Tailscale からの HTTP の口を開き、
- * ここにスマホで開くリンクと、その QR コードを出す。状態は自分で読み、切り替えはすぐ main へ送る（remote:set）。
+ * 設定の「スマホから操作」。入れると main（src/main/mobileRemote.ts）がこの PC の Tailscale の IP だけで HTTP の口を開き、
+ * ここにスマホで開くリンクと、その QR コードを出す。Tailscale の IP が無ければ開かず、理由と入れ方を出す。状態は自分で読み、切り替えはすぐ main へ送る（remote:set）。
  * リンクには合言葉が入るので、画面に出すだけでログには書かない
  */
 export function RemoteSection() {
@@ -67,7 +67,6 @@ export function RemoteSection() {
         data-testid="remote-port" />
     </div>
     {state.enabled && state.error && <p className="st-note st-note--warn" role="alert">{t(`remote.error.${state.error}`, { port: state.port })}</p>}
-    {state.running && state.urls.length === 0 && <p className="st-note st-note--warn">{t('remote.noAddress')}</p>}
     {state.running && state.urls.length > 0 && <>
       <p className="st-note">{t('remote.running', { port: state.port })}</p>
       <div className="remote-settings__share">

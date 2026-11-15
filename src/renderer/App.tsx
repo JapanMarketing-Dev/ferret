@@ -1303,13 +1303,13 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                 )
               ) : centerTab === 'visual-review' ? (
                 <ErrorBoundary name="visual-review"><Suspense fallback={<div className="editor-area" />}>
-                  <VisualReview listing={visualReviews.listing} onChanged={visualReviews.reload}
+                  <VisualReview listing={visualReviews.listing} onChanged={visualReviews.reload} folderPath={workspace.folderPath}
                     recording={{ pending: planRecording.pending?.kind === 'visual-review' ? planRecording.pending : null, busy: recording || recordBusy || (!!planRecording.pending && planRecording.pending.kind !== 'visual-review'), live,
                       onStart: (plan, note) => { if (planRecording.begin('visual-review', plan, note)) recordWith('plan') }, onNote: (id, note) => planRecording.updateNote('visual-review', id, note), onStop: toggleRecording }} />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'value-usecases' ? (
                 <ErrorBoundary name="value-usecases"><Suspense fallback={<div className="editor-area" />}>
-                  <ValueUseCases listing={valueUseCases.listing} onChanged={valueUseCases.reload}
+                  <ValueUseCases listing={valueUseCases.listing} onChanged={valueUseCases.reload} folderPath={workspace.folderPath}
                     recording={{ pending: planRecording.pending?.kind === 'value-usecases' ? planRecording.pending : null, busy: recording || recordBusy || (!!planRecording.pending && planRecording.pending.kind !== 'value-usecases'), live,
                       onStart: (doc, note) => { if (planRecording.begin('value-usecases', doc, note)) recordWith('plan') }, onNote: (id, note) => planRecording.updateNote('value-usecases', id, note), onStop: toggleRecording }} />
                 </Suspense></ErrorBoundary>

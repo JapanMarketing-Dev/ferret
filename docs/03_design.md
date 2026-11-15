@@ -371,8 +371,8 @@ Agentは `feedback.md`（テキスト）を読み、必要な画像だけを開�
 
 AI Agent をターミナルで動かしたまま席を離れても、スマホから様子を見て指示を出せるようにする。既定は切。設定の「スマホから操作」（または settings.json の `mobileRemote`）で入れる。
 
-- **構成**: main が `node:http` で `0.0.0.0:<ポート>`（既定 47615）を開く（`src/main/mobileRemote.ts`）。スマホ向けのページは素の HTML・CSS・JS を main から返す（`src/main/mobileRemotePage.ts`）。依存は増やさない（設定に出す QR コードも自前。`src/shared/qrCode.ts`）。同じ Wi‑Fi と Tailscale のどちらでも届く。
+- **構成**: main が `node:http` でこの PC の Tailscale の IP（100.64.0.0/10。無ければ fd7a:115c:a1e0::/48）の `<ポート>`（既定 47615）だけを開く（`src/main/mobileRemote.ts`）。スマホ向けのページは素の HTML・CSS・JS を main から返す（`src/main/mobileRemotePage.ts`）。依存は増やさない（設定に出す QR コードも自前。`src/shared/qrCode.ts`）。同じ Wi‑Fi の LAN には開かない。Tailscale の IP が無ければ開かず、設定の画面に理由と Tailscale の入れ方を出し、30 秒ごとに調べ直す。
 - **できること**: 開いているターミナルの一覧（タブ名・プロジェクト・Agent・作業中／確認待ち／待機中）、選んだターミナルの画面の文字（約2秒ごと、下端に追従）、指示の送信（「Agentへ送信」と同じ `TerminalManager.sendReview`。確認待ちなら断り、作業中なら積み、Enter で確定）、決まったキー（Enter・Esc・↑↓・1/2/3・Tab・Ctrl+C）。オーケストラの human.md の確認項目を読むだけで出す。
-- **ペアリング**: 入れたときに 256 ビットの合言葉を作り、設定フォルダの `mobile-remote-token`（所有者だけが読める）に置く。設定の画面に `http://<各 IPv4>:<ポート>/#t=<合言葉>` と最初の URL の QR を出す。合言葉はフラグメントなのでサーバーのログ・Referer に出ず、ページの JS が `Authorization: Bearer` で送る。「リンクを作り直す」で取り替えると古いスマホは 401 になる。
+- **ペアリング**: 入れたときに 256 ビットの合言葉を作り、設定フォルダの `mobile-remote-token`（所有者だけが読める）に置く。設定の画面に `http://<Tailscale の IP>:<ポート>/#t=<合言葉>` とその QR を出す。合言葉はフラグメントなのでサーバーのログ・Referer に出ず、ページの JS が `Authorization: Bearer` で送る。「リンクを作り直す」で取り替えると古いスマホは 401 になる。
 - **守り**（純粋な関数は `src/shared/mobileRemote.ts`、単体・結合テストあり）: 時間が中身で変わらない比較、すべての API に合言葉、誤りが続く IP は 5 分止める（429）、Host が IP・localhost・`*.ts.net` 以外は 403（DNS rebinding）、CORS のヘッダーなし、別 Origin の POST は 403、JSON 以外の本文は 415、本文 16KB・文字 8000 字の上限、送れるキーは許可リストだけ、CSP `default-src 'self'`・`no-store`・`X-Frame-Options: DENY`。合言葉はログ・Sentry に出さない。入れる・作り直すは利用者が押した直後だけ（IPC）。切ったとき・終了のときはつながったままの接続も切って閉じる。
-- **限界**: 平文の HTTP なので、公衆 Wi‑Fi では同じネットワークの人に通信（合言葉を含む）を読まれうる。信頼できる Wi‑Fi か Tailscale（WireGuard で暗号化）で使う前提で、設定の画面に書く。ポートが使われていれば画面に知らせ、別のポートを選んでもらう（勝手に変えるとブックマークが切れるため）。
+- **限界**: HTTP 自体は平文だが、Tailscale（WireGuard で暗号化）の上だけで届くので、同じ Wi‑Fi の人には読まれない。Tailscale のネットワークに入れる人とリンクを知る人は操作できる。ポートが使われていれば画面に知らせ、別のポートを選んでもらう（勝手に変えるとブックマークが切れるため）。

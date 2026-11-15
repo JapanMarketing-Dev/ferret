@@ -10,13 +10,15 @@ import {
   type ValueReply,
   type ValueState,
   type ValueUseCaseDoc,
-  type ValueUseCaseListing
+  type ValueUseCaseListing,
+  VALUE_USECASE_DIR
 } from '@shared/valueUseCase'
+import { reviewDirPath, reviewDocPath, valueRef, valueStepRef } from '@shared/reviewRefs'
 import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
 import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
 import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
-import { InvalidPlans, ListToggle, ManualCopy, ResponseHistory, STATUS_TONE, Shot, formatTime, letter, useDocImages, useListCollapsed, type FeedbackBox, type Manual } from './VisualReview'
+import { CopyRef, InvalidPlans, ListToggle, ManualCopy, ResponseHistory, STATUS_TONE, Shot, formatTime, letter, useDocImages, useListCollapsed, type FeedbackBox, type Manual } from './VisualReview'
 import { Whiteboard } from './Whiteboard'
 import { useT } from '../lib/i18n'
 import '../styles/visualReview.css'
@@ -48,8 +50,10 @@ const STATE_TONE: Record<ValueState | 'unknown', BadgeTone> = {
   unknown: 'neutral'
 }
 
-export function ValueUseCases({ listing, onChanged, recording }: {
+export function ValueUseCases({ listing, onChanged, recording, folderPath }: {
   listing: ValueUseCaseListing
+  /** 開いているプロジェクトのフォルダ（パスのコピーに使う） */
+  folderPath?: string | null
   onChanged: () => void
   recording?: ValueRecordingControls
 }) {
@@ -73,7 +77,7 @@ export function ValueUseCases({ listing, onChanged, recording }: {
   return (
     <div className={`vr vuc${listCollapsed ? ' is-list-collapsed' : ''}`} data-testid="value-usecases">
       <nav className="vr__list" aria-label={t('valueUseCase.listLabel')}>
-        <ListToggle collapsed={listCollapsed} onToggle={toggleList} />
+        <ListToggle collapsed={listCollapsed} onToggle={toggleList} copyText={folderPath ? reviewDirPath(folderPath, VALUE_USECASE_DIR) : undefined} copyLabel={t('reviewRefs.copyAll')} />
         {!listCollapsed && docs.map((doc) => {
           const summary = summarizeValues(doc)
           return (
@@ -105,14 +109,16 @@ export function ValueUseCases({ listing, onChanged, recording }: {
           manual={manual?.id === selected.id ? manual : null}
           onManual={setManual}
           recording={recording}
+          docPath={folderPath ? reviewDocPath(folderPath, VALUE_USECASE_DIR, selected.id) : null}
         />
       )}
     </div>
   )
 }
 
-function DocDetail({ doc, onChanged, manual, onManual, recording }: {
+function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
   doc: ValueUseCaseDoc
+  docPath: string | null
   onChanged: () => void
   manual: Manual | null
   onManual: (manual: Manual | null) => void
@@ -256,6 +262,7 @@ function DocDetail({ doc, onChanged, manual, onManual, recording }: {
               <h2 className="vr__title">{doc.title}</h2>
               <Badge tone={STATUS_TONE[doc.status]}>{t(`visualReview.status.${doc.status}`)}</Badge>
               <span className="vr__muted">{t('visualReview.revision', { n: doc.revision })}</span>
+              <CopyRef text={docPath} label={t('reviewRefs.copyDoc')} testId="review-copy-doc" />
             </div>
             <div className="vuc__summary" data-testid="value-usecases-summary">
               <strong>{t('valueUseCase.summary', { values: summary.values, works: summary.works })}</strong>
@@ -273,6 +280,7 @@ function DocDetail({ doc, onChanged, manual, onManual, recording }: {
                   doc={doc}
                   value={value}
                   index={v}
+                  docPath={docPath}
                   images={images}
                   drawing={mode === 'feedback'}
                   boxes={boxes}
@@ -310,8 +318,9 @@ function DocDetail({ doc, onChanged, manual, onManual, recording }: {
 }
 
 /** 価値1つの横一列。左に価値のカード（番号・名前・今の作り・誰が・なぜ・条件）、右へ最初の画面からの手順のカードを矢印でつなぐ */
-function ValueLane({ doc, value, index, images, drawing, boxes, onDraw }: {
+function ValueLane({ doc, value, index, images, drawing, boxes, onDraw, docPath }: {
   doc: ValueUseCaseDoc
+  docPath: string | null
   value: ValueItem
   index: number
   images: Record<string, string | null>
@@ -327,6 +336,7 @@ function ValueLane({ doc, value, index, images, drawing, boxes, onDraw }: {
         <div className="vuc__value-head">
           <span className="vuc__value-no">{index + 1}</span>
           <span className="vuc__value-name">{value.name}</span>
+          <CopyRef text={docPath && valueRef(docPath, index, value)} />
         </div>
         <Badge tone={STATE_TONE[state]}>{t(`valueUseCase.state.${state}`)}</Badge>
         <dl className="vuc__facts">
@@ -346,6 +356,7 @@ function ValueLane({ doc, value, index, images, drawing, boxes, onDraw }: {
                   <div className="vuc__step-head">
                     <span className="vr__num vr-kind--target">{step.step}</span>
                     <span className="vuc__step-screen">{step.screen || t('valueUseCase.step', { n: step.step })}</span>
+                    <CopyRef text={docPath && valueStepRef(docPath, index, s, value, step)} />
                   </div>
                   {step.url && <span className="vr__muted vr__url" title={step.url}>{step.url}</span>}
                   {step.image ? (

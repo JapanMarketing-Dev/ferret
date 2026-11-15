@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowRight, Check, Copy, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Square, Trash2, X } from 'lucide-react'
+import { ArrowRight, Check, Copy, Link2, MessageSquare, Mic, PanelLeftClose, PanelLeftOpen, Square, Trash2, X } from 'lucide-react'
 import {
   canRespond,
   clampBox,
@@ -9,8 +9,10 @@ import {
   type PlanStatus,
   type RecordingNote,
   type VisualPlan,
-  type VisualPlanReply
+  type VisualPlanReply,
+  VISUAL_REVIEW_DIR
 } from '@shared/visualReview'
+import { planChangeRef, planScreenRef, reviewDirPath, reviewDocPath } from '@shared/reviewRefs'
 import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
 import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
 import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
@@ -52,8 +54,10 @@ export const STATUS_TONE: Record<PlanStatus, BadgeTone> = {
   done: 'brand'
 }
 
-export function VisualReview({ listing, onChanged, recording }: {
+export function VisualReview({ listing, onChanged, recording, folderPath }: {
   listing: PlanListing
+  /** 開いているプロジェクトのフォルダ（パスのコピーに使う。無ければコピーのボタンを出さない） */
+  folderPath?: string | null
   /** 返事のあとに一覧を読み直す */
   onChanged: () => void
   recording?: PlanRecordingControls
@@ -84,7 +88,7 @@ export function VisualReview({ listing, onChanged, recording }: {
   return (
     <div className={`vr${listCollapsed ? ' is-list-collapsed' : ''}`} data-testid="visual-review">
       <nav className="vr__list" aria-label={t('visualReview.listLabel')}>
-        <ListToggle collapsed={listCollapsed} onToggle={toggleList} />
+        <ListToggle collapsed={listCollapsed} onToggle={toggleList} copyText={folderPath ? reviewDirPath(folderPath, VISUAL_REVIEW_DIR) : undefined} copyLabel={t('reviewRefs.copyAll')} />
         {!listCollapsed && plans.map((plan) => (
           <button
             key={plan.id}
@@ -112,9 +116,37 @@ export function VisualReview({ listing, onChanged, recording }: {
           manual={manual?.id === selected.id ? manual : null}
           onManual={setManual}
           recording={recording}
+          docPath={folderPath ? reviewDocPath(folderPath, VISUAL_REVIEW_DIR, selected.id) : null}
         />
       )}
     </div>
+  )
+}
+
+/**
+ * 場所（パス・文書の中の位置）をコピーする小さなボタン。Claude Code・Codex などへ貼って「ここを直して」と指せる。
+ * text が無ければ出さない
+ */
+export function CopyRef({ text, label, testId }: { text: string | null | undefined; label?: string; testId?: string }) {
+  const t = useT()
+  const toast = useToast()
+  if (!text) return null
+  const name = label ?? t('reviewRefs.copy')
+  return (
+    <IconButton
+      className="vr__copyref"
+      label={name}
+      title={`${name}\n${text}`}
+      icon={<Link2 size={13} />}
+      size="sm"
+      onClick={(e) => {
+        e.stopPropagation()
+        void navigator.clipboard.writeText(text)
+          .then(() => toast({ tone: 'success', message: t('reviewRefs.copied', { text }) }))
+          .catch(() => toast({ tone: 'danger', message: t('reviewRefs.copyFailed') }))
+      }}
+      data-testid={testId ?? 'review-copy-ref'}
+    />
   )
 }
 
@@ -133,10 +165,11 @@ export function useListCollapsed(): [boolean, () => void] {
   return [collapsed, toggle]
 }
 
-export function ListToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+export function ListToggle({ collapsed, onToggle, copyText, copyLabel }: { collapsed: boolean; onToggle: () => void; copyText?: string; copyLabel?: string }) {
   const t = useT()
   return (
     <div className="vr__list-head">
+      {!collapsed && <CopyRef text={copyText} label={copyLabel} testId="review-copy-all" />}
       <IconButton
         label={t(collapsed ? 'whiteboard.showList' : 'whiteboard.hideList')}
         icon={collapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
@@ -187,8 +220,9 @@ export function useDocImages(id: string, revision: number, rels: readonly string
   return images
 }
 
-function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
+function PlanDetail({ plan, onChanged, manual, onManual, recording, docPath }: {
   plan: VisualPlan
+  docPath: string | null
   onChanged: () => void
   manual: Manual | null
   onManual: (manual: Manual | null) => void
@@ -341,6 +375,7 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
               <Badge tone={STATUS_TONE[plan.status]}>{t(`visualReview.status.${plan.status}`)}</Badge>
               <span className="vr__muted">{t('visualReview.revision', { n: plan.revision })}</span>
               {plan.createdAt && <span className="vr__muted">{formatTime(plan.createdAt)}</span>}
+              <CopyRef text={docPath} label={t('reviewRefs.copyDoc')} testId="review-copy-doc" />
             </div>
             {plan.request && <blockquote className="vr__request"><span className="vr__muted">{t('visualReview.request')}</span> {plan.request}</blockquote>}
           </header>
@@ -354,6 +389,7 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
                       <span className="vr__screen-no">{t('visualReview.screen', { n: index + 1 })}</span>
                       {screen.caption && <span>{screen.caption}</span>}
                       {screen.url && <span className="vr__muted vr__url" title={screen.url}>{screen.url}</span>}
+                      <CopyRef text={docPath && planScreenRef(docPath, index, screen.caption)} />
                     </div>
                     <Shot
                       src={images[screen.image]}
@@ -366,9 +402,9 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording }: {
                   </div>
                   {(numbered[index] ?? []).length > 0 && (
                     <ol className="wbl__notes">
-                      {(numbered[index] ?? []).map((item) => (
+                      {(numbered[index] ?? []).map((item, a) => (
                         <li key={item.n} className={`wbl__card wbl__note vr-kind--${item.kind}`} data-board-card data-wb-to={`vr-${item.n}`} data-wb-kind={item.kind}>
-                          <div className="vr__change-label"><span className="vr__num">{item.n}</span> <span className="vr__kind">{t(`visualReview.kind.${item.kind}`)}</span> {item.label}</div>
+                          <div className="vr__change-label"><span className="vr__num">{item.n}</span> <span className="vr__kind">{t(`visualReview.kind.${item.kind}`)}</span> {item.label}<CopyRef text={docPath && planChangeRef(docPath, index, a, item.n, item.label)} /></div>
                           <BeforeAfter before={item.before} after={item.after} />
                         </li>
                       ))}

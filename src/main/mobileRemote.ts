@@ -1,5 +1,5 @@
 /**
- * スマホから操作（Mobile remote）。同じ Wi‑Fi・Tailscale のスマホのブラウザから、開いているターミナルの画面を見て、
+ * スマホから操作（Mobile remote）。Tailscale でつないだスマホのブラウザから、開いているターミナルの画面を見て、
  * Agent に指示やキーを送る HTTP の口（node:http。依存は増やさない）。既定は閉じていて、設定で入れたときだけ開く。
  *
  * - 合言葉（256 ビット）は設定フォルダの mobile-remote-token に所有者だけが読める形で置く（再起動してもブックマークが使える）。
@@ -7,8 +7,9 @@
  * - 守りの決まり（Host・合言葉・回数の制限・本文の上限・キーの許可リスト）は @shared/mobileRemote の純粋な関数
  * - ここは electron を読まない（単体・結合テストで偽のターミナルを渡して確かめる）。つなぐのは src/main/index.ts
  *
- * 平文の HTTP なので、同じ Wi‑Fi の他人が通信を盗み見られる場所（公衆 Wi‑Fi など）では使わない前提（設定の画面で伝える）。
- * Tailscale 越しなら WireGuard で暗号化される。
+ * 口はこの PC の Tailscale の IP だけで開く（0.0.0.0 や LAN の IP では開かない）。HTTP は平文だが、Tailscale 越しなので
+ * WireGuard で暗号化され、同じ Wi‑Fi の他人には届かない。Tailscale の IP が無ければ開かず、noTailscale を画面に出し、
+ * 少し待って調べ直す（Tailscale が後からつながったら開く）。
  */
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync } from 'node:fs'
@@ -31,10 +32,10 @@ import {
   parseKeyBody,
   parseSendBody,
   projectNameFor,
-  reachableIPv4s,
   remotePort,
-  remoteUrls,
+  remoteUrl,
   routeRequest,
+  tailscaleAddress,
   tokenFromBytes,
   tokensEqual,
   type MobileRemoteError,
@@ -149,7 +150,7 @@ export class MobileRemoteServer {
   }
 
   /** 待ち受けを始める。開けなければ errno の code（EADDRINUSE など）付きの Error で reject */
-  async start(port: number, host = '0.0.0.0'): Promise<void> {
+  async start(port: number, host: string): Promise<void> {
     if (this.server) await this.stop()
     const server = createServer((req, res) => void this.handle(req, res))
     // 遅い相手・途中で止まる相手にいつまでも付き合わない
@@ -304,9 +305,14 @@ export interface MobileRemoteServiceOptions {
   random?: (n: number) => Uint8Array
   /** 待ち受けの開始・停止・失敗のたびに呼ぶ（設定の画面へ知らせる） */
   onChange?: (state: MobileRemoteState) => void
-  /** 待ち受ける所（テストは 127.0.0.1） */
+  /** 待ち受ける所を Tailscale の IP の代わりに決める（テストだけ。127.0.0.1） */
   host?: string
+  /** Tailscale の IP が無いとき、調べ直すまでの間（ミリ秒。テストで縮める） */
+  retryMs?: number
 }
+
+/** Tailscale の IP が無いとき、調べ直す間（30 秒） */
+export const TAILSCALE_RETRY_MS = 30_000
 
 /**
  * 設定（mobileRemote）に合わせてサーバーを開け閉めし、合言葉と画面に出す状態を持つ。
@@ -319,6 +325,9 @@ export class MobileRemoteService {
   private error: MobileRemoteError | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private qrCache: { url: string; qr: MobileRemoteState['qr'] } | null = null
+  /** 待ち受けている Tailscale の IP（URL に使う） */
+  private address: string | null = null
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly opts: MobileRemoteServiceOptions) {}
 
@@ -349,13 +358,12 @@ export class MobileRemoteService {
     return token
   }
 
-  /** 画面に出す今の状態。IP はそのつど調べ直す（Wi‑Fi の切り替え・Tailscale の接続で変わる） */
+  /** 画面に出す今の状態。URL は待ち受けている Tailscale の IP だけ */
   state(): MobileRemoteState {
     const enabled = this.prefs?.enabled === true
     const port = remotePort(this.prefs)
     const running = this.server?.port != null
-    const addresses = running ? reachableIPv4s((this.opts.interfaces ?? networkInterfaces)()) : []
-    const urls = running && this.token ? remoteUrls(addresses, port, this.token) : []
+    const urls = running && this.token && this.address ? [remoteUrl(this.address, port, this.token)] : []
     return { enabled, port, running, urls, qr: this.qrFor(urls[0]), error: this.error }
   }
 
@@ -374,17 +382,26 @@ export class MobileRemoteService {
     return state
   }
 
-  /** 設定に合わせる（入れたら開く、ポートが変われば開き直す、切ったら閉じる） */
+  /** 設定に合わせる（入れたら開く、ポート・Tailscale の IP が変われば開き直す、切ったら閉じる） */
   apply(prefs: MobileRemotePrefs | undefined): Promise<MobileRemoteState> {
     return this.serial(async () => {
       this.prefs = prefs
+      this.clearRetry()
       const port = remotePort(prefs)
       if (prefs?.enabled !== true) {
         await this.closeServer()
         this.error = null
         return this.emit()
       }
-      if (this.server && this.server.port === port && !this.error) return this.emit()
+      const address = tailscaleAddress((this.opts.interfaces ?? networkInterfaces)())
+      if (!address) {
+        // Tailscale の IP が無ければ開かない（LAN や 0.0.0.0 へは落とさない）。後で調べ直す
+        await this.closeServer()
+        this.error = 'noTailscale'
+        this.scheduleRetry()
+        return this.emit()
+      }
+      if (this.server && this.server.port === port && this.address === address && !this.error) return this.emit()
       await this.closeServer()
       try {
         this.ensureToken()
@@ -396,8 +413,9 @@ export class MobileRemoteService {
       }
       const server = new MobileRemoteServer({ ...this.opts.deps, token: () => this.token ?? '' })
       try {
-        await server.start(port, this.opts.host)
+        await server.start(port, this.opts.host ?? address)
         this.server = server
+        this.address = address
         this.error = null
       } catch (err) {
         this.error = listenErrorKind(err)
@@ -418,12 +436,27 @@ export class MobileRemoteService {
 
   /** 閉じる（アプリの終了）。設定は変えない */
   stop(): Promise<void> {
+    this.clearRetry()
     return this.serial(() => this.closeServer())
+  }
+
+  private scheduleRetry(): void {
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      if (this.prefs?.enabled === true && this.error === 'noTailscale') void this.apply(this.prefs)
+    }, this.opts.retryMs ?? TAILSCALE_RETRY_MS)
+    this.retryTimer.unref?.()
+  }
+
+  private clearRetry(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryTimer = null
   }
 
   private async closeServer(): Promise<void> {
     const server = this.server
     this.server = null
+    this.address = null
     await server?.stop()
   }
 }

@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { sanitizeGithubPreferences } from '@shared/repoCreate'
 import { MAX_TEXT_FILE_SIZE } from '@shared/files'
+// 静的に読む（動的 import にすると、browser.ts の静的 import と1つにまとめられたときに使わない export として消され、
+// memoryAction が undefined になった。FERRET-2A）
+import { MEMORY_CHECK_MS, formatGb, memoryAction } from '@shared/browserMemory'
 import { UNSAVED_LIST_LIMIT, describeUnsavedFile, planUnsavedQuit, quitActionFor, sanitizeUnsavedRefs, screenQuitSaveEntries, type QuitAction, type QuitSaveOutcome, type UnsavedFileRef, type UnsavedQuitItem } from '@shared/quitUnsaved'
 import { CAPTURE_INDICATOR, UserGestures, ViewInputGrant, appMediaAllowed, captureRequestProblem, indicatorTitle, isGestureInput, isRecorderContents, isTrustedIpcSender, nextAudioConsent, type CaptureConsentState } from './captureConsent'
 import { programCopyText } from './terminalClipboard'
@@ -47,7 +50,9 @@ import { normalizeAnnotationColor } from '@shared/annotation'
 import { extensionPopupGetsReviewPreload, shouldCloseExtensionPopup, type AnnotationActivity, type PopupDismissCause } from '@shared/popupAnnotation'
 import { findProjectByFolder, markProjectOpened, newProject, reorderProjects, upsertProjectFolder } from './projects'
 import { ensureWorkFolder, withWorkProject, workFolderPath } from './workProject'
-import { ensureGlobalFolder, globalFolderPath, withGlobalOrchestra } from './globalOrchestra'
+import { ensureGlobalFolder, globalFolderPath, readGlobalRules, syncAgentGlobalRules, syncGlobalFiles, withGlobalOrchestra } from './globalOrchestra'
+import { syncVisualReviewSkill } from './visualReviewSkill'
+import { CallLog, setApiCallSink } from './decision/callLog'
 import { GLOBAL_PROJECTS_FILE, GLOBAL_RULES_FILE } from '@shared/globalOrchestra'
 import { archiveFallback, canArchive, isArchived } from '@shared/projectArchive'
 import { currentOrchestra, isGlobalOrchestra, moveInTree, orchestraList, orchestraMembers, removeOrchestra } from '@shared/orchestras'
@@ -103,7 +108,7 @@ import { canRespond, isValidPlanId, responseMessage, sanitizeRecordingNote, sani
 import { VALUE_LIMITS, sanitizeValueReply, toValueBoxes, valueResponseMessage, type ValueReplyResult } from '@shared/valueUseCase'
 import { isInsideDir } from '@shared/sendTarget'
 import type { ScreenCache } from './screenCache'
-import { crashReportsActive, initCrashReporting, maybeSendTestEvent, reportMainError, sentryTestKinds, setTelemetryContext, noteQuitRequested, telemetryInstallId, trackIpc } from './telemetry'
+import { crashReportsActive, initCrashReporting, maybeSendTestEvent, reportMainError, sentryTestKinds, setTelemetryContext, noteQuitRequested, setRendererRoleResolver, telemetryInstallId, trackIpc } from './telemetry'
 import { wrapIpcHandler } from '@shared/telemetry'
 import { errorKind, flow, reportHandled } from '@shared/report'
 import { isValidPort } from '@shared/mobileRemote'
@@ -581,12 +586,12 @@ async function gateCredentials(scope: string, url: string | undefined, ref: (Key
  * 従量課金の API 呼び出しの記録（<設定フォルダ>/usage/decision-YYYY-MM.jsonl）と、判定モデルのローカル中継。
  * 中継は判定モデルを有効にしたときだけ立てる。Agent にはキーを渡さず、中継の URL だけを渡す（src/main/decision/）
  */
-let callLog: import('./decision/callLog').CallLog | null = null
+let callLog: CallLog | null = null
 let decisionService: import('./decision/service').DecisionService | null = null
 let usagePushTimer: NodeJS.Timeout | null = null
 
-async function apiCallLog(): Promise<import('./decision/callLog').CallLog> {
-  if (!callLog) callLog = new (await import('./decision/callLog')).CallLog(join(configDir(), 'usage'))
+async function apiCallLog(): Promise<CallLog> {
+  if (!callLog) callLog = new CallLog(join(configDir(), 'usage'))
   return callLog
 }
 
@@ -926,13 +931,12 @@ async function orchestraRulesWithGlobal(): Promise<import('@shared/orchestrator'
   const rules = currentSettings().orchestra
   const global = currentSettings().projects.find(isGlobalOrchestra)
   if (!global || global.archived) return rules
-  const body = await (await import('./globalOrchestra')).readGlobalRules(global.folderPath).catch(() => '')
+  const body = await readGlobalRules(global.folderPath).catch(() => '')
   return body ? { ...rules, global: body } : rules
 }
 
 /** グローバルのフォルダの rules.md（無ければ雛形）と projects.md を書き、欄に書く場所を返す */
 async function prepareGlobalFolder(project: Project): Promise<import('@shared/globalOrchestra').GlobalGuide> {
-  const { syncGlobalFiles } = await import('./globalOrchestra')
   await syncGlobalFiles(project.folderPath, currentSettings().projects, guideLanguage())
   return { rulesPath: join(project.folderPath, GLOBAL_RULES_FILE), projectsPath: join(project.folderPath, GLOBAL_PROJECTS_FILE) }
 }
@@ -1033,12 +1037,11 @@ function scheduleGlobalRulesSync(delayMs = 1000): void {
     syncEditorWorkspace()
     if (!IS_PACKAGED) return
     const global = currentSettings().projects.find(isGlobalOrchestra)
-    void import('./globalOrchestra')
-      .then(async ({ readGlobalRules, syncAgentGlobalRules }) => {
-        // 隠した・消したときは空として、Ferret が写したものを外す
-        const body = global && !global.archived ? await readGlobalRules(global.folderPath) : ''
-        return syncAgentGlobalRules(body, global ? join(global.folderPath, GLOBAL_RULES_FILE) : GLOBAL_RULES_FILE)
-      })
+    void (async () => {
+      // 隠した・消したときは空として、Ferret が写したものを外す
+      const body = global && !global.archived ? await readGlobalRules(global.folderPath) : ''
+      return syncAgentGlobalRules(body, global ? join(global.folderPath, GLOBAL_RULES_FILE) : GLOBAL_RULES_FILE)
+    })()
       .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync global rules' }))
   }, delayMs)
   globalRulesTimer.unref?.()
@@ -1097,24 +1100,22 @@ let memorySlept = false
  */
 function startMemoryWatch(): void {
   if (memoryWatchTimer) return
-  void import('@shared/browserMemory').then(({ MEMORY_CHECK_MS, memoryAction, formatGb }) => {
-    const total = totalmem()
-    memoryWatchTimer = setInterval(() => {
-      try {
-        const used = app.getAppMetrics().reduce((sum, metric) => sum + (metric.memory?.workingSetSize ?? 0) * 1024, 0)
-        const action = memoryAction(used, total, Date.now(), memoryNoticeAt, memorySlept)
-        if (action.sleep) browser?.sleepBackgroundTabs()
-        memorySlept = action.sleep
-        if (action.notice) {
-          memoryNoticeAt = Date.now()
-          send('browser:notice', t('browser.memory.notice', { gb: formatGb(used), percent: Math.round((used / total) * 100) }))
-        }
-      } catch (err) {
-        reportHandled(err, { area: 'browser', op: 'memory watch' })
+  const total = totalmem()
+  memoryWatchTimer = setInterval(() => {
+    try {
+      const used = app.getAppMetrics().reduce((sum, metric) => sum + (metric.memory?.workingSetSize ?? 0) * 1024, 0)
+      const action = memoryAction(used, total, Date.now(), memoryNoticeAt, memorySlept)
+      if (action.sleep) browser?.sleepBackgroundTabs()
+      memorySlept = action.sleep
+      if (action.notice) {
+        memoryNoticeAt = Date.now()
+        send('browser:notice', t('browser.memory.notice', { gb: formatGb(used), percent: Math.round((used / total) * 100) }))
       }
-    }, MEMORY_CHECK_MS)
-    memoryWatchTimer.unref?.()
-  })
+    } catch (err) {
+      reportHandled(err, { area: 'browser', op: 'memory watch' })
+    }
+  }, MEMORY_CHECK_MS)
+  memoryWatchTimer.unref?.()
 }
 
 let projectsSkillTimer: NodeJS.Timeout | null = null
@@ -1624,8 +1625,8 @@ function syncBrowserSkillNow(): void {
 /** 画面・動きの変更を作る前に計画を見せる skill（ferret-visual-review）を Claude Code・Codex に入れる。配布版だけ */
 function syncVisualReviewSkillNow(): void {
   if (!IS_PACKAGED) return
-  void import('./visualReviewSkill')
-    .then(({ syncVisualReviewSkill }) => syncVisualReviewSkill(app.getVersion()))
+  void Promise.resolve()
+    .then(() => syncVisualReviewSkill(app.getVersion()))
     .catch((err: unknown) => reportHandled(err, { area: 'review', op: 'sync visual review skill' }))
   // システムの価値と、価値を得るまでの手順を先に定義して承認を待つ skill（ferret-value-usecases）
   void import('./valueUseCaseSkill')
@@ -3924,7 +3925,7 @@ async function main(): Promise<void> {
   // 上限での自動切り替え。新しいタブは renderer が開き、引き継ぎは main が行う
   initFailover({ terminals, launch: (request) => send('failover:launch', request), notice: (notice) => send('failover:notice', notice) })
   // 文字起こし・整理の API 呼び出しも同じ記録へ（src/main/decision/callLog.ts の recordApiCall）
-  void import('./decision/callLog').then(({ setApiCallSink }) => setApiCallSink(recordCall))
+  setApiCallSink(recordCall)
   syncDecision()
 
   mainWindow = createWindow()
@@ -4015,12 +4016,12 @@ async function main(): Promise<void> {
   browser.onNotice = (message) => send('browser:notice', message)
   startMemoryWatch()
   // 落ちたレンダラが何かを Sentry に残す（アプリの画面か、内蔵ブラウザのタブか。FERRET-29）
-  void import('./telemetry').then(({ setRendererRoleResolver }) => setRendererRoleResolver((contents) => {
+  setRendererRoleResolver((contents) => {
     if (mainWindow && !mainWindow.isDestroyed() && contents === mainWindow.webContents) return 'app'
     if (browser?.allContents().includes(contents)) return 'browser-tab'
     if (browser?.popupContents().includes(contents)) return 'browser-popup'
     return 'other'
-  }))
+  })
   // 表示幅の切替を操作ログへ残す（WS-3 → viewport イベント）
   browser.onViewportChange = (width) => recording?.recordViewport(width)
   // 文字で指摘の静止画は、そのビューへの本物の入力の直後だけ（noteInputs）

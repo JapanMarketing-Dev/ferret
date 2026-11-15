@@ -444,7 +444,7 @@ export const SETTINGS_SCHEMA: JsonSchema = {
     autoUpdate: bool('Download new versions in the background, check each one against the signed SHA256SUMS, and install it the next time Ferret closes (Restart to update installs it right away). When off, nothing is downloaded or installed until you choose to.', { default: true }),
     mobileRemote: {
       type: 'object',
-      description: 'Phone remote: watch and steer the terminals from a phone browser on the same Wi-Fi or over Tailscale. When enabled, Ferret listens on all network interfaces and shows a link and QR code in Settings > Phone remote; the link carries a secret that Ferret keeps outside this file. Anyone with that link can type into your terminals, so turn it on only on networks you trust (traffic is plain HTTP; over Tailscale it is encrypted).',
+      description: 'Phone remote: watch and steer the terminals from a phone browser over Tailscale. When enabled, Ferret listens only on this computer\'s Tailscale address (100.64.0.0/10, or fd7a:115c:a1e0::/48), never on the Wi-Fi network; without a Tailscale address it does not listen and Settings > Phone remote explains how to set up Tailscale. Settings shows a link and QR code; the link carries a secret that Ferret keeps outside this file. Anyone with that link who can reach your Tailscale network can type into your terminals.',
       additionalProperties: false,
       properties: {
         enabled: bool('Listen for the phone. Omit or false to keep it off.', { default: false }),

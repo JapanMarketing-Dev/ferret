@@ -1,6 +1,6 @@
 {
   "name": "ade-movie",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "private": true,
   "license": "MIT",
   "description": "画面を操作しながら喋って囲むだけでUIフィードバックをAgentへ渡すデスクトップADE",
@@ -41,7 +41,16 @@
       "electron",
       "esbuild",
       "node-pty"
-    ]
+    ],
+    "//overrides": "既知の脆弱性がある間接の依存だけを直した版に上げる（OSV。scripts/publish-squash.sh が公開前に調べる）。直接の依存が直した版を使うようになったら消す",
+    "overrides": {
+      "dompurify@<3.4.17": "3.4.17",
+      "fast-uri@<3.1.9": "3.1.9",
+      "undici@>=6.0.0 <6.29.1": "6.29.1",
+      "undici@>=7.0.0 <7.30.1": "7.30.1",
+      "glob@>=9.0.0 <14.0.2": "14.0.3",
+      "minimatch@>=7.0.0 <11.0.1": "11.0.3"
+    }
   },
   "dependencies": {
     "@sentry/electron": "8.3.0",

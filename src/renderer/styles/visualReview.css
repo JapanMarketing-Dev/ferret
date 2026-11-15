@@ -409,3 +409,9 @@
   .vr__list { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: var(--size-border) solid var(--color-border); }
   .vr__item { min-width: 160px; }
 }
+
+/* 場所のコピー（Agent に貼る）。目立たせず、近づけば分かる */
+.vr__copyref { opacity: 0.55; flex: none; }
+.vr__copyref:hover, .vr__copyref:focus-visible { opacity: 1; }
+.vr__change-label .vr__copyref { margin-left: var(--space-1); vertical-align: middle; }
+.vr__list-head { gap: var(--space-1); }

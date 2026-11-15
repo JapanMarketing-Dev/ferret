@@ -283,4 +283,26 @@ describe('ブランチは main だけ（develop は 2026-10-15 に廃止）', ()
     expect(push).toBe('git push $REMOTE $COMMIT:refs/heads/$BRANCH')
     expect(push).not.toMatch(/develop/)
   })
+
+  it('公開の squash は事業の実験用 Worker（workers/experiment-pages）を外す', () => {
+    const text = read('scripts/publish-squash.sh')
+    const excludes = /^EXCLUDES=\(\n([\s\S]*?)\n\)/m.exec(text)![1]!.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
+    expect(excludes).toContain('workers/experiment-pages')
+    // 外したあとに壊れるものを置かない（CI・ルートの設定・単体テストが参照しない）
+    for (const file of [...workflows, 'package.json', 'vitest.config.ts', 'wrangler.jsonc', 'electron-builder.config.cjs']) {
+      expect(read(file), file).not.toContain('experiment-pages')
+    }
+  })
+
+  it('公開の squash は、作り直した lockfile の High・Critical の既知の脆弱性で止める（push の前、gitleaks の前）', () => {
+    const text = read('scripts/publish-squash.sh')
+    const gate = text.indexOf('# --- 3b. 依存の既知の脆弱性')
+    expect(gate).toBeGreaterThan(text.indexOf('pnpm install --lockfile-only'))
+    expect(gate).toBeLessThan(text.indexOf('# --- 4.'))
+    expect(gate).toBeLessThan(text.indexOf('PUBLISH_DRY_RUN:-}" = "1"'))
+    const step = text.slice(gate, text.indexOf('# --- 4.'))
+    expect(step).toMatch(/osv-scanner --format json -r "\$STAGE"/)
+    expect(step).toMatch(/node "\$ROOT\/scripts\/vuln-gate\.mjs" <"\$OSV_JSON" \\\n\s+\|\| die/)
+    expect(step).toMatch(/pnpm audit --audit-level high\) \\\n\s+\|\| die/)
+  })
 })

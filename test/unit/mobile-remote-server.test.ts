@@ -379,7 +379,8 @@ describe('MobileRemoteService', () => {
     const token = readFileSync(join(dir, 'mobile-remote-token'), 'utf8').trim()
     expect(isWellFormedToken(token)).toBe(true)
     if (process.platform !== 'win32') expect(statSync(join(dir, 'mobile-remote-token')).mode & 0o777).toBe(0o600)
-    expect(state.urls).toEqual([`http://192.168.1.23:${port}/#t=${token}`, `http://100.101.102.103:${port}/#t=${token}`])
+    // LAN の IP は出さず、Tailscale の IP だけ
+    expect(state.urls).toEqual([`http://100.101.102.103:${port}/#t=${token}`])
     expect(state.qr?.size).toBeGreaterThan(21)
     expect(state.qr?.path).toMatch(/^M\d+ \d+h\d+v1h-\d+z/)
     expect(onChange).toHaveBeenLastCalledWith(state)
@@ -459,11 +460,42 @@ describe('MobileRemoteService', () => {
     expect(await connectRefused(port)).toBe(true)
   })
 
-  it('アドレスが無ければ URL も QR も空（待ち受けは続ける）', async () => {
+  it('Tailscale の IP が無ければ（LAN だけでも）口を開かず noTailscale', async () => {
     const port = await freePort()
-    const service = make({ interfaces: () => ({ lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }] }) })
+    const service = make({ interfaces: () => ({ en0: [{ address: '192.168.1.23', family: 'IPv4', internal: false }], lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true }] }) })
     const state = await service.apply({ enabled: true, port })
-    expect(state).toMatchObject({ running: true, urls: [], qr: null })
+    expect(state).toMatchObject({ enabled: true, running: false, urls: [], qr: null, error: 'noTailscale' })
+    expect(await connectRefused(port)).toBe(true)
+  })
+
+  it('Tailscale が後からつながれば、調べ直して開く。切れば調べ直しも止まる', async () => {
+    const port = await freePort()
+    let ifaces: Record<string, { address: string; family: string; internal: boolean }[]> = {}
+    const onChange = vi.fn()
+    const service = make({ interfaces: () => ifaces, retryMs: 5, onChange })
+    expect((await service.apply({ enabled: true, port })).error).toBe('noTailscale')
+    ifaces = { utun4: [{ address: '100.101.102.103', family: 'IPv4', internal: false }] }
+    await vi.waitFor(() => expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ running: true, error: null })), { timeout: 1000, interval: 5 })
+    expect((await send(port)).status).toBe(200)
+    ifaces = {}
+    await service.apply({ enabled: false, port })
+    onChange.mockClear()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('本番では Tailscale の IP で待ち受ける（host を渡さないとき）', async () => {
+    const { token: _token, ...deps } = makeDeps(fake)
+    const start = vi.spyOn(MobileRemoteServer.prototype, 'start').mockResolvedValue(undefined)
+    try {
+      const service = new MobileRemoteService({ tokenFile: join(dir, 'mobile-remote-token'), deps, interfaces })
+      await service.apply({ enabled: true, port: 47615 })
+      expect(start).toHaveBeenCalledWith(47615, '100.101.102.103')
+      expect(start).not.toHaveBeenCalledWith(47615, '0.0.0.0')
+      await service.stop()
+    } finally {
+      start.mockRestore()
+    }
   })
 
   it('合言葉を保存できなければ開かない（failed）', async () => {

@@ -211,7 +211,7 @@ When a project builds a Chrome extension, load it into Ferret's built-in browser
 
 ## Phone remote
 
-\`mobileRemote.enabled: true\` lets the user watch the terminals and send instructions to agents from a phone browser on the same Wi-Fi or over Tailscale (\`mobileRemote.port\`, default 47615, changes the port). Turn it on only when the user asks: it opens a port on every network interface. The link and its QR code are shown in Ferret's Settings > Phone remote; tell the user to scan it there. The link's secret is kept outside settings.json; never read, print or send it. To stop it, set \`enabled\` to false or remove \`mobileRemote\`.
+\`mobileRemote.enabled: true\` lets the user watch the terminals and send instructions to agents from a phone browser over Tailscale (\`mobileRemote.port\`, default 47615, changes the port). Turn it on only when the user asks: it opens a port on this computer's Tailscale address only, and does not open at all until Tailscale is installed and connected on this computer and the phone. The link and its QR code are shown in Ferret's Settings > Phone remote; tell the user to scan it there. The link's secret is kept outside settings.json; never read, print or send it. To stop it, set \`enabled\` to false or remove \`mobileRemote\`.
 
 ## Orchestras (several products under one agent)
 
