@@ -415,3 +415,25 @@
 .vr__copyref:hover, .vr__copyref:focus-visible { opacity: 1; }
 .vr__change-label .vr__copyref { margin-left: var(--space-1); vertical-align: middle; }
 .vr__list-head { gap: var(--space-1); }
+
+/* 価値ユースケースのグループ（数百の価値を 10〜30 のグループでざっくり見る） */
+.vuc__groups-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); color: var(--color-text-muted, inherit); }
+.vuc__groups { display: flex; flex-direction: column; gap: 32px; }
+.vuc__group { display: flex; flex-direction: column; gap: 24px; }
+.vuc__group-card { width: 520px; display: flex; flex-direction: column; gap: var(--space-2); }
+.vuc__group.is-open .vuc__group-card { border-width: 2px; }
+.vuc__group-head { display: flex; align-items: center; gap: var(--space-2); }
+.vuc__group-toggle { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.vuc__group-name { font-size: 1.1em; font-weight: var(--font-weight-semibold, 600); }
+.vuc__group-summary { margin: 0; }
+.vuc__group-preview { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.vuc__group-preview li { display: flex; gap: var(--space-2); align-items: baseline; }
+.vuc__group-lanes { padding-left: 32px; border-left: 3px solid var(--color-border, #ddd); }
+.vuc__statebar { display: flex; flex-direction: column; gap: 4px; }
+.vuc__statebar-track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--color-border, #e5e5e5); }
+.vuc__statebar-seg.vuc-state--works { background: var(--color-success); }
+.vuc__statebar-seg.vuc-state--partial { background: var(--color-warning); }
+.vuc__statebar-seg.vuc-state--broken { background: var(--color-danger); }
+.vuc__statebar-seg.vuc-state--not-built { background: #9ca3af; }
+.vuc__statebar-seg.vuc-state--unknown { background: #d1d5db; }
+.vuc__statebar-text { font-size: 0.85em; color: var(--color-text-muted, inherit); }

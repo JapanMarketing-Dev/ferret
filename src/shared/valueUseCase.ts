@@ -70,7 +70,20 @@ export interface ValueItem {
   /** 価値が得られたと分かる条件 */
   success: string
   status?: ValueState
+  /** 属するグループの id（文書の groups の id）。無ければグループなし */
+  group?: string
   flow: ValueStep[]
+}
+
+/**
+ * 価値のグループ（Agent が書く）。価値が数百になると全部は見られないので、10〜30 のグループに分けて、
+ * まずグループ単位でざっくりレビューする
+ */
+export interface ValueGroup {
+  id: string
+  name: string
+  /** グループの中身を一言で */
+  summary: string
 }
 
 /** フィードバックで人が囲んだ場所（価値と手順の番号。どちらも 0 から） */
@@ -99,6 +112,8 @@ export interface ValueUseCaseDoc {
   terminalId?: string
   /** システムの存在意義（1〜3文） */
   purpose: string
+  /** 価値のグループ（書いた順）。無ければ空（画面は自動で分ける。groupValues） */
+  groups: ValueGroup[]
   values: ValueItem[]
   outOfScope: string[]
   questions: string[]
@@ -117,7 +132,9 @@ export const VALUE_LIMITS = {
   steps: 30,
   /** 手順を通しで数えた数の上限（フィードバックの囲みの画像の番号） */
   totalSteps: 1000 * 30,
-  docs: 200
+  docs: 200,
+  /** グループの数の上限（読むのは 60 まで。画面で勧めるのは 10〜30） */
+  groups: 60
 } as const
 
 function parseValueState(raw: unknown): ValueState | undefined {
@@ -168,6 +185,36 @@ export function orderFlow(raw: unknown): ValueStep[] {
 
 const VALUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
+function parseGroups(raw: unknown): ValueGroup[] {
+  const used = new Set<string>()
+  if (!Array.isArray(raw)) return []
+  const out: ValueGroup[] = []
+  raw.slice(0, VALUE_LIMITS.groups * 2).forEach((value, index) => {
+    if (out.length >= VALUE_LIMITS.groups || !isObject(value)) return
+    const name = text(value.name, VR_LIMITS.label)
+    if (!name) return
+    let id = typeof value.id === 'string' && VALUE_ID.test(value.id) ? value.id : `g${index + 1}`
+    for (let n = 2; used.has(id); n++) id = `${id.replace(/-\d+$/, '')}-${n}`
+    used.add(id)
+    out.push({ id, name, summary: text(value.summary, VR_LIMITS.text) })
+  })
+  return out
+}
+
+/** 価値の group を、グループの id に合わせる（id でも名前でもよい。大文字・小文字は問わない）。合わなければ消す */
+function linkGroups(values: ValueItem[], groups: readonly ValueGroup[]): ValueItem[] {
+  if (groups.length === 0) return values.map(({ group: _group, ...value }) => value)
+  const byKey = new Map<string, string>()
+  for (const group of groups) {
+    byKey.set(group.id.toLowerCase(), group.id)
+    if (!byKey.has(group.name.toLowerCase())) byKey.set(group.name.toLowerCase(), group.id)
+  }
+  return values.map(({ group, ...value }) => {
+    const id = group ? byKey.get(group.trim().toLowerCase()) : undefined
+    return id ? { ...value, group: id } : value
+  })
+}
+
 function parseValue(raw: unknown, index: number, used: Set<string>): ValueItem | null {
   if (!isObject(raw)) return null
   const name = text(raw.name, VR_LIMITS.label)
@@ -177,9 +224,11 @@ function parseValue(raw: unknown, index: number, used: Set<string>): ValueItem |
   for (let n = 2; used.has(id); n++) id = `${id.replace(/-\d+$/, '')}-${n}`
   used.add(id)
   const status = parseValueState(raw.status)
+  const group = typeof raw.group === 'string' ? raw.group.trim().slice(0, VR_LIMITS.label) : ''
   return {
     id,
     name,
+    ...(group ? { group } : {}),
     who: text(raw.who, VR_LIMITS.label),
     why: text(raw.why, VR_LIMITS.text),
     success: text(raw.success, VR_LIMITS.text),
@@ -225,9 +274,10 @@ export function parseValueUseCase(raw: unknown, fileId: string): { ok: true; doc
   const title = text(raw.title, VR_LIMITS.title)
   if (!title) return { ok: false, reason: '"title" is missing' }
   const used = new Set<string>()
-  const values = Array.isArray(raw.values)
+  const groups = parseGroups(raw.groups)
+  const values = linkGroups(Array.isArray(raw.values)
     ? raw.values.slice(0, VALUE_LIMITS.values * 2).map((value, index) => parseValue(value, index, used)).filter((value) => value !== null).slice(0, VALUE_LIMITS.values)
-    : []
+    : [], groups)
   const status = parseStatus(raw.status)
   // 下書きは、まだ価値が無くてよい（存在意義だけでも先に出す）
   if (values.length === 0 && status !== 'drafting') {
@@ -247,6 +297,7 @@ export function parseValueUseCase(raw: unknown, fileId: string): { ok: true; doc
       status,
       ...(terminalId ? { terminalId } : {}),
       purpose: text(raw.purpose, VR_LIMITS.text),
+      groups,
       values,
       outOfScope: list(raw.outOfScope, VR_LIMITS.listItems, (value) => optionalText(value, VR_LIMITS.text) ?? null),
       questions: list(raw.questions, VR_LIMITS.listItems, (value) => optionalText(value, VR_LIMITS.text) ?? null),
@@ -282,6 +333,75 @@ export function summarizeValues(doc: Pick<ValueUseCaseDoc, 'values'>): ValueSumm
     else summary.unknown++
   }
   return summary
+}
+
+/** これより価値が多ければグループに分けて見せる（少なければ今までどおり全部を並べる） */
+export const GROUP_FROM_VALUES = 13
+/** 自動で分けるときのグループの数の目安 */
+export const AUTO_GROUPS_MAX = 30
+
+/** 画面で見せるグループ（文書のもの・自動で分けたもの） */
+export interface ValueGroupView {
+  /** 画面の中で一意（開いた・閉じたの控え） */
+  key: string
+  name: string
+  summary: string
+  /**
+   * doc … 文書の groups / other … 文書のグループに入っていない価値 /
+   * who … 誰が（who）で自動に分けた / range … 書いた順に自動で区切った
+   */
+  source: 'doc' | 'other' | 'who' | 'range'
+  /** 文書の groups の中の位置（source が doc のときだけ） */
+  groupIndex?: number
+  /** 文書の values の中の位置（書いた順） */
+  indices: number[]
+  stats: ValueSummary
+}
+
+function groupView(doc: Pick<ValueUseCaseDoc, 'values'>, base: Omit<ValueGroupView, 'stats'>): ValueGroupView {
+  return { ...base, stats: summarizeValues({ values: base.indices.map((i) => doc.values[i]!) }) }
+}
+
+/**
+ * 価値をグループに分ける。グループに分けないとき（価値が少なく、文書にグループも無い）は null。
+ * - 文書に groups があればそれを使う（書いた順。空のグループは外す。どれにも入らない価値は最後の「その他」）
+ * - 無ければ自動で: 誰が（who）が 2〜30 種類に分かれるならそれで、だめなら書いた順に 30 以下に区切る
+ */
+export function groupValues(doc: Pick<ValueUseCaseDoc, 'values' | 'groups'>): ValueGroupView[] | null {
+  const n = doc.values.length
+  if (doc.groups.length > 0 && n > 0) {
+    const members = new Map<string, number[]>(doc.groups.map((group) => [group.id, []]))
+    const other: number[] = []
+    doc.values.forEach((value, i) => {
+      const bucket = value.group ? members.get(value.group) : undefined
+      if (bucket) bucket.push(i)
+      else other.push(i)
+    })
+    const views = doc.groups.flatMap((group, groupIndex) => {
+      const indices = members.get(group.id) ?? []
+      return indices.length ? [groupView(doc, { key: `doc:${group.id}`, name: group.name, summary: group.summary, source: 'doc', groupIndex, indices })] : []
+    })
+    if (other.length) views.push(groupView(doc, { key: 'other', name: '', summary: '', source: 'other', indices: other }))
+    return views
+  }
+  if (n < GROUP_FROM_VALUES) return null
+  const byWho = new Map<string, number[]>()
+  doc.values.forEach((value, i) => {
+    const who = value.who.trim()
+    const bucket = byWho.get(who)
+    if (bucket) bucket.push(i)
+    else byWho.set(who, [i])
+  })
+  if (byWho.size >= 2 && byWho.size <= AUTO_GROUPS_MAX && !byWho.has('')) {
+    return [...byWho].map(([who, indices]) => groupView(doc, { key: `who:${who}`, name: who, summary: '', source: 'who', indices }))
+  }
+  const size = Math.max(10, Math.ceil(n / AUTO_GROUPS_MAX))
+  const views: ValueGroupView[] = []
+  for (let start = 0; start < n; start += size) {
+    const indices = Array.from({ length: Math.min(size, n - start) }, (_, k) => start + k)
+    views.push(groupView(doc, { key: `range:${start}`, name: '', summary: '', source: 'range', indices }))
+  }
+  return views
 }
 
 /** すべての価値が動く（完成）。価値が無ければ false */

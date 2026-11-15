@@ -59,3 +59,18 @@ export function planScreenRef(docPath: string, screenIndex: number, caption?: st
 export function planChangeRef(docPath: string, screenIndex: number, annotationIndex: number, n: number, changeLabel?: string): string {
   return reviewItemRef(docPath, `screens[${screenIndex}].annotations[${annotationIndex}]`, `#${n}${changeLabel ? ` ${changeLabel}` : ''}`)
 }
+
+/** 価値ユースケースのグループ1つ（文書のグループ・自動で分けたもの。@shared/valueUseCase の groupValues） */
+export function valueGroupRef(
+  docPath: string,
+  group: { source: 'doc' | 'other' | 'who' | 'range'; groupIndex?: number; indices: readonly number[]; key: string },
+  name: string,
+  id?: string
+): string {
+  const first = group.indices[0] ?? 0
+  const last = group.indices[group.indices.length - 1] ?? first
+  if (group.source === 'doc') return reviewItemRef(docPath, `groups[${group.groupIndex ?? 0}]`, name, id)
+  if (group.source === 'who') return `${docPath} → values[who=${JSON.stringify(name)}] (${group.indices.length})`
+  if (group.source === 'range') return `${docPath} → values[${first}..${last}]`
+  return `${docPath} → values without a group (${group.indices.length})`
+}

@@ -36,7 +36,7 @@ A system is complete when every value it promises can be obtained by a real user
 
 ## 1. Draft first — within your first few tool calls
 
-Before reading the code in depth, write \`${VALUE_USECASE_DIR}/<id>.json\` with \`"status": "drafting"\`, the \`title\`, a one-line \`purpose\` and the \`values\` you can already name (names only is fine; \`values\` may even be empty). Use what you already know (the request, README / CLAUDE.md / AGENTS.md). Ferret opens the tab as soon as the draft appears. While filling it in, check the past feedback people gave across projects (skill ferret-feedback) and reflect the related and recurring points (e.g. basics they always expect), so they do not have to repeat them.
+Before reading the code in depth, write \`${VALUE_USECASE_DIR}/<id>.json\` with \`"status": "drafting"\`, the \`title\`, a one-line \`purpose\` and the \`values\` you can already name (names only is fine; \`values\` may even be empty), with their \`groups\` as soon as you can see them. Use what you already know (the request, README / CLAUDE.md / AGENTS.md). Ferret opens the tab as soon as the draft appears. While filling it in, check the past feedback people gave across projects (skill ferret-feedback) and reflect the related and recurring points (e.g. basics they always expect), so they do not have to repeat them.
 
 If a document already exists for this product, update it instead (same file) — do not start over.
 
@@ -65,8 +65,12 @@ Copy the screenshots you use into \`${VALUE_USECASE_DIR}/<id>/\` (the cache is o
   "status": "proposed",
   "terminalId": "<value of $FERRET_TERMINAL_ID>",
   "purpose": "Why this system exists, in 1-3 sentences.",
+  "groups": [
+    { "id": "billing", "name": "Billing and getting paid", "summary": "Create, send and track invoices until the money arrives" }
+  ],
   "values": [{
     "id": "send-invoice",
+    "group": "billing",
     "name": "A freelancer sends a correct invoice in under a minute",
     "who": "Freelancer (owner of the account)",
     "why": "Getting paid on time is the reason they use the product",
@@ -86,6 +90,7 @@ Copy the screenshots you use into \`${VALUE_USECASE_DIR}/<id>/\` (the cache is o
 }
 \`\`\`
 
+- **Groups (always)**: a detailed document has hundreds of values, which nobody can review one by one. Put every value into one of **10–30 \`groups\`** (about 5–30 values each) and set each value's \`group\` to that group's \`id\`. Group by what the person reviews together — an area of the product, a user journey or a role — not by build status. Give each group a short \`name\` and a one-line \`summary\` so the person can judge the whole group at a glance. Ferret shows the groups first and opens a group's values on demand. With fewer than about 15 values, a few groups (or none) is fine. When you update an existing document that has no \`groups\`, add them.
 - \`status\` of the document: \`drafting\` while you are still writing (cannot be approved yet), \`proposed\` when ready.
 - **Every value**: list all the values the system must deliver (not features — what the user gains). If every flow works, the system is complete; if something is missing from the list, it will not be built.
 - **Full flow from the very first screen** (launch / top page / login): one step per screen or action — the screen name, the exact button or field (\`action\`), and what the user sees next (\`expected\`). Do not skip or merge steps; a flow with 3 steps is usually too coarse.
@@ -102,6 +107,7 @@ Tell the person in one or two lines that the value use cases are in Ferret's **�
 ## 4. When Ferret sends the answer
 
 - "[Ferret value use cases] … approved" → build the system so each flow works exactly as written. Work value by value; after a flow works end to end, set that value's \`"status": "works"\` (and \`updatedAt\`). When all values work, set the document's \`"status": "done"\`. If a flow has to change, revise the document first (\`revision\` + 1, \`"status": "proposed"\`) and wait again.
+- Feedback may name a whole group ("Group \"…\"") — apply it to every value in that group.
 - "[Ferret value use cases] … feedback" → revise the document (same file, \`revision\` + 1, \`"status": "proposed"\`, new \`updatedAt\`), say it is updated, and wait again. Marked areas name the value and step (1-based) and the area on that step's screenshot.
 - Feedback can arrive at any time — also after approval, while you are building, or after the plan is done. Stop where you are, read it, then revise the plan (\`revision\` + 1, \`"status": "proposed"\`) and wait again, unless it only corrects something already built to match the approved plan — then fix that and say so.
 - Feedback can also come as a **recorded review**: the message names \`.ferret/reviews/<id>/\` and the last entry in \`responses\` has \`"kind": "recording"\`. Read \`<dir>/feedback.md\`, \`<dir>/transcript.jsonl\` and open the screenshots (\`<dir>/NN.png\`) before revising; address every finding or ask in \`questions\`.

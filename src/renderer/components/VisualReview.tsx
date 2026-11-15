@@ -205,17 +205,24 @@ function usePlanImages(plan: VisualPlan): Record<string, string | null> {
 /** 文書（計画・価値ユースケース）の画像を main から data URL で読む。画像の並びと版が同じなら読み直さない（ちらつかせない） */
 export function useDocImages(id: string, revision: number, rels: readonly string[]): Record<string, string | null> {
   const [images, setImages] = useState<Record<string, string | null>>({})
-  const key = `${id}:${revision}:${rels.join('|')}`
+  // 読み始めた画像（同じ文書・版のあいだ）。画像の並びが増えたとき（価値ユースケースのグループを開いたとき）は、足りない分だけ読む
+  const started = useRef<{ doc: string; rels: Set<string> }>({ doc: '', rels: new Set() })
+  const doc = `${id}:${revision}`
+  const key = `${doc}:${rels.join('|')}`
   useEffect(() => {
-    let alive = true
-    setImages({})
-    for (const rel of new Set(rels)) {
-      void window.ade.invoke('visualReview:image', rel).then((url) => {
-        if (alive) setImages((current) => ({ ...current, [rel]: url }))
-      }).catch(() => { if (alive) setImages((current) => ({ ...current, [rel]: null })) })
+    if (started.current.doc !== doc) {
+      started.current = { doc, rels: new Set() }
+      setImages({})
     }
-    return () => { alive = false }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- key に rels を含む
+    const seen = started.current
+    for (const rel of new Set(rels)) {
+      if (seen.rels.has(rel)) continue
+      seen.rels.add(rel)
+      void window.ade.invoke('visualReview:image', rel).then((url) => {
+        if (started.current === seen) setImages((current) => ({ ...current, [rel]: url }))
+      }).catch(() => { if (started.current === seen) setImages((current) => ({ ...current, [rel]: null })) })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key に doc と rels を含む
   }, [key])
   return images
 }

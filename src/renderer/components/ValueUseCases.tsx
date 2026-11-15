@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, Check, MessageSquare, Mic, Square, Trash2 } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, MessageSquare, Mic, Square, Trash2 } from 'lucide-react'
 import { canRespond, type PlanBox, type RecordingNote } from '@shared/visualReview'
 import {
   flatStepIndex,
+  groupValues,
   isComplete,
   stepAt,
   summarizeValues,
+  type ValueGroupView,
   type ValueItem,
+  type ValueSummary,
   type ValueReply,
   type ValueState,
   type ValueUseCaseDoc,
   type ValueUseCaseListing,
   VALUE_USECASE_DIR
 } from '@shared/valueUseCase'
-import { reviewDirPath, reviewDocPath, valueRef, valueStepRef } from '@shared/reviewRefs'
+import { reviewDirPath, reviewDocPath, valueGroupRef, valueRef, valueStepRef } from '@shared/reviewRefs'
 import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
 import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
 import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
@@ -116,6 +119,21 @@ export function ValueUseCases({ listing, onChanged, recording, folderPath }: {
   )
 }
 
+/** 開いているグループ（文書ごと。返事で版が変わって詳細を作り直しても、開いたままにする） */
+const openGroupsByDoc = new Map<string, Set<string>>()
+/** これより価値が多ければ、最初はグループを閉じて見せる（グループだけでざっくり見る） */
+const OPEN_ALL_UP_TO = 30
+
+function useOpenGroups(doc: ValueUseCaseDoc, groups: ValueGroupView[] | null): [Set<string>, (keys: Set<string>) => void] {
+  const [open, setOpenState] = useState<Set<string>>(() => openGroupsByDoc.get(doc.id)
+    ?? new Set(groups && doc.values.length <= OPEN_ALL_UP_TO ? groups.map((group) => group.key) : []))
+  const setOpen = (keys: Set<string>): void => {
+    openGroupsByDoc.set(doc.id, keys)
+    setOpenState(keys)
+  }
+  return [open, setOpen]
+}
+
 function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
   doc: ValueUseCaseDoc
   docPath: string | null
@@ -126,7 +144,11 @@ function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
 }) {
   const t = useT()
   const toast = useToast()
-  const rels = useMemo(() => doc.values.flatMap((value) => value.flow.flatMap((step) => (step.image ? [step.image] : []))), [doc])
+  const groups = useMemo(() => groupValues(doc), [doc])
+  const [openGroups, setOpenGroups] = useOpenGroups(doc, groups)
+  // 画像は見えている価値（開いたグループ）の分だけ読む（数百の価値の画像を一度に読まない）
+  const visible = useMemo(() => (groups ? groups.filter((group) => openGroups.has(group.key)).flatMap((group) => group.indices) : doc.values.map((_, i) => i)), [doc, groups, openGroups])
+  const rels = useMemo(() => visible.flatMap((i) => doc.values[i]!.flow.flatMap((step) => (step.image ? [step.image] : []))), [doc, visible])
   const images = useDocImages(doc.id, doc.revision, rels)
   const summary = summarizeValues(doc)
   const complete = isComplete(doc)
@@ -177,6 +199,40 @@ function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
   const startRecording = (): void => {
     setMode('feedback')
     recording?.onStart(doc, currentNote())
+  }
+
+  const groupName = (group: ValueGroupView): string => group.source === 'other'
+    ? t('valueUseCase.group.other')
+    : group.source === 'range'
+      ? t('valueUseCase.group.range', { from: (group.indices[0] ?? 0) + 1, to: (group.indices[group.indices.length - 1] ?? 0) + 1 })
+      : group.name
+  /** グループ全体へのフィードバック。文の頭にグループの名前を入れて、フィードバックを開く */
+  const feedbackForGroup = (group: ValueGroupView): void => {
+    const head = t('valueUseCase.group.feedbackHead', { name: groupName(group) })
+    setText((current) => (current.trim() ? `${current.replace(/\s+$/, '')}\n${head}` : head))
+    setMode('feedback')
+  }
+  const toggleGroup = (key: string): void => {
+    const next = new Set(openGroups)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    setOpenGroups(next)
+  }
+  const lane = (v: number) => {
+    const value = doc.values[v]!
+    return (
+      <ValueLane
+        key={value.id}
+        doc={doc}
+        value={value}
+        index={v}
+        docPath={docPath}
+        images={images}
+        drawing={mode === 'feedback'}
+        boxes={boxes}
+        onDraw={(screen, box) => setBoxes((current) => [...current, { ...box, screen, note: '' }])}
+      />
+    )
   }
 
   const recordBlocked = busy || !!recording?.busy || !!recording?.pending
@@ -269,25 +325,57 @@ function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
               <span>{t('valueUseCase.summaryDetail', { ...summary })}</span>
               {complete && <Badge tone="success">{t('valueUseCase.complete')}</Badge>}
             </div>
+            {groups && (
+              <div className="vuc__groups-bar" data-testid="value-usecases-groups-bar">
+                <span>{t(groups.some((group) => group.source === 'doc') ? 'valueUseCase.group.countDoc' : 'valueUseCase.group.countAuto', { n: groups.length })}</span>
+                <Button variant="ghost" icon={<ChevronsUpDown size={13} />} onClick={() => setOpenGroups(new Set(groups.map((group) => group.key)))} data-testid="value-usecases-open-all">{t('valueUseCase.group.openAll')}</Button>
+                <Button variant="ghost" icon={<ChevronsDownUp size={13} />} onClick={() => setOpenGroups(new Set())} data-testid="value-usecases-close-all">{t('valueUseCase.group.closeAll')}</Button>
+              </div>
+            )}
             {doc.purpose && <p className="vuc__purpose"><strong>{t('valueUseCase.purpose')}</strong> {doc.purpose}</p>}
           </header>
 
           <div className="wbl__body">
-            <div className="wbl__lanes">
-              {doc.values.map((value, v) => (
-                <ValueLane
-                  key={value.id}
-                  doc={doc}
-                  value={value}
-                  index={v}
-                  docPath={docPath}
-                  images={images}
-                  drawing={mode === 'feedback'}
-                  boxes={boxes}
-                  onDraw={(screen, box) => setBoxes((current) => [...current, { ...box, screen, note: '' }])}
-                />
-              ))}
-            </div>
+            {groups ? (
+              <div className="vuc__groups">
+                {groups.map((group) => {
+                  const open = openGroups.has(group.key)
+                  const name = groupName(group)
+                  const docGroup = group.groupIndex !== undefined ? doc.groups[group.groupIndex] : undefined
+                  return (
+                    <section key={group.key} className={`vuc__group${open ? ' is-open' : ''}`} data-testid="value-usecases-group">
+                      <div className="wbl__card vuc__group-card" data-board-card>
+                        <div className="vuc__group-head">
+                          <button type="button" className="vuc__group-toggle" aria-expanded={open} onClick={() => toggleGroup(group.key)} data-testid="value-usecases-group-toggle">
+                            {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
+                            <span className="vuc__group-name">{name}</span>
+                            <span className="vr__muted">{t('valueUseCase.group.values', { n: group.indices.length })}</span>
+                          </button>
+                          <CopyRef text={docPath && valueGroupRef(docPath, group, name, docGroup?.id)} />
+                        </div>
+                        {group.summary && <p className="vuc__group-summary">{group.summary}</p>}
+                        <StateBar stats={group.stats} />
+                        {!open && (
+                          <ul className="vuc__group-preview">
+                            {group.indices.slice(0, 5).map((i) => <li key={i}><span className="vuc__value-no">{i + 1}</span>{doc.values[i]!.name}</li>)}
+                            {group.indices.length > 5 && <li className="vr__muted">{t('valueUseCase.group.more', { n: group.indices.length - 5 })}</li>}
+                          </ul>
+                        )}
+                        <div className="vr__row">
+                          <Button variant="ghost" onClick={() => toggleGroup(group.key)}>{t(open ? 'valueUseCase.group.close' : 'valueUseCase.group.open')}</Button>
+                          {pending && !processingHere && <Button icon={<MessageSquare size={13} />} disabled={busy} onClick={() => feedbackForGroup(group)} data-testid="value-usecases-group-feedback">{t('valueUseCase.group.feedback')}</Button>}
+                        </div>
+                      </div>
+                      {open && <div className="wbl__lanes vuc__group-lanes">{group.indices.map(lane)}</div>}
+                    </section>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="wbl__lanes">
+                {doc.values.map((_, v) => lane(v))}
+              </div>
+            )}
             {(doc.outOfScope.length > 0 || doc.questions.length > 0 || doc.responses.length > 0) && (
               <div className="wbl__side">
                 {doc.questions.length > 0 && (
@@ -314,6 +402,29 @@ function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
         </div>
       </Whiteboard>
     </article>
+  )
+}
+
+/** グループの価値の今の作りの内訳（横の帯と数） */
+function StateBar({ stats }: { stats: ValueSummary }) {
+  const t = useT()
+  const parts: Array<{ key: string; n: number; state: ValueState | 'unknown' }> = [
+    { key: 'works', n: stats.works, state: 'works' },
+    { key: 'partial', n: stats.partial, state: 'partial' },
+    { key: 'broken', n: stats.broken, state: 'broken' },
+    { key: 'not-built', n: stats.notBuilt, state: 'not-built' },
+    { key: 'unknown', n: stats.unknown, state: 'unknown' }
+  ]
+  const total = Math.max(1, stats.values)
+  return (
+    <div className="vuc__statebar">
+      <div className="vuc__statebar-track" aria-hidden="true">
+        {parts.filter((part) => part.n > 0).map((part) => <span key={part.key} className={`vuc__statebar-seg vuc-state--${part.state}`} style={{ width: `${(part.n / total) * 100}%` }} />)}
+      </div>
+      <span className="vuc__statebar-text">
+        {parts.filter((part) => part.n > 0).map((part) => `${t(`valueUseCase.state.${part.state}`)} ${part.n}`).join(' · ')}
+      </span>
+    </div>
   )
 }
 
