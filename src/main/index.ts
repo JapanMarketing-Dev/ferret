@@ -20,7 +20,7 @@ import type { SessionPaths } from './sessions/paths'
 import type { IncrementalTranscriber } from './pipeline/stt/engine'
 import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
 import { captureTargetLabel, resolveCaptureTarget, sanitizeCaptureTarget, targetFromSource, targetSourceIds } from '@shared/captureTarget'
-import { mirrorSourceParam } from '@shared/captureComposite'
+import { mirrorSourceParam, windowOnDisplay } from '@shared/captureComposite'
 import { AGENT_SKILL_AGENTS, type AgentSkillAgent, type SkillContext } from '@shared/agentSkill'
 import { BrowserWindow, Menu, Notification, app, clipboard, dialog, ipcMain, nativeTheme, powerMonitor, safeStorage, shell, protocol, session } from 'electron'
 import { basename, dirname, join } from 'node:path'
@@ -1744,10 +1744,20 @@ function syncMirror(): Promise<Electron.WebContents | null> {
     const wanted = mirrorRecording === false ? null : mirrorRecording ?? await previewSourceId()
     if (!browser) return null
     if (!wanted) { browser.hideMirror(); return null }
-    return browser.showMirror(join(__dirname, '../recorder/mirror.html'), wanted, t('recording.mirrorUnavailable', { target: captureTargetLabel(captureConsent.target) }), await mirroredDisplay(wanted))
+    const display = await mirroredDisplay(wanted)
+    // Ferret の窓がある画面そのものを録るときは映さない（映すと、Ferret の中に Ferret の画面が映って二重・入れ子になる。2026-11-16）。
+    // 内蔵ブラウザをそのまま出し、書き込みも内蔵ブラウザで受ける（画面の録画にはそのまま写る。静止画は録画の映像から切り出す）
+    if (display && showsOwnWindow(display())) { browser.hideMirror(); return null }
+    return browser.showMirror(join(__dirname, '../recorder/mirror.html'), wanted, t('recording.mirrorUnavailable', { target: captureTargetLabel(captureConsent.target) }), display)
   })
   mirrorQueue = next.catch(() => undefined)
   return next.catch((err: unknown) => { reportHandled(err, { area: 'recording', op: 'sync capture mirror' }); return null })
+}
+
+/** 録る画面（ディスプレイの範囲）に Ferret の窓が少しでも入っているか */
+function showsOwnWindow(display: Electron.Rectangle | null): boolean {
+  if (!display || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()) return false
+  return windowOnDisplay(mainWindow.getBounds(), display)
 }
 
 /**

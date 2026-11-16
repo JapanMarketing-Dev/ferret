@@ -152,3 +152,10 @@ export function mirrorHash(state: { source: string; message?: string; mask?: str
   if (state.mask) params.set('mask', state.mask)
   return params.toString()
 }
+
+/**
+ * 窓がその画面に少しでも入っているか（Ferret の窓がある画面を録るなら、録画の映像を Ferret の中に映さない。映すと二重・入れ子になる）
+ */
+export function windowOnDisplay(window: Rect, display: Rect): boolean {
+  return mirrorMaskParam(window, display) !== null
+}

@@ -14,7 +14,7 @@ import { applyRefreshedToken, isTokenExpiring, keychainWriteCommand, readRefresh
 import { fetchClaudeUsage } from '../../src/main/usage/fetchers'
 import { groupAccountRows } from '../../src/shared/accounts'
 import { usageResetText, usageSectionName, usageSections, type ProviderRateLimits } from '../../src/shared/usage'
-import { isMirrorShownTitle, mirrorHash, mirrorMaskParam } from '../../src/shared/captureComposite'
+import { isMirrorShownTitle, mirrorHash, mirrorMaskParam, windowOnDisplay } from '../../src/shared/captureComposite'
 
 const NOW = 1_800_000_000_000
 const creds = (o: Record<string, unknown>) => JSON.stringify({ claudeAiOauth: { accessToken: 'old-at', refreshToken: 'old-rt', expiresAt: NOW - 1000, scopes: ['user:inference'], subscriptionType: 'max', ...o }, other: 1 })
@@ -257,5 +257,23 @@ describe('映すページへ渡すハッシュ', () => {
     expect(isMirrorShownTitle('mirror-failed')).toBe(true)
     expect(isMirrorShownTitle('Ferret mirror')).toBe(false)
     expect(isMirrorShownTitle('')).toBe(false)
+  })
+})
+
+describe('Ferret の窓がある画面を録るときは映さない（二重・入れ子にしない）', () => {
+  const main = { x: 0, y: 0, width: 1512, height: 982 }
+  const second = { x: 1512, y: 0, width: 1920, height: 1080 }
+  it('窓が録る画面に入っていれば true（一部だけでも）', () => {
+    expect(windowOnDisplay({ x: 100, y: 50, width: 1200, height: 800 }, main)).toBe(true)
+    expect(windowOnDisplay({ x: 1400, y: 50, width: 600, height: 800 }, second)).toBe(true)
+  })
+  it('別の画面にある窓なら false（映してよい）', () => {
+    expect(windowOnDisplay({ x: 1600, y: 0, width: 800, height: 600 }, main)).toBe(false)
+    expect(windowOnDisplay({ x: 0, y: 0, width: 1512, height: 982 }, second)).toBe(false)
+  })
+  it('index.ts の syncMirror は、Ferret の窓がある画面のときは映さず内蔵ブラウザを出す', async () => {
+    const { readFileSync } = await import('node:fs')
+    const src = readFileSync('src/main/index.ts', 'utf8')
+    expect(src).toMatch(/if \(display && showsOwnWindow\(display\(\)\)\) \{ browser\.hideMirror\(\); return null \}/)
   })
 })
