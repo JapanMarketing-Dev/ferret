@@ -14,7 +14,7 @@ import { applyRefreshedToken, isTokenExpiring, keychainWriteCommand, readRefresh
 import { fetchClaudeUsage } from '../../src/main/usage/fetchers'
 import { groupAccountRows } from '../../src/shared/accounts'
 import { usageResetText, usageSectionName, usageSections, type ProviderRateLimits } from '../../src/shared/usage'
-import { mirrorMaskParam } from '../../src/shared/captureComposite'
+import { isMirrorShownTitle, mirrorHash, mirrorMaskParam } from '../../src/shared/captureComposite'
 
 const NOW = 1_800_000_000_000
 const creds = (o: Record<string, unknown>) => JSON.stringify({ claudeAiOauth: { accessToken: 'old-at', refreshToken: 'old-rt', expiresAt: NOW - 1000, scopes: ['user:inference'], subscriptionType: 'max', ...o }, other: 1 })
@@ -240,5 +240,22 @@ describe('録画の合わせ鏡を止める場所', () => {
   it('大きさが0なら null', () => {
     expect(mirrorMaskParam({ x: 0, y: 0, width: 0, height: 10 }, display)).toBeNull()
     expect(mirrorMaskParam({ x: 0, y: 0, width: 10, height: 10 }, { x: 0, y: 0, width: 0, height: 0 })).toBeNull()
+  })
+})
+
+describe('映すページへ渡すハッシュ', () => {
+  it('映すもの・文・塗りつぶす場所。無いものは入れない。文は URL として逃がす', () => {
+    expect(mirrorHash({ source: 'screen:1:0' })).toBe('src=screen%3A1%3A0')
+    const hash = new URLSearchParams(mirrorHash({ source: 'screen:1:0,window:2:0', message: '映せません & ?#', mask: '0,0,0.5,1' }))
+    expect(hash.get('src')).toBe('screen:1:0,window:2:0')
+    expect(hash.get('msg')).toBe('映せません & ?#')
+    expect(hash.get('mask')).toBe('0,0,0.5,1')
+    expect(new URLSearchParams(mirrorHash({ source: 'screen:1:0', mask: null })).has('mask')).toBe(false)
+  })
+  it('ビューを出す題名は mirror-ready と mirror-failed だけ', () => {
+    expect(isMirrorShownTitle('mirror-ready')).toBe(true)
+    expect(isMirrorShownTitle('mirror-failed')).toBe(true)
+    expect(isMirrorShownTitle('Ferret mirror')).toBe(false)
+    expect(isMirrorShownTitle('')).toBe(false)
   })
 })

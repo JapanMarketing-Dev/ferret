@@ -33,7 +33,8 @@ vi.mock('electron', () => {
       isDestroyed: () => this.webContents.closed,
       setWindowOpenHandler: () => undefined,
       on: (name: string, fn: (...args: unknown[]) => void) => { this.webContents.events.set(name, fn) },
-      loadURL: async (url: string) => { this.webContents.url = url },
+      loadURL: async (url: string) => { this.webContents.url = url; state.log.push(`load ${this.id} ${url}`) },
+      loadFile: async (path: string, options?: { hash?: string }) => { this.webContents.url = `file://${path}${options?.hash ? `#${options.hash}` : ''}`; state.log.push(`loadFile ${this.id}`) },
       getURL: () => this.webContents.url,
       getTitle: () => '',
       getUserAgent: () => 'UA',
@@ -81,7 +82,10 @@ const { EmbeddedBrowser } = await import('../../src/main/browser')
 function attach(): InstanceType<typeof EmbeddedBrowser> {
   const window = {
     contentView: { addChildView: (v: { id: number }) => { state.log.push(`add ${v.id}`) }, removeChildView: (v: { id: number }) => { state.log.push(`remove ${v.id}`) }, children: [] },
-    isDestroyed: () => false
+    isDestroyed: () => false,
+    isVisible: () => true,
+    isMinimized: () => false,
+    getContentBounds: () => ({ x: 0, y: 0, width: 800, height: 600 })
   } as unknown as Parameters<InstanceType<typeof EmbeddedBrowser>['attach']>[0]
   const browser = new EmbeddedBrowser()
   browser.attach(window, { urls: ['https://example.com/shop', 'https://example.com/shop2'], active: 0 }, 'desktop')
@@ -356,5 +360,70 @@ describe('後ろのタブを眠らせる（@shared/browserMemory）', () => {
     expect(snap.tabs).toHaveLength(2)
     expect(snap.tabs[0]!.entries).toEqual([{ url: 'https://example.com/a', title: '' }])
     expect(snap.active).toBe(1)
+  })
+})
+
+describe('録画中の映し込み（mirror）をちらつかせない（2026-11-16）', () => {
+  it('隠す（ダイアログを開いた）ときは大きさを0にせず見せないだけ。戻すと同じ大きさで見せる', () => {
+    const browser = attach()
+    const front = state.views[0]!
+    state.log.length = 0
+    browser.setBounds(null)
+    expect(state.log).toContain(`visible ${front.id} false`)
+    expect(state.log).not.toContain(`bounds ${front.id} 0`)
+    state.log.length = 0
+    browser.setBounds({ x: 0, y: 0, width: 800, height: 600 })
+    expect(state.log).toContain(`visible ${front.id} true`)
+    expect(state.log).toContain(`bounds ${front.id} 800`)
+  })
+
+  it('新しい映し込みは、最初の映像が出た（題名 mirror-ready）まで出さない', async () => {
+    const browser = attach()
+    const shown = browser.showMirror('/m/mirror.html', 'screen:1:0', 'msg')
+    const mirror = state.views.at(-1)!
+    await shown
+    expect(state.log).toContain(`visible ${mirror.id} false`)
+    expect(state.log).not.toContain(`visible ${mirror.id} true`)
+    state.log.length = 0
+    mirror.webContents.events.get('page-title-updated')!({}, 'Ferret mirror')
+    expect(state.log).not.toContain(`visible ${mirror.id} true`)
+    mirror.webContents.events.get('page-title-updated')!({}, 'mirror-ready')
+    expect(state.log).toContain(`visible ${mirror.id} true`)
+    browser.hideMirror()
+  })
+
+  it('映せないと分かった（mirror-failed）ときも出す（理由の文を見せる）', async () => {
+    const browser = attach()
+    await browser.showMirror('/m/mirror.html', 'window:9:0', 'cannot')
+    const mirror = state.views.at(-1)!
+    mirror.webContents.events.get('page-title-updated')!({}, 'mirror-failed')
+    expect(state.log).toContain(`visible ${mirror.id} true`)
+    browser.hideMirror()
+  })
+
+  it('録る対象を切り替えても、ビューを作り直さず読み込み直さない。映すものはハッシュだけで替える', async () => {
+    const browser = attach()
+    await browser.showMirror('/m/mirror.html', 'screen:1:0', 'msg')
+    const mirror = state.views.at(-1)!
+    const count = state.views.length
+    state.log.length = 0
+    const again = await browser.showMirror('/m/mirror.html', 'window:42:0', 'msg2')
+    expect(state.views.length).toBe(count)
+    expect(again).toBe(mirror.webContents)
+    expect(state.log.filter((l) => l.startsWith('loadFile') || l.startsWith('remove') || l.startsWith('close'))).toEqual([])
+    const load = state.log.find((l) => l.startsWith(`load ${mirror.id} `))!
+    const hash = new URLSearchParams(load.split('#')[1])
+    expect(hash.get('src')).toBe('window:42:0')
+    expect(hash.get('msg')).toBe('msg2')
+    browser.hideMirror()
+  })
+
+  it('同じものをもう一度映すときは何も送らない', async () => {
+    const browser = attach()
+    await browser.showMirror('/m/mirror.html', 'screen:1:0', 'msg')
+    state.log.length = 0
+    await browser.showMirror('/m/mirror.html', 'screen:1:0', 'msg')
+    expect(state.log.filter((l) => l.startsWith('load'))).toEqual([])
+    browser.hideMirror()
   })
 })

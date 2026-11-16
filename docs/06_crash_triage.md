@@ -72,6 +72,8 @@ tags と添付で分かること（どれも利用者の内容は含まない）
 - まずパンくずの `slow op` の `op` と `ms` を見る。同期の処理（`ps`・`which:*`・`settings:save`・`pty:kill`・`gc:*`）がそのまま止まりの長さに近ければ、それが原因
   - 例：0.7.6 の macOS の 5.9s は、ターミナルを閉じたときの同期の `ps`（`slow op ps 5963ms`。FERRET-21 の ETIMEDOUT も同じ）。0.7.7 で非同期にした
   - `block.ipc` / contexts.block の inflight は「止まった間に待たされていた IPC」で、原因とは限らない（非同期の `fs:gitStatus` などが巻き添えで長く見える）
+  - 手がかりの重い処理は、止まりの始まりから測りの間隔（1秒）前より後に終わったものだけ（`blockSlowOpWindowMs`）。待つのが仕事の IPC（`terminal:continueWork`。`WAITING_IPC_CHANNELS`）は重い処理にも処理中の IPC にも出さない（FERRET-M の 0.8.9：止まりの 7 秒前に終わった `ipc:terminal:continueWork 3812ms` が原因に見えていた）。待つ IPC を足したら `WAITING_IPC_CHANNELS` にも足す
+  - 手がかりが何も無い止まりは、タグ `block.axchange`（補助技術の切り替えが止まりの何秒前か）を見る。`<5s` に偏るなら、他のアプリが補助技術を有効にして Chromium が画面の木を作り直した止まり
 - main では子プロセスを同期で起動しない（`execFileSync`・`execSync`・`spawnSync`）・同期のダイアログを使わない。`test/unit/main-blocking-policy.test.ts` が落とす。どうしても要るときはそのテストの ALLOWED に理由と一緒に足す
 - `opendir` は直接使わない（Windows で落ちる。FERRET-1Q）。`src/main/dirEntries.ts` の `readDirEntries` を使う（`test/unit/dir-entries.test.ts` が落とす）
 - マシン全体が詰まっている間（macOS の熱の状態が serious・critical、または 1分の load average ÷ CPU の数が 2 以上）の止まりは送らない（`isMachineOverloaded`）。0.7.13 の macOS の 1.1s・2.2s は、何本もの Agent とビルドで load average が約30、thermal-state-change が続く中で起き、止まりの手がかり（IPC・重い処理）は無かった。送る止まりにはタグ `block.thermal`・`block.load` を付ける

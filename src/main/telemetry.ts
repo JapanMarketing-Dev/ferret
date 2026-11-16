@@ -31,6 +31,8 @@ import {
   resolveInstallId,
   createBreadcrumbFilter,
   createInflightTracker,
+  blockSlowOpWindowMs,
+  isWaitingIpc,
   eventLoopBlockContext,
   eventLoopBlockThreshold,
   shouldReportEventLoopBlock,
@@ -216,6 +218,8 @@ const inflightIpc = createInflightTracker()
 
 /** IPC のハンドラの開始と終了を控える。長くかかったもの（1秒以上）は重い処理としても控える */
 export function trackIpc(channel: string): () => void {
+  // 待つのが仕事の IPC は手がかりにしない（main を止めないのに、長いので止まりの原因に見える。FERRET-M の 0.8.9）
+  if (isWaitingIpc(channel)) return () => undefined
   const end = inflightIpc.begin(channel)
   return () => {
     const ms = end()
@@ -296,11 +300,15 @@ export function watchEventLoop(threshold: number): void {
       // 手がかり：まだ終わっていない IPC（長い順の上位3つ）、直前に終わった重い処理（同期の fs・ps・which・GC など）、メモリの量、補助技術
       const inflight = inflightIpc.snapshot()
       const memory = process.memoryUsage()
+      // 止まりが終わった時刻（重い処理は Date.now で控えるので、こちらも Date.now）
+      const blockEndWall = Date.now()
       const ax = { axEnabled: app.accessibilitySupportEnabled, axChangedMsAgo: axChangedAt === null ? null : Date.now() - axChangedAt, cpuSpeedLimit, thermalState, loadPerCpu: loadPerCpu() }
       // GC の記録は少し遅れて届くので、待ってから重い処理を集める。スリープ・ロックの知らせも止まりの後に届くので、待ってから見分ける
       setTimeout(() => {
         if (sleepNearBlock({ blockEndAt: now, lagMs: lag, sleepAt: [suspendedAt, lockedAt] })) return
-        reportPerf('event-loop-block', lag, eventLoopBlockContext(inflight, recentSlowOps(Date.now()).slice(0, 3), {
+        // 止まりの前に終わった重い処理は手がかりにしない（FERRET-M の 0.8.9。blockSlowOpWindowMs）
+        const windowMs = blockSlowOpWindowMs({ lagMs: lag, msSinceBlockEnd: Date.now() - blockEndWall, intervalMs: INTERVAL })
+        reportPerf('event-loop-block', lag, eventLoopBlockContext(inflight, recentSlowOps(Date.now(), windowMs).slice(0, 3), {
           heapUsedMb: memory.heapUsed / 2 ** 20, rssMb: memory.rss / 2 ** 20, ...ax
         }))
       }, SLEEP_AFTER_BLOCK_MS).unref?.()

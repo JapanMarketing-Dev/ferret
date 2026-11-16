@@ -108,7 +108,7 @@ describe('パンくずの間引き', () => {
 describe('止まったときの main の様子（FERRET-M: スタックもパンくずも無い止まりの手がかり）', () => {
   it('メモリの量・補助技術の状態をタグと contexts.block に付ける（値は大きさと時間だけ）', () => {
     const ctx = eventLoopBlockContext([], [{ op: 'gc:major', ms: 1900 }], { heapUsedMb: 1170.4, rssMb: 1530.6, axEnabled: true, axChangedMsAgo: 1250 })
-    expect(ctx.tags).toEqual({ 'block.ipc': 'none', 'block.slowop': 'gc:major', 'block.heap': '1-2GB', 'block.ax': 'on' })
+    expect(ctx.tags).toEqual({ 'block.ipc': 'none', 'block.slowop': 'gc:major', 'block.heap': '1-2GB', 'block.ax': 'on', 'block.axchange': '<5s' })
     expect(ctx.context).toMatchObject({ heap_used: '1170MB', rss: '1531MB', ax_changed: '1250ms ago', recent_slow_ops: 'gc:major 1900ms' })
     expect(eventLoopBlockContext([], [], { heapUsedMb: 80, rssMb: 200, axEnabled: false, axChangedMsAgo: null }).context.ax_changed).toBe('never')
   })

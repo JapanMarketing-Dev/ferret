@@ -131,3 +131,24 @@ export function mirrorMaskParam(mirrorOnScreen: Rect, display: Rect): string | n
   return [(left - display.x) / display.width, (top - display.y) / display.height, (right - left) / display.width, (bottom - top) / display.height].map(round).join(',')
 }
 
+
+/** 映すページ（mirror.js）が最初の映像を出した・映せないと分かったときの題名。main はこれでビューを出す */
+export const MIRROR_TITLE_READY = 'mirror-ready'
+export const MIRROR_TITLE_FAILED = 'mirror-failed'
+/** 題名が来なくても、この時間でビューを出す（映像が遅い・題名の知らせが来ない） */
+export const MIRROR_READY_FALLBACK_MS = 2500
+
+export function isMirrorShownTitle(title: string): boolean {
+  return title === MIRROR_TITLE_READY || title === MIRROR_TITLE_FAILED
+}
+
+/**
+ * 映すページへ渡すハッシュ（src=映すもの&msg=映せないときの文&mask=塗りつぶす場所）。
+ * 録る対象を切り替えるときもページを読み込み直さず、このハッシュだけを替える（mirror.js が新しい映像の最初の1枚を待って入れ替える）
+ */
+export function mirrorHash(state: { source: string; message?: string; mask?: string | null }): string {
+  const params = new URLSearchParams({ src: state.source })
+  if (state.message) params.set('msg', state.message)
+  if (state.mask) params.set('mask', state.mask)
+  return params.toString()
+}

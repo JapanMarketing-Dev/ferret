@@ -82,6 +82,8 @@ function attach(): InstanceType<typeof EmbeddedBrowser> {
   const window = { contentView: { addChildView: () => {}, removeChildView: () => {}, children: [] }, isDestroyed: () => false } as unknown as Parameters<InstanceType<typeof EmbeddedBrowser>['attach']>[0]
   const browser = new EmbeddedBrowser()
   browser.attach(window, 'https://evil.example/page', 'desktop')
+  // 画面に置く場所がある（置き場所が無い間は、前のタブも見せない）
+  browser.setBounds({ x: 0, y: 0, width: 800, height: 600 })
   return browser
 }
 

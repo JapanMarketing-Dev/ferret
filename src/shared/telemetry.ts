@@ -893,6 +893,40 @@ export function minimizeNativeCrash<E extends { tags?: object; contexts?: object
 }
 
 /**
+ * 待つのが仕事の IPC（main の停止の手がかりにしない）。ハンドラは await で待っているだけで main を止めないのに、
+ * 長くかかるので「重い処理」「処理中の IPC」に出て止まりの原因に見えてしまう。
+ *   terminal:continueWork … 戻したタブの Agent が入力を待つまで 2 秒ごとに様子を見て最大 3 分待つ
+ *   （FERRET-M の 0.8.9：起動直後の 2.2s の止まりに `ipc:terminal:continueWork 3812ms` が付いていたが、止まりの 7 秒前に終わっていた）
+ */
+export const WAITING_IPC_CHANNELS: ReadonlySet<string> = new Set(['terminal:continueWork'])
+
+export function isWaitingIpc(channel: string): boolean {
+  return WAITING_IPC_CHANNELS.has(channel)
+}
+
+/**
+ * 止まりの手がかりにする「重い処理」を集める範囲（いまから何ミリ秒前までに終わったものか）。
+ * 止まりの原因の処理は、止まりの始まり（止まりの終わり − 遅れ）から測りの間隔ぶん前より後に終わっている。
+ * それより前に終わった処理は、この止まりとは関係がない（FERRET-M の 0.8.9：止まりの 7 秒前に終わった処理が手がかりに出ていた）。
+ *   msSinceBlockEnd … 止まりが終わってから集めるまでの時間（GC の記録・スリープの知らせを待つ SLEEP_AFTER_BLOCK_MS）
+ */
+export function blockSlowOpWindowMs(s: { lagMs: number; msSinceBlockEnd: number; intervalMs: number }): number {
+  const parts = [s.lagMs, s.msSinceBlockEnd, s.intervalMs].map((x) => (Number.isFinite(x) && x > 0 ? x : 0))
+  return parts[0] + parts[1] + parts[2]
+}
+
+/**
+ * 補助技術の切り替えが止まりの何秒前だったか（タグ block.axchange）。切り替えの直後は Chromium が画面の木を作り直して
+ * main が止まることがある。止まりの手がかり（IPC・重い処理）が無いときに、それが原因かを件数で見分ける
+ */
+export function axChangeBucket(msAgo: number | null | undefined): string {
+  if (msAgo == null || !Number.isFinite(msAgo) || msAgo < 0) return 'never'
+  if (msAgo < 5000) return '<5s'
+  if (msAgo < 30_000) return '5-30s'
+  return '30s+'
+}
+
+/**
  * 処理中の IPC（main の停止の手がかり）。begin で始め、返した関数で終える。snapshot は長い順の上位3つ
  */
 export function createInflightTracker(now: () => number = Date.now) {
@@ -990,6 +1024,7 @@ export function eventLoopBlockContext(
   if (env) {
     tags['block.heap'] = memoryBucket(env.heapUsedMb)
     tags['block.ax'] = env.axEnabled ? 'on' : 'off'
+    tags['block.axchange'] = axChangeBucket(env.axChangedMsAgo)
     context.heap_used = `${Math.round(env.heapUsedMb)}MB`
     context.rss = `${Math.round(env.rssMb)}MB`
     context.ax_changed = env.axChangedMsAgo === null ? 'never' : `${Math.round(env.axChangedMsAgo)}ms ago`
