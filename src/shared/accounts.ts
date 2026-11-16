@@ -125,23 +125,41 @@ export function duplicateAccountIds(
 }
 
 /**
- * 一覧に出す行。同じログイン（メールと組織が同じ）が重なれば1行にする。
- * 同じアカウントを2回追加した・システムの既定も同じログイン、のときに同じ行が並ばないように（足元のアカウントの内訳）。
- * 残すのは選択中の行。選択中が無ければ先の行（システムの既定 → 先に追加したもの）。メールが分からない行はまとめない
+ * 一覧に出す行を、同じログイン（メールと組織が同じ）ごとにまとめる。keeper が出す行、members はまとめた行すべて（keeper が先頭）。
+ * 同じアカウントを2回追加した・いつものログインも同じログイン、のときに同じ行が並ばないように（設定画面とフッターの内訳で同じ結果にする）。
+ * 残すのは選択中の行。選択中が無ければ先の行（いつものログイン → 先に追加したもの）。メールが分からない行はまとめない
  */
-export function dedupeAccountRows<T extends { accountId: string | null; email: string | null; workspaceLabel: string | null }>(rows: readonly T[], activeAccountId: string | null): T[] {
-  const keyOf = (row: T) => loginKey(row.email, row.workspaceLabel)
-  const keep = new Map<string, T>()
+export function groupAccountRows<T extends { accountId: string | null; email: string | null; workspaceLabel: string | null }>(
+  rows: readonly T[],
+  activeAccountId: string | null
+): Array<{ keeper: T; members: T[] }> {
+  const groups = new Map<string, T[]>()
   for (const row of rows) {
-    const key = keyOf(row)
-    if (!key) continue
-    const kept = keep.get(key)
-    if (!kept || (row.accountId === activeAccountId && kept.accountId !== activeAccountId)) keep.set(key, row)
+    const key = loginKey(row.email, row.workspaceLabel)
+    if (key) groups.set(key, [...(groups.get(key) ?? []), row])
   }
-  return rows.filter((row) => {
-    const key = keyOf(row)
-    return !key || keep.get(key) === row
-  })
+  const out: Array<{ keeper: T; members: T[] }> = []
+  const done = new Set<string>()
+  for (const row of rows) {
+    const key = loginKey(row.email, row.workspaceLabel)
+    if (!key) {
+      out.push({ keeper: row, members: [row] })
+      continue
+    }
+    if (done.has(key)) continue
+    const members = groups.get(key)!
+    const keeper = members.find((m) => m.accountId === activeAccountId) ?? members[0]
+    // 並びは keeper の位置にそろえる（選択中の行が後ろにあれば、その位置に出す）
+    if (keeper !== row) continue
+    done.add(key)
+    out.push({ keeper, members: [keeper, ...members.filter((m) => m !== keeper)] })
+  }
+  return out
+}
+
+/** groupAccountRows の出す行だけ */
+export function dedupeAccountRows<T extends { accountId: string | null; email: string | null; workspaceLabel: string | null }>(rows: readonly T[], activeAccountId: string | null): T[] {
+  return groupAccountRows(rows, activeAccountId).map((g) => g.keeper)
 }
 
 /** 表示名。名前 → メール → 「ログイン待ち」の順 */

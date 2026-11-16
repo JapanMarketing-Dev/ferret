@@ -113,3 +113,21 @@ export const MIRROR_SOURCE_ID = /^(screen|window):[\w:-]+$/
 export function parseMirrorSourceParam(param: string): string[] {
   return param.split(',').filter((id) => MIRROR_SOURCE_ID.test(id)).slice(0, MAX_COMPOSITE_SOURCES)
 }
+
+/**
+ * 録画中の画面を映す枠（mirror）が、録っている画面そのものの上にあるとき、映像の中でその枠が写る場所（画面に対する 0〜1 の割合）。
+ * そこを映像に出すと、枠の中に枠が映り、無限に重なる（合わせ鏡。2026-11-16、画面全体を録ったら画面が入れ子になって録画が崩れた）。
+ * mirror.js はこの場所を塗りつぶして、映像の中の枠を映さない。重なっていなければ null。
+ * 値は小数4桁に丸めた文字列（URL のハッシュ "mask=x,y,w,h" に入れる）
+ */
+export function mirrorMaskParam(mirrorOnScreen: Rect, display: Rect): string | null {
+  if (!(display.width > 0 && display.height > 0 && mirrorOnScreen.width > 0 && mirrorOnScreen.height > 0)) return null
+  const left = Math.max(mirrorOnScreen.x, display.x)
+  const top = Math.max(mirrorOnScreen.y, display.y)
+  const right = Math.min(mirrorOnScreen.x + mirrorOnScreen.width, display.x + display.width)
+  const bottom = Math.min(mirrorOnScreen.y + mirrorOnScreen.height, display.y + display.height)
+  if (right <= left || bottom <= top) return null
+  const round = (n: number) => String(Math.round(n * 10000) / 10000)
+  return [(left - display.x) / display.width, (top - display.y) / display.height, (right - left) / display.width, (bottom - top) / display.height].map(round).join(',')
+}
+

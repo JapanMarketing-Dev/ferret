@@ -28,6 +28,46 @@
   if (!id) return fail(null)
   start(id, video, true)
 
+  /*
+   * 録っている画面の中に、この枠（Ferret の中で映像を映している場所）自身が写っているときは、その場所を塗りつぶす。
+   * そのまま映すと、枠の中に枠が映り、無限に重なる（合わせ鏡）。場所は main（browser.ts の updateMirrorMask）が
+   * URL のハッシュ "mask=x,y,w,h"（画面に対する 0〜1 の割合。@shared/captureComposite の mirrorMaskParam）で渡す
+   */
+  var mask = document.createElement('div')
+  mask.className = 'self-mask'
+  mask.hidden = true
+  document.body.appendChild(mask)
+  function readMask() {
+    var m = /^#mask=([\d.]+),([\d.]+),([\d.]+),([\d.]+)$/.exec(location.hash)
+    if (!m) return null
+    var r = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
+    for (var i = 0; i < 4; i++) if (!isFinite(r[i]) || r[i] < 0 || r[i] > 1) return null
+    return r[2] > 0 && r[3] > 0 ? r : null
+  }
+  function placeMask() {
+    var r = ids.length === 1 ? readMask() : null
+    var vw = video.videoWidth
+    var vh = video.videoHeight
+    if (!r || !vw || !vh || video.hidden) { mask.hidden = true; return }
+    // video は object-fit: contain。映像が実際に出ている範囲に合わせる
+    var box = video.getBoundingClientRect()
+    var scale = Math.min(box.width / vw, box.height / vh)
+    var w = vw * scale
+    var h = vh * scale
+    var left = box.left + (box.width - w) / 2
+    var top = box.top + (box.height - h) / 2
+    mask.style.left = (left + r[0] * w) + 'px'
+    mask.style.top = (top + r[1] * h) + 'px'
+    mask.style.width = (r[2] * w) + 'px'
+    mask.style.height = (r[3] * h) + 'px'
+    mask.hidden = false
+  }
+  window.addEventListener('hashchange', placeMask)
+  window.addEventListener('resize', placeMask)
+  video.addEventListener('loadedmetadata', placeMask)
+  video.addEventListener('resize', placeMask)
+  placeMask()
+
   /**
    * 1つの画面・ウインドウを video に映す。main（最初のもの）が映せなければ理由の文を出す。
    * 並べているほかのものが映せなければ、その枠だけ暗いままにする（録画は続く）

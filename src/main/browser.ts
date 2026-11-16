@@ -1,7 +1,8 @@
 import { isGestureInput, registerRecorderContents } from './captureConsent'
 import { BrowserIdentity, cleanElectronUserAgent, electronUserAgent } from './browserUserAgent'
 import { SHARED_BROWSER_PARTITION } from '@shared/browserProfile'
-import { WebContentsView, dialog, session, shell, type BaseWindow, type BrowserWindow, type Session, type WebContents } from 'electron'
+import { WebContentsView, dialog, session, shell, type BaseWindow, type BrowserWindow, type Rectangle, type Session, type WebContents } from 'electron'
+import { mirrorMaskParam } from '@shared/captureComposite'
 import { join } from 'node:path'
 import { MOBILE_PRESET, type BrowserState, type ViewBounds, type Viewport } from '@shared/types'
 import { LIVE_TABS, pageTabDestination, tabsToSleep } from '@shared/browserMemory'
@@ -395,6 +396,12 @@ export class EmbeddedBrowser {
 
   attach(window: BaseWindow, initial: string | ProjectTabs, viewport: Viewport): void {
     this.window = window
+    // ウインドウを動かした・別の画面へ移した・最小化した: 映している画面の中の枠の場所が変わる
+    // attach は何度も呼ばれる（プロジェクトの切り替え）ので、同じウインドウには1回だけ付ける
+    if (this.watchedWindow !== window && typeof window.on === 'function') {
+      this.watchedWindow = window
+      for (const event of ['move', 'resize', 'minimize', 'restore', 'show', 'hide'] as const) window.on(event as 'move', () => this.updateMirrorMask())
+    }
     this.viewport = viewport
     this.openTabs(typeof initial === 'string' ? { urls: [initial], active: 0 } : initial)
   }
@@ -951,10 +958,15 @@ export class EmbeddedBrowser {
    * （書き込みの注入スクリプト preload/review を同じく読み込む）。映像を求めてよいのは録画ウインドウと同じ扱い。
    * 映せなければ null（録画は続ける）
    */
-  async showMirror(htmlPath: string, sourceId: string, message = ''): Promise<WebContents | null> {
+  async showMirror(htmlPath: string, sourceId: string, message = '', display: (() => Rectangle | null) | null = null): Promise<WebContents | null> {
     const current = this.mirror?.webContents
-    if (this.mirrorSource === sourceId && current && !current.isDestroyed()) return current
+    this.mirrorDisplay = display
+    if (this.mirrorSource === sourceId && current && !current.isDestroyed()) {
+      this.updateMirrorMask()
+      return current
+    }
     this.hideMirror()
+    this.mirrorDisplay = display
     const window = this.window
     if (!window || window.isDestroyed()) return null
     const view = new WebContentsView({
@@ -987,13 +999,48 @@ export class EmbeddedBrowser {
       if (this.mirror === view) this.hideMirror()
       return null
     }
-    return this.mirror === view && !wc.isDestroyed() ? wc : null
+    if (this.mirror !== view || wc.isDestroyed()) return null
+    this.mirrorUrl = wc.getURL().split('#')[0]
+    this.mirrorMask = ''
+    this.updateMirrorMask()
+    return wc
+  }
+
+  /** 映している画面のディスプレイの範囲（画面座標）。画面全体を1つだけ映しているときだけ。ウインドウ・内蔵ブラウザなら null */
+  private mirrorDisplay: (() => Rectangle | null) | null = null
+  /** 枠の場所の変化を見ているウインドウ */
+  private watchedWindow: BaseWindow | null = null
+  /** 映すページの URL（ハッシュを除く）と、いま渡している塗りつぶしの場所 */
+  private mirrorUrl = ''
+  private mirrorMask = ''
+
+  /**
+   * 映している画面の中に、この枠（mirror）自身が写っていれば、その場所を mirror.js に塗りつぶさせる（合わせ鏡で無限に重なるのを防ぐ）。
+   * 場所は URL のハッシュで渡す（同じページの中の移動なので、映像は止まらない）。枠が動く・大きさが変わるたびに呼ぶ
+   */
+  private updateMirrorMask(): void {
+    const view = this.mirror
+    const window = this.window
+    const wc = view?.webContents
+    if (!view || !wc || wc.isDestroyed() || !this.mirrorUrl || !window || window.isDestroyed()) return
+    const display = this.mirrorDisplay?.() ?? null
+    const bounds = view.getBounds()
+    const content = window.getContentBounds()
+    const mask = display && window.isVisible() && !window.isMinimized()
+      ? mirrorMaskParam({ x: content.x + bounds.x, y: content.y + bounds.y, width: bounds.width, height: bounds.height }, display) ?? ''
+      : ''
+    if (mask === this.mirrorMask) return
+    this.mirrorMask = mask
+    wc.loadURL(`${this.mirrorUrl}#${mask ? `mask=${mask}` : ''}`).catch((err: unknown) => reportHandled(err, { area: 'browser', op: 'mask capture mirror' }))
   }
 
   hideMirror(): void {
     const view = this.mirror
     this.mirror = null
     this.mirrorSource = null
+    this.mirrorDisplay = null
+    this.mirrorUrl = ''
+    this.mirrorMask = ''
     if (!view) return
     this.onLayout?.()
     retireView(this.window, view, 'destroy capture mirror')
@@ -1097,6 +1144,7 @@ export class EmbeddedBrowser {
     const { x, y, width, height } = this.bounds
     // 映像は表示幅（スマホ幅）に関わらず、枠いっぱいに収める
     mirror?.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) })
+    if (mirror) this.updateMirrorMask()
     if (this.viewport === 'mobile') {
       const w = Math.min(MOBILE_PRESET.width, width)
       view.setBounds({

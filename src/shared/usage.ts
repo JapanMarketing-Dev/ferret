@@ -24,7 +24,7 @@ export interface RateLimitWindow {
 type ProviderRateLimitStatus = 'idle' | 'fetching' | 'ok' | 'error' | 'unavailable'
 
 /** 失敗の種類（Orca の UsageRateLimitFailureKind のうち、本システムで起きるもの） */
-export type UsageFailureKind = 'missing-credentials' | 'stale-token' | 'keychain-unavailable' | 'network' | 'server' | 'rate-limited' | 'unknown'
+export type UsageFailureKind = 'missing-credentials' | 'stale-token' | 'not-allowed' | 'keychain-unavailable' | 'network' | 'server' | 'rate-limited' | 'unknown'
 
 export interface ProviderRateLimits {
   provider: AccountAgent
@@ -167,6 +167,8 @@ export function usageStatusLabel(p: ProviderRateLimits): string {
       return t('usage.status.notLoggedIn')
     case 'stale-token':
       return t('usage.status.staleToken')
+    case 'not-allowed':
+      return t('usage.status.notAllowed')
     case 'keychain-unavailable':
       return t('usage.status.keychain')
     case 'network':
@@ -189,4 +191,29 @@ export function formatPlanLabel(planType: string | null | undefined): string | n
       return normalized === 'chatgpt' ? 'ChatGPT' : normalized.charAt(0).toUpperCase() + normalized.slice(1)
     })
     .join(' ')
+}
+
+/** 設定画面のアカウント行に出す枠の名前（言語に合わせる） */
+export function usageSectionName(section: UsageSection): string {
+  switch (section.key) {
+    case 'session':
+      return section.window.windowMinutes === 300 ? t('accounts.usage.session') : formatWindowLabel(section.window.windowMinutes)
+    case 'weekly':
+      return section.window.windowMinutes === 10080 ? t('accounts.usage.weekly') : formatWindowLabel(section.window.windowMinutes)
+    case 'fableWeekly':
+      return t('accounts.usage.fable')
+    default:
+      return t('accounts.usage.spend')
+  }
+}
+
+/**
+ * 枠がいつ戻るか（設定画面のアカウント行）。日時と残り時間の両方を出す（例「11/17 3:00 にリセット（あと 4h 12m）」）。
+ * 戻る時刻が分からなければ null。formatTime は表示の言語の日時（renderer の formatDateTime）を渡す
+ */
+export function usageResetText(window: RateLimitWindow, now: number, formatTime: (ms: number) => string): string | null {
+  if (typeof window.resetsAt !== 'number' || !Number.isFinite(window.resetsAt)) return null
+  const left = window.resetsAt - now
+  if (left <= 0) return t('accounts.usage.resetsNow')
+  return t('accounts.usage.resets', { time: formatTime(window.resetsAt), left: formatResetDuration(left) })
 }

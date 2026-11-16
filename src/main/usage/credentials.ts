@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { claudeKeychainService } from '../accounts/identity'
+import type { CredentialLocation } from './oauthRefresh'
 
 /**
  * 使用量の取得に使うアクセストークンを読む。値はメモリの中だけで使い、返り値以外へは出さない
@@ -96,6 +97,11 @@ export function parseClaudeCredentials(raw: string, now: number = Date.now()): {
   }
 }
 
+/** 読んだ Claude の資格情報（取り直して書き戻すために、元の JSON と置き場所も持つ） */
+export type ClaudeCredentialRead =
+  | { token: string; expired: boolean; raw: string; location: CredentialLocation }
+  | { token: null; reason: 'missing' | 'keychain-unavailable' }
+
 /**
  * Claude の OAuth アクセストークン。
  * configDir を渡すと、その CLAUDE_CONFIG_DIR 用の Keychain の項目と .credentials.json を見る。
@@ -103,22 +109,27 @@ export function parseClaudeCredentials(raw: string, now: number = Date.now()): {
  *
  * macOS では、古い .credentials.json が残っていて、新しいトークンは Keychain にあることがある
  * （Claude Code は macOS では Keychain に書く）。ファイルのトークンが期限切れなら Keychain を見て、
- * Keychain にも無いときだけファイルの期限切れのトークンを使う（使用量の取得が 401 になり「ログインし直し」と出る）。
+ * Keychain にも無いときだけファイルの期限切れのトークンを使う。
  */
-export async function readClaudeAccessToken(configDir?: string, options: { retryBlocked?: boolean } = {}): Promise<CredentialRead> {
+export async function readClaudeCredential(configDir?: string, options: { retryBlocked?: boolean } = {}): Promise<ClaudeCredentialRead> {
   // ファイル（Linux・Windows、または macOS でファイルに置いている場合）を先に見る。Keychain に触れずに済む
-  let file: { token: string; expired: boolean } | null = null
+  const filePath = join(configDir ?? join(homedir(), '.claude'), '.credentials.json')
+  let file: { token: string; expired: boolean; raw: string; location: CredentialLocation } | null = null
   try {
-    file = parseClaudeCredentials(await readFile(join(configDir ?? join(homedir(), '.claude'), '.credentials.json'), 'utf8'))
+    const raw = await readFile(filePath, 'utf8')
+    const parsed = parseClaudeCredentials(raw)
+    if (parsed) file = { ...parsed, raw, location: { kind: 'file', path: filePath } }
   } catch {
     // 無ければ Keychain を見る
   }
-  if (file && !file.expired) return { token: file.token }
-  if (process.platform !== 'darwin') return file ? { token: file.token } : { token: null, reason: 'missing' }
-  const raw = await keychain.read(claudeKeychainService(configDir), keychainUser(), options)
-  const fromKeychain = raw && raw !== 'unavailable' ? parseClaudeCredentials(raw)?.token ?? null : null
-  if (fromKeychain) return { token: fromKeychain }
-  if (file) return { token: file.token }
+  if (file && !file.expired) return file
+  if (process.platform !== 'darwin') return file ?? { token: null, reason: 'missing' }
+  const service = claudeKeychainService(configDir)
+  const account = keychainUser()
+  const raw = await keychain.read(service, account, options)
+  const parsed = raw && raw !== 'unavailable' ? parseClaudeCredentials(raw) : null
+  if (parsed && raw && raw !== 'unavailable') return { ...parsed, raw, location: { kind: 'keychain', service, account } }
+  if (file) return file
   if (raw === 'unavailable') return { token: null, reason: 'keychain-unavailable' }
   return { token: null, reason: 'missing' }
 }

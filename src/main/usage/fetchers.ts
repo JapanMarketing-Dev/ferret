@@ -1,6 +1,7 @@
 import type { ProviderRateLimits, RateLimitWindow, UsageFailureKind } from '@shared/usage'
 import type { AccountAgent } from '@shared/types'
-import { readClaudeAccessToken, readCodexAccessToken } from './credentials'
+import { parseClaudeCredentials, readClaudeCredential, readCodexAccessToken } from './credentials'
+import { isTokenExpiring, refreshClaudeCredentials, type CredentialLocation } from './oauthRefresh'
 import { t } from '@shared/i18n'
 import { errorKind, reportHandled } from '@shared/report'
 import { ResponseTooLargeError, SMALL_JSON_MAX_BYTES, readBoundedJson } from '../boundedResponse'
@@ -141,23 +142,62 @@ export function mapClaudeUsageResponse(data: ClaudeUsageResponse): ProviderRateL
   }
 }
 
-/** configDir を省略するとシステムの既定アカウント */
-/** retryKeychain は手動の再読み込みのときだけ true（一度読めなかった Keychain の項目をもう一度試す） */
-export async function fetchClaudeUsage(request: UsageRequest, configDir?: string, options: { retryKeychain?: boolean } = {}): Promise<ProviderRateLimits> {
-  const credential = await readClaudeAccessToken(configDir, { retryBlocked: options.retryKeychain })
+/** 403 の本文が「この組織は OAuth を許していない」か（エラーの本文だけ読む。トークンは含まない） */
+async function isOauthNotAllowed(response: Response): Promise<boolean> {
+  const body = await readUsageBody(response.clone())
+  if (body.failed) return false
+  const error = (body.json as { error?: { details?: { error_code?: unknown } } } | null)?.error
+  return error?.details?.error_code === 'oauth_not_allowed_for_organization'
+}
+
+/**
+ * configDir を省略するとシステムの既定アカウント。
+ * retryKeychain は手動の再読み込みのときだけ true（一度読めなかった Keychain の項目をもう一度試す）。
+ * refresh を渡すと、期限が切れた（または 401 になった）トークンを取り直して元の置き場所へ書き戻してから読む（追加したアカウントだけ）
+ */
+export async function fetchClaudeUsage(
+  request: UsageRequest,
+  configDir?: string,
+  options: { retryKeychain?: boolean; refresh?: { request: UsageRequest; write: (location: CredentialLocation, json: string) => Promise<boolean> } } = {}
+): Promise<ProviderRateLimits> {
+  const credential = await readClaudeCredential(configDir, { retryBlocked: options.retryKeychain })
   if (credential.token === null) {
     return credential.reason === 'keychain-unavailable'
       ? failure('claude', 'keychain-unavailable', t('usage.errors.keychain'))
       : failure('claude', 'missing-credentials', t('usage.errors.claudeNotLoggedIn'))
   }
-  let response: Response
-  try {
-    response = await request(CLAUDE_USAGE_URL, {
-      headers: { Authorization: `Bearer ${credential.token}`, 'anthropic-beta': 'oauth-2025-04-20', 'User-Agent': 'claude-code/2.1.0' },
-      signal: AbortSignal.timeout(API_TIMEOUT_MS)
-    })
-  } catch {
-    return networkFailure('claude')
+  let token = credential.token
+  let refreshed = false
+  const refresh = async (): Promise<boolean> => {
+    if (!options.refresh || refreshed) return false
+    refreshed = true
+    const next = await refreshClaudeCredentials(options.refresh.request, credential.raw)
+    const parsed = next ? parseClaudeCredentials(next) : null
+    if (!next || !parsed) return false
+    // 書き戻せなくても、この読み込みには新しいトークンを使う
+    await options.refresh.write(credential.location, next).catch(() => false)
+    token = parsed.token
+    return true
+  }
+  if (credential.expired || isTokenExpiring(credential.raw)) await refresh()
+  const call = async (): Promise<Response | null> => {
+    try {
+      return await request(CLAUDE_USAGE_URL, {
+        headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', 'User-Agent': 'claude-code/2.1.0' },
+        signal: AbortSignal.timeout(API_TIMEOUT_MS)
+      })
+    } catch {
+      return null
+    }
+  }
+  let response = await call()
+  if (!response) return networkFailure('claude')
+  // 組織が OAuth のログインを許していない（403 oauth_not_allowed_for_organization）。トークンを取り直しても変わらない
+  if (response.status === 403 && (await isOauthNotAllowed(response))) return failure('claude', 'not-allowed', t('usage.errors.oauthNotAllowed'))
+  // 期限の前でも取り消されたトークンは 401 になる。一度だけ取り直して読み直す
+  if ((response.status === 401 || response.status === 403) && (await refresh())) {
+    response = await call()
+    if (!response) return networkFailure('claude')
   }
   if (!response.ok) return httpFailure('claude', response)
   const body = await readUsageBody(response)

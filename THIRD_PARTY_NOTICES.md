@@ -50,6 +50,7 @@ The following files contain code ported or adapted from Orca. Each file names it
 | `src/main/starPrompt.ts` | `src/main/star-nag/service.ts` |
 | `src/main/terminalHistory.ts` | `src/main/daemon/`<br>`src/shared/terminal-tab-types.ts` |
 | `src/main/usage/credentials.ts` | `src/main/rate-limits/claude-oauth-credentials.ts`<br>`src/main/rate-limits/codex-backend-auth.ts` |
+| `src/main/usage/oauthRefresh.ts` | `src/main/claude-accounts/oauth-refresh.ts`<br>`src/main/rate-limits/claude-managed-account-usage.ts` |
 | `src/main/usage/fetchers.ts` | `src/main/rate-limits/claude-oauth-usage-error.ts`<br>`src/main/rate-limits/claude-oauth-usage-request.ts`<br>`src/main/rate-limits/claude-usage-window.ts`<br>`src/main/rate-limits/codex-backend-usage-client.ts`<br>`src/main/rate-limits/codex-rate-limit-window-classification.ts`<br>`src/main/rate-limits/codex-rate-limit-window-mapper.ts` |
 | `src/main/usage/policy.ts` | `src/main/rate-limits/service/service-fetch-policy.ts`<br>`src/main/rate-limits/service/service-polling.ts`<br>`src/main/rate-limits/service/service-result-policy.ts`<br>`src/main/rate-limits/service/service-types.ts` |
 | `src/main/usage/service.ts` | `src/main/rate-limits/claude-managed-account-usage.ts`<br>`src/main/rate-limits/service.ts`<br>`src/main/rate-limits/service/service-inactive-accounts.ts`<br>`src/main/rate-limits/service/service-polling.ts` |

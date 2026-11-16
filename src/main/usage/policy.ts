@@ -88,7 +88,7 @@ export function providersToRefresh(options: {
  */
 export function failureRetryAfterMs(p: ProviderRateLimits, streak: number, now: number = Date.now()): number | null {
   if (p.status !== 'error') return null
-  if (p.failureKind === 'keychain-unavailable' || p.failureKind === 'missing-credentials' || p.failureKind === 'stale-token') return null
+  if (p.failureKind === 'keychain-unavailable' || p.failureKind === 'missing-credentials' || p.failureKind === 'stale-token' || p.failureKind === 'not-allowed') return null
   const delay = failureRetryDelayMs(streak)
   return p.retryAtMs && p.retryAtMs > now ? Math.max(delay, p.retryAtMs - now) : delay
 }

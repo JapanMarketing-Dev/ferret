@@ -1,10 +1,11 @@
 import { app, net, type BrowserWindow } from 'electron'
-import { accountDisplayName, dedupeAccountRows, defaultLoginLabel, EMPTY_AGENT_ACCOUNTS } from '@shared/accounts'
+import { accountDisplayName, defaultLoginLabel, EMPTY_AGENT_ACCOUNTS, groupAccountRows } from '@shared/accounts'
 import type { AccountUsage, ProviderRateLimits, UsageState } from '@shared/usage'
 import type { AccountAgent } from '@shared/types'
 import { currentSettings } from '../settings'
 import { systemConfigDir, verifyManagedAccountDir } from '../accounts/paths'
 import { fetchClaudeUsage, fetchCodexUsage, type UsageRequest } from './fetchers'
+import { writeClaudeCredentials } from './oauthRefresh'
 import {
   DEFAULT_POLL_MS,
   INACTIVE_FETCH_DEBOUNCE_MS,
@@ -74,7 +75,25 @@ function demoUsage(agent: AccountAgent): ProviderRateLimits {
     : { provider: 'codex', session: null, weekly: window(1, 10080, 10020), planType: 'plus', updatedAt: now, error: null, status: 'ok' }
 }
 
-function fetchFor(agent: AccountAgent, target: Target | null, force = false): Promise<ProviderRateLimits> {
+/**
+ * 同じ設定フォルダのトークンの取り直しは1つずつ（リフレッシュトークンは使い捨てで、同時に2回使うと片方が失敗し、ログインが切れることがある）
+ */
+const refreshQueue = new Map<string, Promise<unknown>>()
+function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = refreshQueue.get(key) ?? Promise.resolve()
+  const next = previous.catch(() => undefined).then(work)
+  refreshQueue.set(key, next)
+  void next.finally(() => {
+    if (refreshQueue.get(key) === next) refreshQueue.delete(key)
+  }).catch(() => undefined)
+  return next
+}
+
+/**
+ * refresh: 期限の切れたトークンを取り直してよいか。追加したアカウントのうち、選んでいない（その Claude Code が動いていない）ものだけ。
+ * いつものログイン（~/.claude）と選択中のアカウントは、動いている Claude Code が自分で取り直すので触らない
+ */
+function fetchFor(agent: AccountAgent, target: Target | null, force = false, refresh = false): Promise<ProviderRateLimits> {
   if (process.env.ADE_DEMO === '1') return Promise.resolve(demoUsage(agent))
   if (!target) {
     return Promise.resolve({
@@ -87,7 +106,9 @@ function fetchFor(agent: AccountAgent, target: Target | null, force = false): Pr
       failureKind: 'missing-credentials'
     })
   }
-  return agent === 'claude' ? fetchClaudeUsage(request, target.dir, { retryKeychain: force }) : fetchCodexUsage(request, target.dir!)
+  if (agent === 'codex') return fetchCodexUsage(request, target.dir!)
+  if (!refresh || target.key === 'system' || !target.dir) return fetchClaudeUsage(request, target.dir, { retryKeychain: force })
+  return oneAtATime(target.dir, () => fetchClaudeUsage(request, target.dir, { retryKeychain: force, refresh: { request, write: writeClaudeCredentials } }))
 }
 
 const AGENTS: readonly AccountAgent[] = ['claude', 'codex']
@@ -200,32 +221,46 @@ export async function refreshUsage(force: boolean): Promise<UsageState> {
   return state
 }
 
-/** アカウント別の内訳（いつものログイン＋追加したアカウント）。開いたときだけ呼ぶ。いつものログインもメールの名前で並べる */
-export async function getAccountUsage(agent: AccountAgent, force = false, inactiveMaxAgeMs = INACTIVE_FETCH_DEBOUNCE_MS): Promise<AccountUsage[]> {
+/** アカウント別の内訳の行（いつものログイン＋ログインの済んだ追加したアカウント）を、同じログインごとにまとめる */
+async function accountGroups(agent: AccountAgent) {
   const list = accounts()[agent]
   const active = activeAccountId(agent)
-  // システムの既定が登録したアカウントと同じログインなら1行にする（同じアカウントを2回追加したときも）
   const system = await (await import('../accounts')).readSystemDefault(agent).catch(() => null)
-  const rows = dedupeAccountRows([
+  return groupAccountRows([
     { accountId: null, label: defaultLoginLabel(agent, system), email: system?.signedIn ? system.email : null, workspaceLabel: system?.workspaceLabel ?? null },
     ...list.accounts.filter((a) => a.lastAuthenticatedAt !== null).map((a) => ({ accountId: a.id, label: accountDisplayName(a), email: a.email, workspaceLabel: a.workspaceLabel }))
   ], active)
+}
+
+/** 1アカウント分（選択中は主の値。ほかは60秒のキャッシュ → 取得。期限切れのトークンは取り直す） */
+async function usageOf(agent: AccountAgent, accountId: string | null, force: boolean, inactiveMaxAgeMs: number): Promise<ProviderRateLimits> {
+  const isActive = accountId === activeAccountId(agent)
+  if (isActive && state[agent]) return state[agent]!
+  const target = targetFor(agent, accountId)
+  const cacheKey = `${agent}:${target?.key ?? `broken:${accountId}`}`
+  const cached = inactiveCache.get(cacheKey) ?? null
+  if (cached && !force && Date.now() - cached.updatedAt < inactiveMaxAgeMs) return cached
+  const fresh = applyStalePolicy(await fetchFor(agent, target, force, !isActive && accountId !== null), cached)
+  if (fresh.status === 'ok') inactiveCache.set(cacheKey, fresh)
+  return fresh
+}
+
+/**
+ * アカウント別の内訳（いつものログイン＋追加したアカウント）。開いたときだけ呼ぶ。いつものログインもメールの名前で並べる。
+ * 同じログインの行は1行にまとめ（設定画面と同じ）、その行が読めなければ同じログインのほかの設定フォルダで読む
+ */
+export async function getAccountUsage(agent: AccountAgent, force = false, inactiveMaxAgeMs = INACTIVE_FETCH_DEBOUNCE_MS): Promise<AccountUsage[]> {
+  const active = activeAccountId(agent)
+  const groups = await accountGroups(agent)
   return Promise.all(
-    rows.map(async ({ accountId, label }): Promise<AccountUsage> => {
-      const isActive = accountId === active
-      const target = targetFor(agent, accountId)
-      const cacheKey = `${agent}:${target?.key ?? `broken:${accountId}`}`
-      let rateLimits: ProviderRateLimits | null
-      if (isActive && state[agent]) rateLimits = state[agent]
-      else {
-        const cached = inactiveCache.get(cacheKey) ?? null
-        if (cached && !force && Date.now() - cached.updatedAt < inactiveMaxAgeMs) rateLimits = cached
-        else {
-          rateLimits = applyStalePolicy(await fetchFor(agent, target, force), cached)
-          if (rateLimits.status === 'ok') inactiveCache.set(cacheKey, rateLimits)
-        }
+    groups.map(async ({ keeper, members }): Promise<AccountUsage> => {
+      let rateLimits: ProviderRateLimits | null = null
+      for (const member of members) {
+        const next = await usageOf(agent, member.accountId, force, inactiveMaxAgeMs)
+        if (!rateLimits || next.status === 'ok') rateLimits = next
+        if (next.status === 'ok') break
       }
-      return { accountId, label, active: isActive, rateLimits }
+      return { accountId: keeper.accountId, label: keeper.label, active: keeper.accountId === active, rateLimits }
     })
   )
 }

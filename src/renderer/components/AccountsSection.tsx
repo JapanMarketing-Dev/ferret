@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Info, KeyRound, LogIn, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { accountDisplayName, defaultLoginLabel, type AgentAccountSummary, type AgentAccountsView } from '@shared/accounts'
+import { accountDisplayName, defaultLoginLabel, groupAccountRows, type AgentAccountSummary, type AgentAccountsView } from '@shared/accounts'
+import { clampUsedPercent, usageResetText, usageSectionName, usageSections, usageStatusLabel, usageTone, type AccountUsage, type ProviderRateLimits } from '@shared/usage'
 import { TUI_AGENT_LABEL, type AccountAgent } from '@shared/types'
 import { Badge, Button, Field, IconButton } from '../ui'
 import { useAgentAccounts, type AccountAction } from '../hooks/useAgentAccounts'
@@ -22,7 +23,8 @@ import '../styles/accounts.css'
  * いつものログイン（~/.claude・~/.codex）を、ログインしているアカウントの名前（メール）の1行として先頭に置き、
  * その下に追加したアカウントを並べる。どれを使うかは行を押して選ぶ（「システムの既定」という別枠は出さない）。
  * 追加はログインを促す流れ（押すと内蔵ターミナルでログインが始まる）。保存は main 側で即時に行うので、
- * ダイアログを閉じたときの一括保存の対象ではない。WSL・リモート・使用量の表示は持ち込んでいない。
+ * ダイアログを閉じたときの一括保存の対象ではない。WSL・リモートは持ち込んでいない。
+ * 同じログイン（メールと組織が同じ）の行は1行にまとめ（フッターの内訳と同じ groupAccountRows）、各行に使用量と、いつリセットされるかを出す（2026-11-16）。
  */
 
 const AGENTS: readonly AccountAgent[] = ['claude', 'codex']
@@ -30,6 +32,38 @@ const AGENTS: readonly AccountAgent[] = ['claude', 'codex']
 function formatTime(ms: number | null): string {
   if (!ms) return ''
   return formatDateTime(ms, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+/** 1アカウントの使用量（枠ごとにバー・％・いつリセットされるか） */
+function AccountUsageLine({ p, name }: { p: ProviderRateLimits | null | undefined; name: string }) {
+  const t = useT()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
+  const sections = p ? usageSections(p) : []
+  if (sections.length === 0) {
+    return <span className="acct-usage acct-usage--muted">{p ? usageStatusLabel(p) : t('accounts.usage.loading')}</span>
+  }
+  return (
+    <span className="acct-usage" aria-label={t('accounts.usage.aria', { name })}>
+      {sections.map((section) => {
+        const used = clampUsedPercent(section.window.usedPercent)
+        const reset = usageResetText(section.window, now, (ms) => formatDateTime(ms, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }))
+        return (
+          <span key={section.key} className="acct-usage__item">
+            <span className="acct-usage__label">{usageSectionName(section)}</span>
+            <span className="usage-bar usage-bar--wide" data-tone={usageTone(used)} aria-hidden="true">
+              <span className="usage-bar__fill" style={{ width: `${used}%` }} />
+            </span>
+            <span className="usage-metric__value" data-tone={usageTone(used)}>{used}%</span>
+            {reset && <span className="acct-usage__reset">{reset}</span>}
+          </span>
+        )
+      })}
+    </span>
+  )
 }
 
 function AccountRow({
@@ -40,11 +74,17 @@ function AccountRow({
   onSelect,
   onRename,
   onRemove,
-  onRelogin
+  onRelogin,
+  usage,
+  note
 }: {
   agent: AccountAgent
   account: AgentAccountSummary
   active: boolean
+  /** 使用量（undefined は読み込み中、行が使えないときは出さない） */
+  usage: ProviderRateLimits | null | undefined
+  /** 詳細の後ろに添える文（いつものログインと同じ、など） */
+  note: string | null
   action: AccountAction
   onSelect: () => void
   onRename: (label: string) => void
@@ -70,7 +110,7 @@ function AccountRow({
     account.problem ??
     (pending
       ? t('accounts.pendingDetail')
-      : [account.label && account.email, account.workspaceLabel, account.lastAuthenticatedAt && t('accounts.signedInAt', { time: formatTime(account.lastAuthenticatedAt) })]
+      : [account.label && account.email, account.workspaceLabel, account.lastAuthenticatedAt && t('accounts.signedInAt', { time: formatTime(account.lastAuthenticatedAt) }), note]
           .filter(Boolean)
           .join(t('common.listSeparator')))
 
@@ -99,6 +139,7 @@ function AccountRow({
             </span>
           )}
           {!editing && detail && <span className={`acct-row__detail${account.problem ? ' is-warn' : ''}`} title={detail}>{detail}</span>}
+          {!editing && usable && !pending && <AccountUsageLine p={usage} name={accountDisplayName(account)} />}
         </span>
       </button>
       {editing && (
@@ -162,11 +203,37 @@ function AgentAccounts({
   const defaultActive = !!view && view.activeAccountId === null
   const system = view?.systemDefault
   const defaultName = defaultLoginLabel(agent, system)
-  // 追加したアカウントに同じメールがあるときだけ、どちらがいつものログインか分かるよう添える
-  const sameEmail = !!system?.email && !!view?.accounts.some((a) => a.email?.toLowerCase() === system.email?.toLowerCase())
-  const defaultDetail = [system?.signedIn && system.email ? system.workspaceLabel : null, sameEmail ? t('accounts.defaultLogin', { agent: TUI_AGENT_LABEL[agent] }) : null]
-    .filter(Boolean)
-    .join(t('common.listSeparator'))
+  const defaultLabel = t('accounts.defaultLogin', { agent: TUI_AGENT_LABEL[agent] })
+  // 同じログイン（メールと組織が同じ）は1行にまとめる。いつものログインと同じアカウントを追加した・同じアカウントを2回追加した（2026-11-16）。
+  // 残すのは選択中の行 → いつものログイン → 先に追加したもの（フッターの内訳と同じ）。ログインの済んでいない行はまとめない
+  const groups = view
+    ? groupAccountRows(
+        [
+          { accountId: null as string | null, email: system?.signedIn ? system.email : null, workspaceLabel: system?.workspaceLabel ?? null, account: null as AgentAccountSummary | null },
+          ...view.accounts.map((a) => ({ accountId: a.id as string | null, email: a.signedIn && !a.problem && a.lastAuthenticatedAt !== null ? a.email : null, workspaceLabel: a.workspaceLabel, account: a as AgentAccountSummary | null }))
+        ],
+        view.activeAccountId
+      )
+    : []
+  const defaultDetail = [system?.signedIn && system.email ? system.workspaceLabel : null, defaultLabel].filter(Boolean).join(t('common.listSeparator'))
+
+  // 各行の使用量（フッターの内訳と同じ取得。60秒以内は取り直さない）
+  const [usage, setUsage] = useState<AccountUsage[] | null>(null)
+  const signature = JSON.stringify([view?.activeAccountId, view?.accounts.map((a) => [a.id, a.signedIn, a.lastAuthenticatedAt]), system?.email])
+  useEffect(() => {
+    if (!view) return
+    let alive = true
+    window.ade
+      .invoke('usage:accounts', agent, false)
+      .then((rows) => alive && setUsage(rows))
+      // 失敗は main の IPC が Sentry へ送る。使用量の欄は読み込み中のまま
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent, signature])
+  const usageFor = (accountId: string | null) => usage?.find((u) => u.accountId === accountId)?.rateLimits ?? (usage ? null : undefined)
 
   return (
     <div className="acct-group" id={`settings-accounts-${agent}`} data-testid={`accounts-${agent}`}>
@@ -179,41 +246,49 @@ function AgentAccounts({
           {t('accounts.add')}
         </Button>
       </div>
-      {view && (
-        <div className={`acct-row${defaultActive ? ' is-active' : ''}`} data-testid={`account-row-default-${agent}`}>
-          <button
-            type="button"
-            className="acct-row__main"
-            onClick={() => void select(agent, null)}
-            disabled={busy || defaultActive}
-            aria-pressed={defaultActive}
-            title={defaultActive ? t('accounts.selected') : t('accounts.switchTo')}
-          >
-            <span className="acct-row__radio" aria-hidden="true">{defaultActive && <Check size={12} strokeWidth={2.5} />}</span>
-            <span className="acct-row__text">
-              <span className="acct-row__name">
-                <span className="acct-row__label" title={defaultName}>{defaultName}</span>
-                {defaultActive && <Badge tone="brand">{t('accounts.selected')}</Badge>}
-                {!system?.signedIn && <Badge tone="warning">{t('accounts.status.signedOut')}</Badge>}
-              </span>
-              {defaultDetail && <span className="acct-row__detail" title={defaultDetail}>{defaultDetail}</span>}
-            </span>
-          </button>
-        </div>
-      )}
-      {view?.accounts.map((account) => (
-        <AccountRow
-          key={account.id}
-          agent={agent}
-          account={account}
-          active={view.activeAccountId === account.id}
-          action={action}
-          onSelect={() => void select(agent, account.id)}
-          onRename={(label) => void rename(agent, account.id, label)}
-          onRemove={() => void remove(agent, account.id)}
-          onRelogin={() => void relogin(agent, account.id)}
-        />
-      ))}
+      {groups.map(({ keeper, members }) => {
+        if (keeper.account === null) {
+          return (
+            <div key="default" className={`acct-row${defaultActive ? ' is-active' : ''}`} data-testid={`account-row-default-${agent}`}>
+              <button
+                type="button"
+                className="acct-row__main"
+                onClick={() => void select(agent, null)}
+                disabled={busy || defaultActive}
+                aria-pressed={defaultActive}
+                title={defaultActive ? t('accounts.selected') : t('accounts.switchTo')}
+              >
+                <span className="acct-row__radio" aria-hidden="true">{defaultActive && <Check size={12} strokeWidth={2.5} />}</span>
+                <span className="acct-row__text">
+                  <span className="acct-row__name">
+                    <span className="acct-row__label" title={defaultName}>{defaultName}</span>
+                    {defaultActive && <Badge tone="brand">{t('accounts.selected')}</Badge>}
+                    {!system?.signedIn && <Badge tone="warning">{t('accounts.status.signedOut')}</Badge>}
+                  </span>
+                  {defaultDetail && <span className="acct-row__detail" title={defaultDetail}>{defaultDetail}</span>}
+                  {system?.signedIn && <AccountUsageLine p={usageFor(null)} name={defaultName} />}
+                </span>
+              </button>
+            </div>
+          )
+        }
+        const account = keeper.account
+        return (
+          <AccountRow
+            key={account.id}
+            agent={agent}
+            account={account}
+            active={view!.activeAccountId === account.id}
+            action={action}
+            usage={usageFor(account.id)}
+            note={members.some((m) => m.accountId === null) ? t('accounts.sameAsDefault', { agent: TUI_AGENT_LABEL[agent] }) : null}
+            onSelect={() => void select(agent, account.id)}
+            onRename={(label) => void rename(agent, account.id, label)}
+            onRemove={() => void remove(agent, account.id)}
+            onRelogin={() => void relogin(agent, account.id)}
+          />
+        )
+      })}
       {switched === agent && (
         <p className="st-note st-note--ok" role="status">
           <Check size={12} aria-hidden="true" />

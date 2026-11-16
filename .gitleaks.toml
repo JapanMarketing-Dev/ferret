@@ -13,6 +13,8 @@ paths = [
 # 共有リンクの相手の画面のまとめ（workers/feedback-share/src/generated.ts）は、元のファイルの名前と sha256 の先頭を持つ。
 # tokens.css の名前と16進の値が API キーに見えるため、その形だけを除外する（ファイル全体は除外しない）
 regexTarget = "line"
+# Claude Code の公開の OAuth クライアント ID（claude の実行ファイルにそのまま入っている。秘密ではない。src/main/usage/oauthRefresh.ts）
 regexes = [
   '''styles/tokens\.css": "[0-9a-f]{16}"''',
+  '''OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'$''',
 ]

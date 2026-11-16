@@ -4,3 +4,6 @@ p { position: absolute; inset: 0; margin: auto; height: fit-content; max-width: 
 /* 複数の画面・ウインドウを同時に録るときは並べて映す（mirror.js が --cols を入れる） */
 body.is-grid { display: grid; grid-template-columns: repeat(var(--cols, 2), 1fr); grid-auto-rows: 1fr; gap: 8px; }
 body.is-grid video { min-width: 0; min-height: 0; }
+/* 映像の中の、この枠自身が写る場所（合わせ鏡を止める。mirror.js の placeMask） */
+.self-mask { position: absolute; background: #111214; pointer-events: none; }
+.self-mask[hidden] { display: none; }

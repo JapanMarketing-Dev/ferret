@@ -1744,10 +1744,30 @@ function syncMirror(): Promise<Electron.WebContents | null> {
     const wanted = mirrorRecording === false ? null : mirrorRecording ?? await previewSourceId()
     if (!browser) return null
     if (!wanted) { browser.hideMirror(); return null }
-    return browser.showMirror(join(__dirname, '../recorder/mirror.html'), wanted, t('recording.mirrorUnavailable', { target: captureTargetLabel(captureConsent.target) }))
+    return browser.showMirror(join(__dirname, '../recorder/mirror.html'), wanted, t('recording.mirrorUnavailable', { target: captureTargetLabel(captureConsent.target) }), await mirroredDisplay(wanted))
   })
   mirrorQueue = next.catch(() => undefined)
   return next.catch((err: unknown) => { reportHandled(err, { area: 'recording', op: 'sync capture mirror' }); return null })
+}
+
+/**
+ * 映すのが画面全体1つなら、そのディスプレイの範囲を返す関数（Ferret の枠がその画面に写るかを browser.ts が毎回確かめる）。
+ * ウインドウ・複数の対象は null（ウインドウの映像に Ferret の枠は写らない）。
+ * macOS は ID の数字がディスプレイの ID。ほかの OS は候補の一覧の display_id で探す
+ */
+async function mirroredDisplay(sourceParam: string): Promise<(() => Electron.Rectangle | null) | null> {
+  const ids = sourceParam.split(',')
+  if (ids.length !== 1 || !ids[0].startsWith('screen:')) return null
+  const { displayIdOfScreen } = await import('@shared/captureSources')
+  let displayId = displayIdOfScreen(ids[0], undefined, process.platform)
+  if (!displayId) {
+    const { listCaptureSources } = await import('./recording/sources')
+    const sources = await listCaptureSources({ width: 0, height: 0 }).catch(() => [])
+    displayId = sources.find((s) => s.id === ids[0])?.displayId
+  }
+  if (!displayId) return null
+  const { screen } = await import('electron')
+  return () => screen.getAllDisplays().find((d) => String(d.id) === displayId)?.bounds ?? null
 }
 
 /** 文字で指摘の受け口を用意する（最初に入れたとき。src/main/textNotes.ts） */
