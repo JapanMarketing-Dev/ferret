@@ -37,6 +37,7 @@ import {
   eventLoopBlockThreshold,
   shouldReportEventLoopBlock,
   sleepNearBlock,
+  shouldReportUnresponsive,
   SLEEP_AFTER_BLOCK_MS,
   createGpuContextLostGate,
   isGpuContextLostExit,
@@ -197,7 +198,27 @@ function watchWebContents(contents: WebContents): void {
     reportMainError(error, { kind: 'preload-error', preload: preloadPath.split(/[\\/]/).pop() ?? 'unknown' })
   })
   contents.on('unresponsive', () => {
-    if (isOwnContents(contents)) reportMessage('webContents unresponsive', 'warning', { kind: 'unresponsive', 'contents.type': contents.getType() })
+    if (!isOwnContents(contents)) return
+    // スリープ明け・ロック解除の直後、隠れている窓、終了の途中の応答なしは送らない（アプリの処理ではない。FERRET-2C）
+    const owner = BrowserWindow.fromWebContents(contents)
+    const visible = owner ? owner.isVisible() && !owner.isMinimized() : true
+    if (!shouldReportUnresponsive({ now: performance.now(), powerTransitionAt: [...powerTransitions.values()], quitting: appQuitting, visible })) return
+    reportMessage('webContents unresponsive', 'warning', { kind: 'unresponsive', 'contents.type': contents.getType() })
+  })
+}
+
+/** スリープ・画面のロックの出入りの最後の時刻（performance.now()。画面の応答なしを送らない時間に使う） */
+const powerTransitions = new Map<string, number>()
+let appQuitting = false
+let powerWatched = false
+function watchPowerTransitions(): void {
+  if (powerWatched) return
+  powerWatched = true
+  app.on('before-quit', () => { appQuitting = true })
+  void app.whenReady().then(() => {
+    for (const event of ['suspend', 'resume', 'lock-screen', 'unlock-screen'] as const) {
+      powerMonitor.on(event as 'suspend', () => { powerTransitions.set(event, performance.now()) })
+    }
   })
 }
 
@@ -361,6 +382,7 @@ function installProcessHooks(): void {
     })
   })
   // ウインドウの応答なしは webContents の unresponsive で拾う（BrowserWindow 以外の view も含む）
+  watchPowerTransitions()
   app.on('web-contents-created', (_e, contents) => watchWebContents(contents))
   // console.error / warn のうち `[startup]` の失敗だけをパンくずに残す（console 全体は送らない）。
   // 見出し付きの行は、クラッシュに添付する直近のログ（logRing）にも残す

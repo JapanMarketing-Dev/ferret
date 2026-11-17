@@ -464,6 +464,22 @@ export function eventLoopBlockThreshold(packaged: boolean): number {
 export const RESUME_GRACE_MS = 5000
 
 /**
+ * スリープ・画面のロックの出入りから、Ferret の画面の「応答なし」（webContents の unresponsive）を送らない時間。
+ * スリープ明けは GPU・画面の描き直しが詰まり、Chromium がしばらく応答なしと判断する（アプリの処理ではない）。
+ * FERRET-2C（0.7.13 の macOS）：画面をロックして8時間寝かせ、ロックを解いて17秒後に1件
+ */
+export const UNRESPONSIVE_WAKE_GRACE_MS = 60_000
+
+/**
+ * 画面の応答なしを送るか。終了の途中、スリープ・ロック・ロック解除（powerTransitionAt。performance.now() の値）から
+ * UNRESPONSIVE_WAKE_GRACE_MS の間、窓が見えていないときは送らない
+ */
+export function shouldReportUnresponsive(s: { now: number; powerTransitionAt: readonly (number | null)[]; quitting: boolean; visible: boolean }): boolean {
+  if (s.quitting || !s.visible) return false
+  return !s.powerTransitionAt.some((at) => at != null && Number.isFinite(at) && s.now >= at && s.now - at < UNRESPONSIVE_WAKE_GRACE_MS)
+}
+
+/**
  * 閉じる操作（before-quit）からこの間は、終了の途中とみなす（will-quit の前の片付けの止まりを送らない。FERRET-M の 0.4.15）。
  * 終了の確認で取り消されることがあるので、ずっとではなく時間で区切る
  */
