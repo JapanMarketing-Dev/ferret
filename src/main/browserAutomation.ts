@@ -22,19 +22,23 @@ export interface BrowserAutomationDeps {
   configFile: string
   /** ferret-browser と Python の置き場（userData/browser-use） */
   toolDir: string
-  tabs(): Array<{ id: string; contents: WebContents }>
-  createTab(url: string): Promise<string>
+  /** そのプロジェクト（scope。null は画面に出しているプロジェクト）のタブ */
+  tabs(scope: string | null): Array<{ id: string; contents: WebContents }>
+  createTab(url: string, scope: string | null): Promise<string>
   closeTab(id: string): void
   activateTab(id: string): void
   /** 自動操作がつないでいる間、画面に出ていなくても描画できる大きさで隠しておく */
   hold(id: string, held: boolean): void
   capture(id: string, params: { format?: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number } }): Promise<string>
   onTabsChanged(listener: () => void): () => void
-  session(): Session
+  /** そのプロジェクトのログインの組の session（Cookie の読み書き） */
+  session(scope: string | null): Session
   notice(message: string): void
   attachedMessage(): string
-  /** つないできたターミナルのプロジェクトで、いま内蔵ブラウザを使ってよいか（だめなら Agent に返す理由） */
+  /** つないできたターミナルのプロジェクトで内蔵ブラウザを使えるか（だめなら Agent に返す理由） */
   scopeError?(scope: string | null): string | null
+  /** そのタブが画面に出しているプロジェクトのものか（隠しているプロジェクトのタブなら、画面を切り替えず知らせもしない） */
+  isShown?(tabId: string): boolean
   /** 画面へ「エージェントが内蔵ブラウザを動かし始めた」を知らせる（エディタなら中央を内蔵ブラウザにする） */
   reveal(): void
   /** API で動かすときの LLM のキー（Ferret に保存したもの・設定の環境変数）。ターミナルには渡さない */
@@ -124,19 +128,19 @@ export class BrowserAutomation {
   private async boot(): Promise<string> {
     const saved = await this.load()
     const server = new BrowserCdpServer({
-      tabs: () => this.deps.tabs(),
-      createTab: (url) => this.deps.createTab(url),
+      tabs: (scope) => this.deps.tabs(scope ?? null),
+      createTab: (url, scope) => this.deps.createTab(url, scope ?? null),
       closeTab: (id) => this.deps.closeTab(id),
       activateTab: (id) => this.deps.activateTab(id),
       onTabsChanged: (listener) => this.deps.onTabsChanged(listener),
       scopeError: (scope) => this.deps.scopeError?.(scope) ?? null,
       cookies: {
-        get: async () => (await this.deps.session().cookies.get({})).map(toCdpCookie),
-        set: async (cookies) => {
+        get: async (scope) => (await this.deps.session(scope ?? null).cookies.get({})).map(toCdpCookie),
+        set: async (cookies, scope) => {
           for (const c of cookies) {
             const sameSite = c.sameSite ? TO_ELECTRON[c.sameSite] : undefined
             const host = c.domain.replace(/^\./, '')
-            await this.deps.session().cookies.set({
+            await this.deps.session(scope ?? null).cookies.set({
               url: `${c.secure ? 'https' : 'http'}://${host}${c.path || '/'}`,
               name: c.name,
               value: c.value,
@@ -149,8 +153,8 @@ export class BrowserAutomation {
             })
           }
         },
-        clear: async () => {
-          await this.deps.session().clearStorageData({ storages: ['cookies'] })
+        clear: async (scope) => {
+          await this.deps.session(scope ?? null).clearStorageData({ storages: ['cookies'] })
         }
       },
       onRelease: (id) => this.deps.hold(id, false),
@@ -159,6 +163,8 @@ export class BrowserAutomation {
       // 同じ操作で何度も出さない（タブを開くたびにつなぎ直す道具がある）
       onAttach: (id) => {
         this.deps.hold(id, true)
+        // 隠しているプロジェクトのタブなら、画面はそのまま（利用者がいま見ているプロジェクトを邪魔しない）
+        if (this.deps.isShown && !this.deps.isShown(id)) return
         this.deps.reveal()
         const now = Date.now()
         if (now - this.lastNoticeAt < 60_000) return

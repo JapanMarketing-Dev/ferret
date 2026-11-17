@@ -57,7 +57,7 @@ import { GLOBAL_PROJECTS_FILE, GLOBAL_RULES_FILE } from '@shared/globalOrchestra
 import { archiveFallback, canArchive, isArchived } from '@shared/projectArchive'
 import { currentOrchestra, isGlobalOrchestra, moveInTree, orchestraList, orchestraMembers, removeOrchestra } from '@shared/orchestras'
 import { checkSshTarget, isValidSshHost, remoteWorkspaceDirName, sshDefaultName, type SshTarget } from '@shared/sshCommand'
-import { EmbeddedBrowser, browserSession, browserSessions, onBrowserSessionReady, type ProjectTabs, type TabsSnapshot } from './browser'
+import { EmbeddedBrowser, browserSession, browserSessions, onBrowserSessionReady, type ProjectTabs } from './browser'
 import { browserPartition, sanitizeBrowserProfile } from '@shared/browserProfile'
 import { BrowserExtensions } from './browserExtensions'
 import { browserImportHandlers } from './browserImport/ipc'
@@ -69,7 +69,7 @@ import type { PcmBlock, RecordingController } from './recording'
 import { installMenu } from './menu'
 import { allowCrashReload } from './crashReload'
 import { applyLocalePreference } from './locale'
-import { CDP_OTHER_PROJECT_ERROR, cdpScopeOf } from './browserScope'
+import { CDP_UNKNOWN_PROJECT_ERROR, cdpScopeOf } from './browserScope'
 import { PRODUCT_NAME, getLocale, t } from '@shared/i18n'
 import { UserFacingError, isStaleChunkError, toUserFacingFileError } from '@shared/errors'
 import { IS_PACKAGED } from './runtime'
@@ -204,12 +204,16 @@ async function browserAutomation(): Promise<import('./browserAutomation').Browse
     browserAutomationService = new BrowserAutomation({
       configFile: join(app.getPath('userData'), 'browser-cdp.json'),
       toolDir: join(app.getPath('userData'), 'browser-use'),
-      tabs: () => browser?.automationTabs() ?? [],
-      // つないできたターミナルのプロジェクトと、いま開いているプロジェクトが違えば動かさない（FERRET のプロジェクトをまたがない）
-      scopeError: (scope) => (scope === cdpScopeOf(workspace.projectId) ? null : CDP_OTHER_PROJECT_ERROR),
-      createTab: async (url) => {
-        if (!browser) throw new UserFacingError(t('browser.errors.invalidUrl'))
-        return browser.newTab(url)
+      // ターミナルのプロジェクトのタブの組だけを動かす（画面に出していないプロジェクトでも並行して動かせる。別のプロジェクトのタブは見せない）
+      tabs: (scope) => {
+        const target = automationProject(scope)
+        return target && browser ? browser.automationTabs(target.group) : []
+      },
+      scopeError: (scope) => (automationProject(scope) ? null : CDP_UNKNOWN_PROJECT_ERROR),
+      createTab: async (url, scope) => {
+        const target = automationProject(scope)
+        if (!browser || !target) throw new UserFacingError(t('browser.errors.invalidUrl'))
+        return browser.newTabIn(target.group, url, target.partition)
       },
       closeTab: (id) => browser?.closeTab(id),
       activateTab: (id) => browser?.activateTab(id),
@@ -222,7 +226,11 @@ async function browserAutomation(): Promise<import('./browserAutomation').Browse
         browserTabListeners.add(listener)
         return () => browserTabListeners.delete(listener)
       },
-      session: () => browser?.activeSession() ?? browserSession(),
+      session: (scope) => {
+        const target = automationProject(scope)
+        return target ? browserSession(undefined, target.partition) : browser?.activeSession() ?? browserSession()
+      },
+      isShown: (id) => browser?.isShownTab(id) ?? true,
       notice: (message) => send('browser:notice', message),
       attachedMessage: () => t('browser.automation.attached'),
       reveal: () => send('browser:agentAttached'),
@@ -245,6 +253,18 @@ async function browserAutomation(): Promise<import('./browserAutomation').Browse
   }
   return browserAutomationService
 }
+/**
+ * browser-use がつないできたターミナルのプロジェクト（scope）の、内蔵ブラウザのタブの組とログインの組。
+ * scope が無い（プロジェクトの外のターミナル）ときは画面に出しているもの。登録から外されたプロジェクトなら null
+ */
+function automationProject(scope: string | null): { group: string; partition: string } | null {
+  if (scope === null || scope === cdpScopeOf(browserTabsOwner)) {
+    return { group: browserTabsOwner ?? '', partition: browser?.activePartition() ?? browserPartition(undefined) }
+  }
+  const project = currentSettings().projects.find((p) => cdpScopeOf(p.id) === scope)
+  return project ? { group: project.id, partition: browserPartition(project.browserProfile) } : null
+}
+
 /** 内蔵ブラウザの拡張機能（内蔵ブラウザの session にだけ読み込む。browserExtensions.ts） */
 let extensions: BrowserExtensions | null = null
 /** 直前に探した取り込みの候補（key → 写す元）。画面からはパスを受け取らず、この key だけを受ける */
@@ -1175,8 +1195,6 @@ function openProject(project: Project): WorkspaceState {
   // work のフォルダを消されていたら作り直してから開く
   if (project.work) ensureWorkFolder(project.folderPath)
   const previousId = workspace.projectId
-  // 前のプロジェクトのタブ（戻る・進むの履歴ごと）は、このプロジェクトに切り替える前に写しておく
-  const previousTabs = browser && previousId && previousId !== project.id ? browser.snapshotTabs() : null
   const next = setWorkspace(project.folderPath, project)
   updateSettings({ activeProjectId: project.id, folderPath: project.folderPath, projects: markProjectOpened(currentSettings().projects, project.id) })
   syncOrchestratorOnOpen(project)
@@ -1185,16 +1203,13 @@ function openProject(project: Project): WorkspaceState {
   send('workspace:changed', next)
   send('projects:changed', projectsState())
   // 内蔵ブラウザもそのプロジェクトのタブに入れ替える（ターミナルと同じく、プロジェクトごとに分ける）。
-  // この起動で開いていたなら履歴ごと → 前に開いていたタブの URL → 登録 URL の先頭 → 空の画面。
+  // 前のプロジェクトのタブは閉じずに隠して残す（そのプロジェクトのターミナルの browser-use は動かし続けられる）。
+  // この起動で開いていたならそのタブ → 前に開いていたタブの URL → 登録 URL の先頭 → 空の画面。
   // 前のプロジェクトのタブの URL は、表示が変わるたびに recordProjectUrl が覚えてある
   if (browser && previousId !== project.id) {
-    if (previousId && previousTabs) parkedBrowserTabs.set(previousId, previousTabs)
-    const parked = parkedBrowserTabs.get(project.id) ?? null
-    parkedBrowserTabs.delete(project.id)
     const saved = currentSettings().projects.find((p) => p.id === project.id) ?? project
     // ログインの組（既定は全プロジェクトで共有。設定で分けたプロジェクトはその組の session）
-    browser.setPartition(browserPartition(saved.browserProfile))
-    browser.replaceTabs(parked, sessionTabs(saved))
+    browser.switchGroup(project.id, browserPartition(saved.browserProfile), sessionTabs(saved))
     browserTabsOwner = project.id
   }
   // 録画の対象の画面・ウインドウは前のプロジェクトで選んだもの。別のアプリを映したり録ったりしないよう、内蔵ブラウザに戻す
@@ -1224,8 +1239,6 @@ function recordProjectUrl(state: BrowserState): void {
   updateSettings({ projects: withProjectSession(projects, id, { url, ...(tabs ? { tabs: tabs.tabs, activeTab: tabs.activeTab } : {}) }) })
 }
 
-/** 切り替えて離れたプロジェクトの内蔵ブラウザのタブ（戻る・進むの履歴ごと）。アプリを開いている間だけ持つ */
-const parkedBrowserTabs = new Map<string, TabsSnapshot>()
 /** 内蔵ブラウザに開いているタブが属するプロジェクト（起動時と、プロジェクトの切り替えで入れ替えたときに決まる） */
 let browserTabsOwner: string | null = null
 
@@ -1318,6 +1331,8 @@ function removeProject(id: string): ProjectsState {
       send('workspace:changed', setWorkspace(null))
     }
   }
+  // 外したプロジェクトの、隠しているタブを閉じる
+  browser?.dropGroup(id)
   send('projects:changed', projectsState())
   return projectsState()
 }
@@ -1381,8 +1396,8 @@ function updateProject(next: ProjectUpdate): ProjectsState {
   // 開いているもの（オーケストラごと隠したときはその子も）を隠したら、隠していないものへ移る
   if (archiveChanged && next.archived) leaveArchivedWorkspace()
   if (partitionChanged) {
-    // 切り替えて戻ったときに前の組のタブを開かないよう、覚えた写しを捨てる
-    parkedBrowserTabs.delete(next.id)
+    // 切り替えて戻ったときに前の組のタブを開かないよう、隠しているタブを閉じる
+    browser?.dropGroup(next.id)
     if (browser && workspace.projectId === next.id) {
       const tabs = browser.snapshotTabs()
       browser.setPartition(browserPartition(merged.browserProfile))
@@ -4071,8 +4086,9 @@ async function main(): Promise<void> {
     recordProjectUrl(state)
     screenCache?.onState(state)
     send('browser:stateChanged', state)
-    for (const listener of browserTabListeners) listener()
   })
+  // 隠しているプロジェクトのタブの変化も、browser-use の中継へ知らせる
+  browser.onTabsTouched = () => { for (const listener of browserTabListeners) listener() }
   // タブ（@shared/browserTabs）。どのタブも録画に結びつけ、前に出ているタブを録る（recording/controller.ts の selectBrowserTab）
   browser.onTabCreated = (contents) => {
     recording?.attach(contents)
@@ -4113,6 +4129,7 @@ async function main(): Promise<void> {
   // 内蔵ブラウザの拡張機能。content script を最初のページにも効かせるため、ページを開く前に読み込む（待つのは少しだけ）
   await startBrowserExtensions(loadedSettings.browserExtensions)
   browser.setPartition(browserPartition(currentSettings().projects.find((p) => p.id === currentSettings().activeProjectId)?.browserProfile))
+  browser.setGroup(browserTabsOwner ?? '')
   browser.attach(mainWindow, startupTabs ?? loadedSettings.url, loadedSettings.viewport)
   browser.setBackgroundColor(nativeThemeBackground())
   mark('browser:attached')

@@ -224,6 +224,8 @@ interface SleepingPage {
 
 interface BrowserTab {
   id: string
+  /** このタブのログインの組（session の名前）。プロジェクトごとの組のタブは、そのプロジェクトの組で作る */
+  partition: string
   /** ページのビュー。眠らせている間は null（sleeping に履歴を残す） */
   view: WebContentsView | null
   /** 眠らせたタブの題名・URL・履歴。起きていれば null */
@@ -254,9 +256,21 @@ interface BrowserTab {
   destroyed: boolean
 }
 
+/** 画面に出していないプロジェクトのタブの組（プロジェクトを切り替えても閉じずに隠して残す。browser-use はそのまま動かせる） */
+interface ParkedGroup {
+  tabs: BrowserTab[]
+  activeId: string
+  partition: string
+}
+
 export class EmbeddedBrowser {
+  /** 画面に出しているプロジェクトのタブ */
   private tabs: BrowserTab[] = []
   private activeId = ''
+  /** 画面に出しているタブの組（プロジェクトの id。プロジェクトが無ければ ''） */
+  private group = ''
+  /** 画面に出していないプロジェクトのタブの組（プロジェクトの id → 組） */
+  private parkedGroups = new Map<string, ParkedGroup>()
   private tabCounter = 0
   /** 前に出した順の番号（眠らせる順。時刻だと同じミリ秒で並びが決まらない） */
   private activeSeq = 0
@@ -303,6 +317,9 @@ export class EmbeddedBrowser {
   /** 利用者に短く知らせる（タブの上限など） */
   onNotice?: (message: string) => void
 
+  /** どこかのプロジェクトのタブが増えた・減った・URL や題名が変わった（画面に出していない組も。browser-use の中継の知らせ） */
+  onTabsTouched?: () => void
+
   /** 開いているログインのポップアップの中身 */
   popupContents(): WebContents[] {
     return [...this.popups].filter((popup) => !popup.isDestroyed() && !popup.webContents.isDestroyed()).map((popup) => popup.webContents)
@@ -314,11 +331,102 @@ export class EmbeddedBrowser {
   }
 
   /** 外の自動操作（browser-use。browserCdp.ts）に見せるタブ。閉じかけ・閉じたものは入れない */
-  automationTabs(): Array<{ id: string; contents: WebContents }> {
-    return this.tabs.flatMap((tab) => {
+  automationTabs(group: string = this.group): Array<{ id: string; contents: WebContents }> {
+    return (this.groupTabs(group) ?? []).flatMap((tab) => {
       const contents = liveContents(tab)
       return contents ? [{ id: tab.id, contents }] : []
     })
+  }
+
+  /** そのプロジェクトのタブ（画面に出している組・隠している組）。まだ1枚も無ければ null */
+  private groupTabs(group: string): BrowserTab[] | null {
+    return group === this.group ? this.tabs : this.parkedGroups.get(group)?.tabs ?? null
+  }
+
+  /** 隠している組も含めた、すべてのタブ */
+  private everyTab(): BrowserTab[] {
+    return [...this.tabs, ...[...this.parkedGroups.values()].flatMap((group) => group.tabs)]
+  }
+
+  /** 隠している組のうち、そのタブを持つもの */
+  private parkedGroupOf(id: string): ParkedGroup | undefined {
+    for (const group of this.parkedGroups.values()) if (group.tabs.some((tab) => tab.id === id)) return group
+    return undefined
+  }
+
+  /** そのタブが画面に出している組のものか（browser-use がつないだことを利用者に知らせるのは、見えている組だけ） */
+  isShownTab(id: string): boolean {
+    return this.tabs.some((tab) => tab.id === id && !tab.destroyed)
+  }
+
+  /** 起動時に、最初に開くタブの組（プロジェクト）を決める。attach の前に呼ぶ */
+  setGroup(group: string): void {
+    if (this.tabs.length === 0) this.group = group
+  }
+
+  /**
+   * 画面に出すプロジェクトを切り替える。いまのタブは閉じずに隠して残し（使っていないタブは眠らせてメモリを抑える。
+   * browser-use がつないでいるタブは起こしたまま）、切り替え先に残した組があればそれを出す。無ければ fallback の URL で開く。
+   * これで別のプロジェクトのターミナルの browser-use が、見ていないプロジェクトのタブを並行して動かせる（2026-11-17）
+   */
+  switchGroup(group: string, partition: string, fallback: ProjectTabs): void {
+    if (!this.window || this.window.isDestroyed() || group === this.group) return
+    for (const popup of this.popups) if (!popup.isDestroyed()) popup.close()
+    this.popups.clear()
+    const leaving = this.tabs.filter((tab) => !tab.destroyed)
+    if (leaving.length) this.parkedGroups.set(this.group, { tabs: leaving, activeId: this.activeId, partition: this.partition })
+    const back = this.parkedGroups.get(group)
+    this.parkedGroups.delete(group)
+    this.group = group
+    this.tabs = []
+    this.activeId = ''
+    const restored = back?.tabs.filter((tab) => !tab.destroyed) ?? []
+    const front = restored.find((tab) => tab.id === back?.activeId) ?? restored[0]
+    if (back && front && (!front.sleeping || this.wakeTab(front))) {
+      this.tabs = restored
+      this.partition = back.partition
+      this.activateFirst(front)
+    } else {
+      for (const tab of restored) this.destroyTab(tab)
+      this.partition = partition
+      this.openTabs(fallback)
+    }
+    for (const tab of leaving) {
+      if (!this.automationHeld.has(tab.id)) this.sleepTab(tab, true)
+    }
+    this.placeViews()
+    this.emitState()
+  }
+
+  /** そのプロジェクトの隠している組を閉じる（ログインの組を変えた・プロジェクトを外した） */
+  dropGroup(group: string): void {
+    const parked = this.parkedGroups.get(group)
+    if (!parked) return
+    this.parkedGroups.delete(group)
+    for (const tab of parked.tabs) {
+      this.automationHeld.delete(tab.id)
+      this.destroyTab(tab)
+    }
+    this.emitState()
+  }
+
+  /**
+   * そのプロジェクトの組に新しいタブを開く（browser-use の Target.createTarget）。画面に出している組なら newTab と同じ。
+   * 隠している組（無ければ作る）なら、画面には出さずにその組の前のタブにする
+   */
+  async newTabIn(group: string, input: string, partition: string): Promise<string> {
+    if (group === this.group) return this.newTab(input)
+    const parked = this.parkedGroups.get(group) ?? { tabs: [], activeId: '', partition }
+    if (!canOpenTab(parked.tabs.length)) throw new UserFacingError(t('browser.tabs.limit', { n: MAX_BROWSER_TABS }))
+    const url = input.trim() ? addressBarUrl(input) : ''
+    if (url && (!isNavigableUrl(url) || !isTypedNavigationAllowed(url))) throw new UserFacingError(t('browser.errors.invalidUrl'))
+    const tab = this.createTab(parked.tabs, parked.partition)
+    parked.activeId = tab.id
+    this.parkedGroups.set(group, parked)
+    this.placeViews()
+    if (url) await this.load(tab.view!.webContents, url)
+    this.emitState()
+    return tab.id
   }
 
   /** 開いているタブの中身すべて（並び順） */
@@ -495,17 +603,17 @@ export class EmbeddedBrowser {
    * タブを1枚作る（まだ前には出さない）。どのタブもここだけで作り、同じ守りを入れる:
    * 権限の決まりを入れた永続の session・注入スクリプトだけの preload・sandbox・遷移と転送の決まり・window.open の扱い
    */
-  private createTab(): BrowserTab {
-    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), view: null, sleeping: null, lastActiveAt: ++this.activeSeq, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
+  private createTab(list: BrowserTab[] = this.tabs, partition: string = this.partition): BrowserTab {
+    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), partition, view: null, sleeping: null, lastActiveAt: ++this.activeSeq, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
     this.attachView(tab)
-    this.tabs.push(tab)
+    list.push(tab)
     return tab
   }
 
   /** 眠らせたままのタブを1枚作る（ページは読まない。押したときに attachView で作る） */
   private createSleepingTab(page: SleepingPage): BrowserTab {
     if (!this.window || this.window.isDestroyed()) throw new UserFacingError(t('browser.errors.generic'))
-    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), view: null, sleeping: page, lastActiveAt: 0, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
+    const tab: BrowserTab = { id: nextTabId(++this.tabCounter), partition: this.partition, view: null, sleeping: page, lastActiveAt: 0, rendererReady: false, emulating: false, loadError: null, gestureAt: 0, destroyed: false }
     this.tabs.push(tab)
     return tab
   }
@@ -517,7 +625,7 @@ export class EmbeddedBrowser {
     const view = new WebContentsView({
       webPreferences: {
         // 権限の決まり（既定で拒否）を入れた session。ビューを作る＝読み込む前に入れる
-        session: browserSession(() => this.window, this.partition),
+        session: browserSession(() => this.window, tab.partition),
         // ペン・操作ログの注入スクリプト（設計4章）。
         // preload なのでページ本体のスクリプトとは別の世界で動き、遷移のたびに読み直される。
         preload: join(__dirname, '../preload/review.js'),
@@ -535,7 +643,7 @@ export class EmbeddedBrowser {
     view.setBackgroundColor(this.background)
     // 映した映像・拡張機能のポップアップより下に置く（いちばん下のタブの位置に差し込む）
     const children = window.contentView.children ?? []
-    const lowest = this.tabs.flatMap((other) => (other.view && other !== tab ? [children.indexOf(other.view)] : [])).filter((i) => i >= 0)
+    const lowest = this.everyTab().flatMap((other) => (other.view && other !== tab ? [children.indexOf(other.view)] : [])).filter((i) => i >= 0)
     if (lowest.length > 0) window.contentView.addChildView(view, Math.min(...lowest))
     else window.contentView.addChildView(view)
     // bounds が renderer から届くまでは描画させない（0サイズ）。前に出すまでは隠す
@@ -571,7 +679,7 @@ export class EmbeddedBrowser {
         return { action: 'deny' }
       }
       const action = popupWindowAction(details)
-      if (action === 'popup') return { action: 'allow', overrideBrowserWindowOptions: popupWindowOptions(this.partition) }
+      if (action === 'popup') return { action: 'allow', overrideBrowserWindowOptions: popupWindowOptions(tab.partition) }
       if (action === 'tab') this.openTabFromPage(tab, details.url, details.disposition !== 'background-tab')
       else if (action === 'in-app') void wc.loadURL(details.url).catch(() => undefined)
       else if (action === 'external') void openExternalFromPage(details.url, wc.getURL())
@@ -647,11 +755,11 @@ export class EmbeddedBrowser {
    * タブを眠らせる（ページを捨て、題名・URL・履歴だけ残す）。前のタブ・自動操作がつないでいるタブ・録画が使っているタブ・
    * 音が出ているタブは眠らせない。眠らせたら true
    */
-  private sleepTab(tab: BrowserTab): boolean {
+  private sleepTab(tab: BrowserTab, evenIfAudible = false): boolean {
     const wc = liveContents(tab)
     const view = tab.view
     if (!wc || !view || tab.id === this.activeId || this.automationHeld.has(tab.id)) return false
-    if (this.keepClosedTab?.(wc) || wc.isCurrentlyAudible()) return false
+    if (this.keepClosedTab?.(wc) || (!evenIfAudible && wc.isCurrentlyAudible())) return false
     const history = wc.navigationHistory
     tab.sleeping = { url: wc.getURL(), title: wc.getTitle(), entries: history.getAllEntries(), index: history.getActiveIndex() }
     tab.view = null
@@ -709,7 +817,9 @@ export class EmbeddedBrowser {
 
   /** メモリが多いとき（index.ts の見張り）。前のタブ以外を眠らせる。眠らせた数を返す */
   sleepBackgroundTabs(): number {
-    return this.enforceLiveTabs(1)
+    let slept = 0
+    for (const tab of [...this.parkedGroups.values()].flatMap((group) => group.tabs)) if (this.sleepTab(tab)) slept++
+    return this.enforceLiveTabs(1) + slept
   }
 
   /** 前に出ているタブ */
@@ -757,7 +867,10 @@ export class EmbeddedBrowser {
       void shell.openExternal(url).catch((err: unknown) => reportHandled(err, { area: 'browser', op: 'open link in external browser' }))
       return
     }
-    if (!fresh || !canOpenTab(this.tabs.length)) {
+    // 隠しているプロジェクトのタブ（browser-use が動かしている）から開いたものは、そのプロジェクトの組に入れる（画面には出さない）
+    const parked = this.tabs.includes(opener) ? undefined : this.parkedGroupOf(opener.id)
+    const list = parked?.tabs ?? this.tabs
+    if (!fresh || !canOpenTab(list.length)) {
       if (fresh) this.onNotice?.(t('browser.tabs.limitSameTab', { n: MAX_BROWSER_TABS }))
       void openerContents?.loadURL(url).catch(() => undefined)
       return
@@ -766,12 +879,16 @@ export class EmbeddedBrowser {
     opener.gestureAt = 0
     let tab: BrowserTab
     try {
-      tab = this.createTab()
+      tab = this.createTab(list, opener.partition)
     } catch (err) {
       reportHandled(err, { area: 'browser', op: 'open tab from page' })
       return
     }
-    if (foreground) this.activateTab(tab.id)
+    if (parked) {
+      if (foreground) parked.activeId = tab.id
+      this.placeViews()
+      this.emitState()
+    } else if (foreground) this.activateTab(tab.id)
     else this.emitState()
     const wc = tab.view!.webContents
     this.enforceLiveTabs()
@@ -787,7 +904,13 @@ export class EmbeddedBrowser {
   /** そのタブを前に出す。録画中なら録画もそのタブへ移る（onActiveTab） */
   activateTab(id: string): void {
     const tab = this.tabs.find((candidate) => candidate.id === id)
-    if (!tab || tab.destroyed) return
+    // 隠しているプロジェクトのタブは、その組の前のタブにするだけ（画面は切り替えない）
+    if (!tab) {
+      const parked = this.parkedGroupOf(id)
+      if (parked) parked.activeId = id
+      return
+    }
+    if (tab.destroyed) return
     // 眠らせたタブは起こしてから前に出す
     if (tab.sleeping && !this.wakeTab(tab)) return
     if (!liveContents(tab)) return
@@ -826,7 +949,18 @@ export class EmbeddedBrowser {
    */
   closeTab(id: string): void {
     const tab = this.tabs.find((candidate) => candidate.id === id)
-    if (!tab) return
+    if (!tab) {
+      // 隠しているプロジェクトのタブ（browser-use が閉じた）。最後の1枚でも空のタブは足さない（戻ってきたら登録の URL で開く）
+      const parked = this.parkedGroupOf(id)
+      const hidden = parked?.tabs.find((candidate) => candidate.id === id)
+      if (!parked || !hidden) return
+      this.automationHeld.delete(id)
+      parked.tabs = parked.tabs.filter((candidate) => candidate !== hidden)
+      if (parked.activeId === id) parked.activeId = parked.tabs[parked.tabs.length - 1]?.id ?? ''
+      this.destroyTab(hidden)
+      this.emitState()
+      return
+    }
     this.automationHeld.delete(id)
     if (this.tabs.length === 1) {
       const blank = this.createTab()
@@ -940,6 +1074,7 @@ export class EmbeddedBrowser {
   }
 
   private emitState(): void {
+    this.onTabsTouched?.()
     const next = this.state()
     const key = JSON.stringify(next)
     if (key === this.lastState) return
@@ -1134,10 +1269,10 @@ export class EmbeddedBrowser {
    * タブのスクリーンショット（画面に出ていないタブも撮る。capturePage の stayHidden）。CDP の Page.captureScreenshot の代わり
    */
   async captureTab(id: string, options: { format?: 'png' | 'jpeg'; quality?: number; clip?: { x: number; y: number; width: number; height: number } }): Promise<string> {
-    const tab = this.tabs.find((candidate) => candidate.id === id && !candidate.destroyed)
+    const tab = this.everyTab().find((candidate) => candidate.id === id && !candidate.destroyed)
     if (!tab || !liveContents(tab)) throw new Error('No target with given id found')
-    // 内蔵ブラウザが画面に出ていて、撮るタブが前に出ていなければ前に出す（エージェントがいま作業しているタブを見せる）
-    if (tab.id !== this.activeId && this.bounds && this.bounds.width > 0 && this.bounds.height > 0) {
+    // 内蔵ブラウザが画面に出ていて、撮るタブが前に出ていなければ前に出す（エージェントがいま作業しているタブを見せる。隠しているプロジェクトのタブは出さない）
+    if (this.tabs.includes(tab) && tab.id !== this.activeId && this.bounds && this.bounds.width > 0 && this.bounds.height > 0) {
       this.activateTab(tab.id)
       await new Promise((resolve) => setTimeout(resolve, 150))
     }
@@ -1156,8 +1291,8 @@ export class EmbeddedBrowser {
   }
 
   private placeViews(): void {
-    // 前に出ていないタブは隠す（ページはそのまま。切り替えても読み込み直さない）
-    for (const tab of this.tabs) {
+    // 前に出ていないタブ・隠しているプロジェクトのタブは隠す（ページはそのまま。切り替えても読み込み直さない）
+    for (const tab of this.everyTab()) {
       if (tab.id === this.activeId || tab.destroyed || !tab.view || tab.view.webContents.isDestroyed()) continue
       if (this.automationHeld.has(tab.id)) {
         this.holdHidden(tab.view)
@@ -1335,8 +1470,9 @@ export class EmbeddedBrowser {
     this.hideMirror()
     for (const popup of this.popups) if (!popup.isDestroyed()) popup.close()
     this.popups.clear()
-    const tabs = this.tabs
+    const tabs = this.everyTab()
     this.tabs = []
+    this.parkedGroups.clear()
     this.activeId = ''
     for (const tab of tabs) {
       tab.destroyed = true

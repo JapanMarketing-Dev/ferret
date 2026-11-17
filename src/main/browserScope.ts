@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 /**
  * 内蔵ブラウザを browser-use で動かす口（browserCdp.ts）の、プロジェクトの範囲。
  * ターミナルには、そのターミナルのプロジェクトの印を付けた URL（/<合言葉>/p/<scope>）を渡し、
- * いま開いているプロジェクトと違えば動かさない（プロジェクトをまたいで、見ている別のプロジェクトの内蔵ブラウザを開かない）。
+ * そのプロジェクトのタブの組だけを動かす（画面に出していないプロジェクトでも並行して動かせる。別のプロジェクトのタブは見せない）。
  * index.ts が起動時に読むので、重い依存（ws など）を持たない
  */
 
@@ -13,8 +13,8 @@ export function cdpScopeOf(projectId: string | null | undefined): string | null 
   return isCdpScope(projectId) ? projectId : `h${createHash('sha256').update(projectId).digest('hex').slice(0, 24)}`
 }
 
-/** 別のプロジェクトを開いているときに Agent へ返す理由（プロジェクトの名前は出さない） */
-export const CDP_OTHER_PROJECT_ERROR = "Ferret's built-in browser is showing another project right now, so it cannot be used from this project's terminal (Ferret never drives the browser across projects). Ask the person to open this project in Ferret first, or use your own browser instead."
+/** ターミナルのプロジェクトが Ferret から外された（もう無い）ときに Agent へ返す理由（プロジェクトの名前は出さない） */
+export const CDP_UNKNOWN_PROJECT_ERROR = "This terminal's project is no longer registered in Ferret, so Ferret's built-in browser cannot be used from it. Open a new terminal in a registered project, or use your own browser instead."
 
 /** URL に入れるプロジェクトの印（英数字・_・-、64 字まで） */
 export function isCdpScope(scope: string): boolean {

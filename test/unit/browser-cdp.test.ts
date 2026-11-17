@@ -252,13 +252,25 @@ describe('BrowserCdpServer（127.0.0.1 の口）', () => {
     await expect(new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })).rejects.toThrow()
   })
 
-  it('プロジェクトの印（/p/<scope>）付きの URL は、そのプロジェクトを開いている間だけ動かせる。別のプロジェクトでは開く・読むのどれもしない', async () => {
-    const h = setup()
-    let open = 'proj-a'
-    let created = 0
+  it('プロジェクトの印（/p/<scope>）ごとに、そのプロジェクトのタブだけを並行して動かせる。登録に無いプロジェクトからは開く・読むのどれもしない', async () => {
+    const byScope: Record<string, Array<{ id: string; contents: FakeContents }>> = {
+      'proj-a': [{ id: 'a-1', contents: new FakeContents('https://a.example', 'A') }],
+      'proj-b': [{ id: 'b-1', contents: new FakeContents('https://b.example', 'B') }]
+    }
+    const known = new Set(['proj-a', 'proj-b'])
+    const createdIn: string[] = []
+    const cookieScopes: Array<string | null | undefined> = []
     server = new BrowserCdpServer({
-      tabs: () => h.tabs, createTab: async () => { created++; return 'x' }, closeTab: () => {}, activateTab: () => {},
-      scopeError: (scope) => (scope === open ? null : 'other project')
+      tabs: (scope) => (scope ? byScope[scope] ?? [] : []),
+      createTab: async (url, scope) => {
+        createdIn.push(String(scope))
+        const id = `${scope}-${byScope[scope!]!.length + 1}`
+        byScope[scope!]!.push({ id, contents: new FakeContents(url) })
+        return id
+      },
+      closeTab: () => {}, activateTab: () => {},
+      cookies: { get: async (scope) => { cookieScopes.push(scope); return [] }, set: async () => {}, clear: async () => {} },
+      scopeError: (scope) => (scope && known.has(scope) ? null : 'unknown project')
     }, 'secret-token')
     await server.start()
     const port = server.listeningPort()
@@ -266,24 +278,46 @@ describe('BrowserCdpServer（127.0.0.1 の口）', () => {
     expect(server.url('bad scope!')).toBe(`http://127.0.0.1:${port}/secret-token`)
     const version = JSON.parse((await get(port, '/secret-token/p/proj-a/json/version')).body) as { webSocketDebuggerUrl: string }
     expect(version.webSocketDebuggerUrl).toBe(`ws://127.0.0.1:${port}/secret-token/p/proj-a/devtools/browser/ferret`)
-    expect((await get(port, '/secret-token/p/proj-a/json/list')).status).toBe(200)
-    const ws = new WebSocket(version.webSocketDebuggerUrl)
-    await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
-    const call = (id: number, method: string, params: object = {}) => {
-      const reply = new Promise<Record<string, unknown>>((resolve) => ws.once('message', (d) => resolve(JSON.parse(d.toString()))))
-      ws.send(JSON.stringify({ id, method, params }))
-      return reply
+    // 一覧はそのプロジェクトのタブだけ
+    expect(JSON.parse((await get(port, '/secret-token/p/proj-a/json/list')).body)).toEqual([{ id: 'a-1', type: 'page', title: 'A', url: 'https://a.example' }])
+    expect(JSON.parse((await get(port, '/secret-token/p/proj-b/json/list')).body)).toEqual([{ id: 'b-1', type: 'page', title: 'B', url: 'https://b.example' }])
+    const open = async (scope: string) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/secret-token/p/${scope}/devtools/browser/ferret`)
+      await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
+      const call = (id: number, method: string, params: object = {}) => {
+        const reply = new Promise<Record<string, unknown>>((resolve) => {
+          const onMessage = (d: WebSocket.RawData) => {
+            const m = JSON.parse(d.toString()) as Record<string, unknown>
+            if (m.id === id) { ws.off('message', onMessage); resolve(m) }
+          }
+          ws.on('message', onMessage)
+        })
+        ws.send(JSON.stringify({ id, method, params }))
+        return reply
+      }
+      return { ws, call }
     }
-    expect(await call(1, 'Target.createTarget', { url: 'https://example.com' })).toMatchObject({ id: 1, result: { targetId: 'x' } })
-    // 見ているプロジェクトが変わった
-    open = 'proj-b'
-    expect(await call(2, 'Target.createTarget', { url: 'https://example.com' })).toEqual({ id: 2, error: { code: -32000, message: 'other project' } })
-    expect(await call(3, 'Target.getTargets')).toMatchObject({ id: 3, error: { message: 'other project' } })
-    expect(created).toBe(1)
-    expect((await get(port, '/secret-token/p/proj-a/json/list')).status).toBe(409)
-    // 印の無い URL も、開いているプロジェクトと違えば同じ
+    const a = await open('proj-a')
+    const b = await open('proj-b')
+    // 2つのプロジェクトから同時に動かせる。タブはそれぞれの組に開く
+    const [ra, rb] = await Promise.all([a.call(1, 'Target.createTarget', { url: 'https://a2.example' }), b.call(1, 'Target.createTarget', { url: 'https://b2.example' })])
+    expect(ra).toMatchObject({ id: 1, result: { targetId: 'proj-a-2' } })
+    expect(rb).toMatchObject({ id: 1, result: { targetId: 'proj-b-2' } })
+    expect(createdIn.sort()).toEqual(['proj-a', 'proj-b'])
+    const targets = (await a.call(2, 'Target.getTargets')) as { result: { targetInfos: Array<{ targetId: string }> } }
+    expect(targets.result.targetInfos.map((t) => t.targetId)).toEqual(['a-1', 'proj-a-2'])
+    // 別のプロジェクトのタブにはつなげない
+    expect(await a.call(3, 'Target.attachToTarget', { targetId: 'b-1', flatten: true })).toMatchObject({ id: 3, error: { message: 'No target with given id found' } })
+    // Cookie もそのプロジェクトのログインの組で読む
+    await b.call(4, 'Storage.getCookies')
+    expect(cookieScopes).toEqual(['proj-b'])
+    // 登録に無いプロジェクト・印の無い URL からは何もしない
+    expect((await get(port, '/secret-token/p/gone/json/list')).status).toBe(409)
     expect((await get(port, '/secret-token/json/list')).status).toBe(409)
-    ws.close()
+    const gone = await open('gone')
+    expect(await gone.call(1, 'Target.createTarget', { url: 'https://example.com' })).toEqual({ id: 1, error: { code: -32000, message: 'unknown project' } })
+    expect(createdIn).toHaveLength(2)
+    for (const c of [a, b, gone]) c.ws.close()
   })
 
   it('前の番号が使えなければ空いている番号で待ち受ける', async () => {

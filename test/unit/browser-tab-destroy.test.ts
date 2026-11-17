@@ -427,3 +427,70 @@ describe('録画中の映し込み（mirror）をちらつかせない（2026-11
     browser.hideMirror()
   })
 })
+
+describe('プロジェクトごとのタブの組（別のプロジェクトの browser-use も並行して動かせる。2026-11-17）', () => {
+  it('隠しているプロジェクトの組にタブを開いても画面には出さず、その組のタブとしてだけ見せる', async () => {
+    const browser = attach()
+    const before = state.views.length
+    state.log.length = 0
+    const id = await browser.newTabIn('proj-b', 'https://b.example/', 'persist:b')
+    const view = state.views[before]!
+    expect(state.views.length).toBe(before + 1)
+    expect(browser.automationTabs('proj-b').map((tab) => tab.id)).toEqual([id])
+    expect(browser.automationTabs().map((tab) => tab.id)).not.toContain(id)
+    expect(browser.isShownTab(id)).toBe(false)
+    expect(state.log).not.toContain(`visible ${view.id} true`)
+    expect(browser.state().tabs?.map((tab) => tab.id)).toEqual(['tab-1', 'tab-2'])
+    // 前に出す・閉じるは、その組の中だけ（画面のタブは変わらない）
+    browser.activateTab(id)
+    expect(browser.state().activeTabId).toBe('tab-1')
+    browser.closeTab(id)
+    expect(browser.automationTabs('proj-b')).toEqual([])
+    await nextTick()
+    expect(state.log).toContain(`close ${view.id}`)
+  })
+
+  it('切り替えても前のプロジェクトのタブは閉じずに残し、browser-use がつないでいるタブは起こしたまま。戻れば同じタブを出す', async () => {
+    const browser = attach()
+    const [a, b] = state.views
+    const agentTab = await browser.newTabIn('proj-b', 'https://b.example/', 'persist:b')
+    const agentView = state.views[2]!
+    browser.holdForAutomation(agentTab, true)
+    browser.holdForAutomation('tab-1', true)
+    state.log.length = 0
+    // proj-b へ: browser-use が作ったタブがそのまま前に出る（作り直さない）
+    browser.switchGroup('proj-b', 'persist:b', { urls: ['https://fallback.example/'], active: 0 })
+    expect(state.views.length).toBe(3)
+    expect(browser.state().activeTabId).toBe(agentTab)
+    expect(browser.isShownTab(agentTab)).toBe(true)
+    await nextTick()
+    // 前のプロジェクト: つないでいる tab-1 は残し、使っていない tab-2 は眠らせる（ページを捨てる）
+    expect(a!.webContents.closed).toBe(false)
+    expect(b!.webContents.closed).toBe(true)
+    expect(browser.automationTabs('').map((tab) => tab.id)).toEqual(['tab-1'])
+    expect(agentView.webContents.closed).toBe(false)
+    // 戻る: 残した tab-1 をそのまま出す
+    browser.switchGroup('', 'persist:shared', { urls: ['https://fallback.example/'], active: 0 })
+    expect(browser.state().activeTabId).toBe('tab-1')
+    expect(browser.state().tabs?.map((tab) => tab.id)).toEqual(['tab-1', 'tab-2'])
+    expect(browser.automationTabs('proj-b').map((tab) => tab.id)).toEqual([agentTab])
+    // 外したプロジェクトの組は閉じる
+    browser.dropGroup('proj-b')
+    expect(browser.automationTabs('proj-b')).toEqual([])
+    await nextTick()
+    expect(agentView.webContents.closed).toBe(true)
+  })
+
+  it('残した組の無いプロジェクトへは、登録の URL で開く', () => {
+    const browser = attach()
+    state.log.length = 0
+    browser.switchGroup('proj-c', 'persist:c', { urls: ['https://c.example/'], active: 0 })
+    expect(state.log.some((l) => /^load \d+ https:\/\/c\.example\/$/.test(l))).toBe(true)
+    // 前のプロジェクトのタブは眠らせて残す（ページは捨てるが、戻れば起こして同じ並びで出す）
+    expect(browser.automationTabs('')).toEqual([])
+    browser.switchGroup('', 'persist:shared', { urls: ['https://fallback.example/'], active: 0 })
+    expect(browser.state().tabs?.map((tab) => tab.id)).toEqual(['tab-1', 'tab-2'])
+    expect(browser.state().activeTabId).toBe('tab-1')
+    expect(browser.automationTabs().map((tab) => tab.id)).toEqual(['tab-1'])
+  })
+})

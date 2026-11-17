@@ -60,22 +60,25 @@ export interface CdpCookie {
 
 export interface BrowserCdpDeps {
   /**
-   * つないできたターミナルのプロジェクト（URL の /p/<scope>。無ければ null）で、いま内蔵ブラウザを使ってよいか。
-   * だめなら Agent に返す理由（英語）。プロジェクトをまたいで、見ている別のプロジェクトの内蔵ブラウザを動かさない
+   * つないできたターミナルのプロジェクト（URL の /p/<scope>。無ければ null）で内蔵ブラウザを使えるか。
+   * だめ（そのプロジェクトがもう無い）なら Agent に返す理由（英語）
    */
   scopeError?(scope: string | null): string | null
-  /** 内蔵ブラウザの今のタブ（閉じたものは入れない） */
-  tabs(): CdpTab[]
+  /**
+   * そのプロジェクト（scope。null は画面に出しているプロジェクト）の内蔵ブラウザのタブ（閉じたものは入れない）。
+   * プロジェクトごとにタブの組が分かれていて、別のプロジェクトのタブは見せない（並行して動かせる）
+   */
+  tabs(scope?: string | null): CdpTab[]
   /** タブが増えた・減った・URL や題名が変わった（Target.setDiscoverTargets・setAutoAttach の知らせに使う）。外す関数を返す */
   onTabsChanged?(listener: () => void): () => void
   /** 内蔵ブラウザのセッションの Cookie（Storage.getCookies / setCookies / clearCookies） */
   cookies?: {
-    get(): Promise<CdpCookie[]>
-    set(cookies: CdpCookie[]): Promise<void>
-    clear(): Promise<void>
+    get(scope?: string | null): Promise<CdpCookie[]>
+    set(cookies: CdpCookie[], scope?: string | null): Promise<void>
+    clear(scope?: string | null): Promise<void>
   }
-  /** 新しいタブを開いて前に出す（'' は空のタブ）。タブの id を返す */
-  createTab(url: string): Promise<string>
+  /** そのプロジェクトの組に新しいタブを開いて前に出す（'' は空のタブ）。タブの id を返す */
+  createTab(url: string, scope?: string | null): Promise<string>
   closeTab(id: string): void
   activateTab(id: string): void
   /** 外の自動操作がタブにつないだ（利用者に知らせる・隠れていても描画できるようにする） */
@@ -109,6 +112,8 @@ interface Attachment {
 
 interface Client {
   send(message: object): void
+  /** つないできたターミナルのプロジェクト（null は画面に出しているプロジェクト） */
+  scope: string | null
   sessions: Set<Session>
   /** Target.setDiscoverTargets で、タブの出入りを知らせる */
   discover: boolean
@@ -138,8 +143,8 @@ export class CdpRouter {
   constructor(private readonly deps: BrowserCdpDeps) {}
 
   /** 接続を1つ作る。閉じたら close() を呼ぶ */
-  connect(send: (message: object) => void): { handle: (raw: string) => Promise<void>; close: () => void } {
-    const client: Client = { send, sessions: new Set(), discover: false, autoAttach: false, known: new Map() }
+  connect(send: (message: object) => void, scope: string | null = null): { handle: (raw: string) => Promise<void>; close: () => void } {
+    const client: Client = { send, scope, sessions: new Set(), discover: false, autoAttach: false, known: new Map() }
     this.clients.add(client)
     if (!this.unsubscribe && this.deps.onTabsChanged) this.unsubscribe = this.deps.onTabsChanged(() => this.tabsChanged())
     return {
@@ -162,7 +167,7 @@ export class CdpRouter {
 
   private syncClient(client: Client): void {
     if (!client.discover && !client.autoAttach) return
-    const tabs = this.deps.tabs().filter((tab) => !tab.contents.isDestroyed())
+    const tabs = this.deps.tabs(client.scope).filter((tab) => !tab.contents.isDestroyed())
     const ids = new Set(tabs.map((tab) => tab.id))
     for (const tab of tabs) {
       const info = this.targetInfo(tab)
@@ -196,8 +201,8 @@ export class CdpRouter {
     return { targetId: tab.id, type: 'page', title: tab.contents.getTitle(), url: tab.contents.getURL() || 'about:blank', attached, canAccessOpener: false, browserContextId: 'ferret' }
   }
 
-  private findTab(id: unknown): CdpTab | undefined {
-    return typeof id === 'string' ? this.deps.tabs().find((tab) => tab.id === id && !tab.contents.isDestroyed()) : undefined
+  private findTab(client: Client, id: unknown): CdpTab | undefined {
+    return typeof id === 'string' ? this.deps.tabs(client.scope).find((tab) => tab.id === id && !tab.contents.isDestroyed()) : undefined
   }
 
   private async handle(client: Client, raw: string): Promise<void> {
@@ -241,31 +246,31 @@ export class CdpRouter {
       case 'Browser.getVersion':
         return { protocolVersion: '1.3', product: 'Ferret/BuiltInBrowser', revision: '', userAgent: '', jsVersion: '' }
       case 'Target.getTargets':
-        return { targetInfos: this.deps.tabs().filter((tab) => !tab.contents.isDestroyed()).map((tab) => this.targetInfo(tab)) }
+        return { targetInfos: this.deps.tabs(client.scope).filter((tab) => !tab.contents.isDestroyed()).map((tab) => this.targetInfo(tab)) }
       case 'Target.getTargetInfo': {
         if (params.targetId === undefined) return { targetInfo: { targetId: BROWSER_TARGET_ID, type: 'browser', title: '', url: '', attached: true, canAccessOpener: false } }
-        const tab = this.findTab(params.targetId)
+        const tab = this.findTab(client, params.targetId)
         if (!tab) throw new Error('No target with given id found')
         return { targetInfo: this.targetInfo(tab) }
       }
       case 'Target.createTarget': {
         const url = typeof params.url === 'string' && params.url !== 'about:blank' ? params.url : ''
-        return { targetId: await this.deps.createTab(url) }
+        return { targetId: await this.deps.createTab(url, client.scope) }
       }
       case 'Target.closeTarget': {
-        const tab = this.findTab(params.targetId)
+        const tab = this.findTab(client, params.targetId)
         if (!tab) throw new Error('No target with given id found')
         this.deps.closeTab(tab.id)
         return { success: true }
       }
       case 'Target.activateTarget': {
-        const tab = this.findTab(params.targetId)
+        const tab = this.findTab(client, params.targetId)
         if (!tab) throw new Error('No target with given id found')
         this.deps.activateTab(tab.id)
         return {}
       }
       case 'Target.attachToTarget': {
-        const tab = this.findTab(params.targetId)
+        const tab = this.findTab(client, params.targetId)
         if (!tab) throw new Error('No target with given id found')
         const session = this.attach(client, tab)
         client.send({ method: 'Target.attachedToTarget', params: { sessionId: session.id, targetInfo: this.targetInfo(tab), waitingForDebugger: false } })
@@ -295,12 +300,12 @@ export class CdpRouter {
       case 'Browser.resetPermissions':
         return {}
       case 'Storage.getCookies':
-        return { cookies: (await this.deps.cookies?.get()) ?? [] }
+        return { cookies: (await this.deps.cookies?.get(client.scope)) ?? [] }
       case 'Storage.setCookies':
-        await this.deps.cookies?.set(Array.isArray(params.cookies) ? params.cookies as CdpCookie[] : [])
+        await this.deps.cookies?.set(Array.isArray(params.cookies) ? params.cookies as CdpCookie[] : [], client.scope)
         return {}
       case 'Storage.clearCookies':
-        await this.deps.cookies?.clear()
+        await this.deps.cookies?.clear(client.scope)
         return {}
       default: {
         const err = new Error(`'${method}' wasn't found`) as Error & { code?: number }
@@ -436,7 +441,7 @@ export class BrowserCdpServer {
     return this.url()
   }
 
-  /** BU_CDP_URL に入れる URL。scope（ターミナルのプロジェクト）を付けると、そのプロジェクトを開いている間だけ動かせる */
+  /** BU_CDP_URL に入れる URL。scope（ターミナルのプロジェクト）を付けると、そのプロジェクトのタブの組を動かす（画面に出していなくても） */
   url(scope?: string): string {
     const base = `http://127.0.0.1:${this.port}/${this.token}`
     return scope && isCdpScope(scope) ? `${base}/p/${scope}` : base
@@ -492,10 +497,10 @@ export class BrowserCdpServer {
       return json(200, { Browser: 'Ferret/BuiltInBrowser', 'Protocol-Version': '1.3', 'User-Agent': '', 'V8-Version': '', 'WebKit-Version': '', webSocketDebuggerUrl: ws })
     }
     if (path === '/json' || path === '/json/list') {
-      // 別のプロジェクトのタブは見せない
+      // そのプロジェクトのタブだけ（別のプロジェクトのタブは見せない）
       const denied = this.deps.scopeError?.(scope) ?? null
       if (denied) return json(409, { error: denied })
-      return json(200, this.deps.tabs().filter((tab) => !tab.contents.isDestroyed()).map((tab) => ({ id: tab.id, type: 'page', title: tab.contents.getTitle(), url: tab.contents.getURL() || 'about:blank' })))
+      return json(200, this.deps.tabs(scope).filter((tab) => !tab.contents.isDestroyed()).map((tab) => ({ id: tab.id, type: 'page', title: tab.contents.getTitle(), url: tab.contents.getURL() || 'about:blank' })))
     }
     json(404, { error: 'not found' })
   }
@@ -503,14 +508,13 @@ export class BrowserCdpServer {
   private onSocket(ws: WebSocket, scope: string | null = null): void {
     const denied = () => this.deps.scopeError?.(scope) ?? null
     const conn = this.router.connect((message) => {
-      // 別のプロジェクトを開いている間は、タブの知らせも送らない
       if (ws.readyState === ws.OPEN && !denied()) ws.send(JSON.stringify(message))
-    })
+    }, scope)
     ws.on('message', (data) => {
       const raw = data.toString()
       const reason = denied()
       if (reason) {
-        // 別のプロジェクトを開いている間は何もしない（タブを開く・前に出す・読むのどれも）。理由を返す
+        // 使えないプロジェクト（もう無い）からは何もしない。理由を返す
         let id: unknown
         try { id = (JSON.parse(raw) as { id?: unknown }).id } catch { /* 読めない */ }
         if (typeof id === 'number' && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ id, error: { code: -32000, message: reason } }))

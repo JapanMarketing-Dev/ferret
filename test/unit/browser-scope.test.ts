@@ -1,6 +1,6 @@
-/** 内蔵ブラウザを動かす口のプロジェクトの範囲（src/main/browserScope.ts）。プロジェクトをまたいで動かさない */
+/** 内蔵ブラウザを動かす口のプロジェクトの範囲（src/main/browserScope.ts）。プロジェクトごとのタブの組だけを動かす */
 import { describe, expect, it } from 'vitest'
-import { CDP_OTHER_PROJECT_ERROR, cdpScopeOf, isCdpScope, splitScope } from '../../src/main/browserScope'
+import { CDP_UNKNOWN_PROJECT_ERROR, cdpScopeOf, isCdpScope, splitScope } from '../../src/main/browserScope'
 
 describe('プロジェクトの印', () => {
   it('英数字・_・- の id はそのまま、ほかは短い要約。無ければ null', () => {
@@ -26,7 +26,7 @@ describe('プロジェクトの印', () => {
   })
 
   it('Agent への理由はプロジェクトの名前を出さず、ほかの手段を示す', () => {
-    expect(CDP_OTHER_PROJECT_ERROR).toContain('another project')
-    expect(CDP_OTHER_PROJECT_ERROR).toContain('your own browser')
+    expect(CDP_UNKNOWN_PROJECT_ERROR).toContain('no longer registered')
+    expect(CDP_UNKNOWN_PROJECT_ERROR).toContain('your own browser')
   })
 })
