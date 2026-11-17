@@ -251,6 +251,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   /** 録画中に「ほかのウインドウも同時に録る」の選択画面を開いているか */
   const [addTrackOpen, setAddTrackOpen] = useState(false)
   const [recordBusy, setRecordBusy] = useState(false)
+  /** 止めた録画のレビューを main が裏で作っている（録画はもう止まっている。次の録画は始められる） */
+  const [reviewFinishing, setReviewFinishing] = useState(false)
+  useEffect(() => window.ade.on('review:finishing', setReviewFinishing), [])
   const recordLock = useRef(false)
   /** 次の録画を足す先のレビュー（Findings の「追加で録る」）。toggleRecording が読んで空にする */
   const appendNext = useRef<string | null>(null)
@@ -705,7 +708,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   }, [toast, t, refreshHistory])
 
   /** ビジュアルレビューの「声と書き込みでフィードバック」。録画が止まってできたレビューを計画に添える */
-  const planRecording = useVisualReviewRecording({ folderPath: workspace.folderPath, active: recording || recordBusy,
+  const planRecording = useVisualReviewRecording({ folderPath: workspace.folderPath, active: recording || recordBusy, finishing: reviewFinishing,
     onReviewUpdated: (next) => { setReview((cur) => (cur?.id === next.id ? next : cur)); void refreshHistory().catch(() => undefined) } })
   /** 録画を止めたあとに開くタブ。声と書き込みのフィードバックなら計画へ戻す */
   const activePlanTab = planRecording.activeTab

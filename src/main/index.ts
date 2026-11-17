@@ -1980,47 +1980,90 @@ async function deliverValueReply(root: string, id: string, reply: { action: 'app
   return { ok: true, sent: true, message: t(reply.action === 'approve' ? 'valueUseCase.sentApprove' : 'valueUseCase.sentFeedback'), doc }
 }
 
+/** 録画を止めたあと、裏でレビューを作っている録画のフォルダ（作り終えるまで消させない） */
+const finishingReviews = new Set<string>()
+/** 録画を始めるたびに増える。止めた録画の後処理が、次に始めた録画の文字起こしの表示を止めないように使う */
+let recordingGeneration = 0
+
+/**
+ * 録画を止める。録画（映像・音声・画面収録）が止まったらすぐ返し、「録画中・録画処理中」の扱いもその場で外す。
+ * 残りの文字起こしとレビューづくりは裏で続け、できたら review:ready を送る（2026-11-17、止めたのに裏では録画中の扱いが
+ * 文字起こしの終わりまで残り、次の録画・フォルダや設定の変更が「録画を停止してください」で止められていた）
+ */
 async function stopReview(): Promise<RecordingStatus> {
-      if (!recording || recording.status.state === 'idle') return recording?.status ?? IDLE_RECORDING_STATUS
-      if (recordingBusy) throw new UserFacingError(t('errors.recordingBusy'))
-      recordingBusy = true
-      try {
-        const result = await recording.stop()
-        await audioWriter?.flush()
-        audioWriter = null
-        const stt = await transcriber?.flush()
-        transcriber = null
-        liveFeed?.stop()
-        if (stt) flow(stt.errors.length ? 'stt failed' : 'stt end', { segments: stt.segments.length, errors: stt.errors.length })
-        const paths = activePaths
-        const append = activeAppend
-        activeAppend = null
-        if (paths) {
-          const { appendReviewTake, finishReview } = await import('./review')
-          const warnings = [...sttWarnings, ...(stt?.errors.map((e) => t('errors.transcriptionFailed', { message: e.message })) ?? [])]
-          // 追記の録画は、開いていたレビューの末尾に足す（新しいレビューは作らない）
-          let review: Awaited<ReturnType<typeof finishReview>>
-          try {
-            review = append
-              ? await appendReviewTake(append.review, append.n, result, stt?.segments ?? [], warnings)
-              : await finishReview(paths, result, stt?.segments ?? [], warnings, activeOptions.captureSystemAudio)
-          } catch (err) {
-            // 録画の素材は残っている（次に開けば復元できる）。消えたと思わせないよう、そう伝える
-            reportHandled(err, { area: 'recording', op: 'finish review' })
-            throw new UserFacingError(t('errors.reviewFinishFailed'))
-          }
-          send('review:ready', review)
-          recordStarMoment('reviews')
-          // 何も起きていない時間を削った版は、指摘を出したあとに裏で作る（失敗しても元の動画のまま使える）
-          scheduleTrim(append?.review ?? paths, append?.n ?? 1, result, stt?.segments ?? [],
-            (activeOptions.captureMic === false && !activeOptions.captureSystemAudio) || (!!stt && stt.errors.length === 0))
-        }
-        return recording.status
-      } finally {
-        recordingBusy = false
-        // ワンクリック録画で画面全体にしていたら、録る前の対象へ戻す
-        restoreQuickTarget()
-      }
+  if (!recording || recording.status.state === 'idle') return recording?.status ?? IDLE_RECORDING_STATUS
+  if (recordingBusy) throw new UserFacingError(t('errors.recordingBusy'))
+  recordingBusy = true
+  let result: import('./recording/types').RecordingResult
+  // この録画の後処理に要るものを手元へ移す（次の録画が始まっても混ざらない）
+  const writer = audioWriter
+  const stt = transcriber
+  const paths = activePaths
+  const append = activeAppend
+  const warnings = [...sttWarnings]
+  const options = { ...activeOptions }
+  const generation = recordingGeneration
+  try {
+    result = await recording.stop()
+  } finally {
+    audioWriter = null
+    transcriber = null
+    activeAppend = null
+    recordingBusy = false
+    // ワンクリック録画で画面全体にしていたら、録る前の対象へ戻す
+    restoreQuickTarget()
+  }
+  const busyDir = append?.review.dir ?? paths?.dir
+  if (busyDir) finishingReviews.add(busyDir)
+  send('review:finishing', finishingReviews.size > 0)
+  void finishStoppedReview({ result, writer, stt, paths, append, warnings, options, generation })
+    .catch((err: unknown) => {
+      reportHandled(err, { area: 'recording', op: 'finish review' })
+      // 録画の素材は残っている（次に開けば復元できる）。消えたと思わせないよう、そう伝える
+      send('recording:warning', err instanceof UserFacingError ? err.message : t('errors.reviewFinishFailed'))
+    })
+    .finally(() => {
+      if (busyDir) finishingReviews.delete(busyDir)
+      send('review:finishing', finishingReviews.size > 0)
+    })
+  return recording.status
+}
+
+/** 止めた録画の残りの文字起こしを済ませ、レビューを作る（stopReview が裏で呼ぶ） */
+async function finishStoppedReview(job: {
+  result: import('./recording/types').RecordingResult
+  writer: typeof audioWriter
+  stt: IncrementalTranscriber | null
+  paths: SessionPaths | null
+  append: { review: SessionPaths; n: number } | null
+  warnings: string[]
+  options: typeof activeOptions
+  generation: number
+}): Promise<void> {
+  const { result, paths, append } = job
+  await job.writer?.flush()
+  const stt = await job.stt?.flush()
+  // 次の録画が始まっていれば、その文字起こしの表示はそのまま
+  if (job.generation === recordingGeneration) liveFeed?.stop()
+  if (stt) flow(stt.errors.length ? 'stt failed' : 'stt end', { segments: stt.segments.length, errors: stt.errors.length })
+  if (!paths) return
+  const { appendReviewTake, finishReview } = await import('./review')
+  const warnings = [...job.warnings, ...(stt?.errors.map((e) => t('errors.transcriptionFailed', { message: e.message })) ?? [])]
+  // 追記の録画は、開いていたレビューの末尾に足す（新しいレビューは作らない）
+  let review: Awaited<ReturnType<typeof finishReview>>
+  try {
+    review = append
+      ? await appendReviewTake(append.review, append.n, result, stt?.segments ?? [], warnings)
+      : await finishReview(paths, result, stt?.segments ?? [], warnings, job.options.captureSystemAudio)
+  } catch (err) {
+    reportHandled(err, { area: 'recording', op: 'finish review' })
+    throw new UserFacingError(t('errors.reviewFinishFailed'))
+  }
+  send('review:ready', review)
+  recordStarMoment('reviews')
+  // 何も起きていない時間を削った版は、指摘を出したあとに裏で作る（失敗しても元の動画のまま使える）
+  scheduleTrim(append?.review ?? paths, append?.n ?? 1, result, stt?.segments ?? [],
+    (job.options.captureMic === false && !job.options.captureSystemAudio) || (!!stt && stt.errors.length === 0))
 }
 
 /** 直前の更新確認で見つかった新しい版のページ（app:openUpdate で開く） */
@@ -3299,6 +3342,8 @@ function registerIpc(): void {
       const deleted: string[] = []
       for (const id of ids) {
         if (typeof id !== 'string' || id === busy) continue
+        // 止めたあと裏でレビューを作っている録画も消さない
+        if (s.isSessionId(id) && finishingReviews.has(s.sessionPaths(target, id).dir)) continue
         await s.deleteSession(target, id)
         deleted.push(id)
       }
@@ -3385,6 +3430,7 @@ function registerIpc(): void {
         const paths = append?.paths ?? await createSession(workspace.folderPath)
         activePaths = paths
         activeAppend = append ? { review: append.review, n: append.n } : null
+        recordingGeneration++
         const onSegments = async (segments: import('./pipeline/types').TranscriptSegment[]) => {
           // 末端のリンクはたどらない（sessions/containment.ts）
           if (segments.length) await (await import('./sessions/containment')).appendFileNoFollow(join(paths.dir, 'transcript.jsonl'), segments.map((s) => JSON.stringify(s)).join('\n') + '\n')

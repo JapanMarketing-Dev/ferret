@@ -655,6 +655,8 @@ export interface IpcEvents {
   /** API の呼び出しを記録したあとの集計（フッターの使用量を更新する） */
   'usage:apiCallsChanged': (summary: ApiUsageSummary) => void
   'review:ready': (review: ReviewData) => void
+  /** 止めた録画のレビューを裏で作っている（true）・作り終えた（false）。録画そのものはもう止まっている */
+  'review:finishing': (busy: boolean) => void
   'meeting:progress': (progress: MeetingImportProgress) => void
   /** 文字で指摘を足した（足した後のレビューと、その中の打った指摘の数）。画面はブラウザのまま */
   'note:added': (result: { review: ReviewData; count: number }) => void
@@ -860,7 +862,7 @@ export const IPC_EVENT_CHANNELS = [
   'recording:status',
   'recording:tracksChanged',
   'recording:level',
-  'recording:warning', 'transcript:status', 'transcript:segments', 'capture:targetChanged', 'annotation:history', 'annotation:shortcut', 'capture:modelProgress', 'usage:apiCallsChanged', 'review:ready', 'review:progressChanged', 'meeting:progress',
+  'recording:warning', 'transcript:status', 'transcript:segments', 'capture:targetChanged', 'annotation:history', 'annotation:shortcut', 'capture:modelProgress', 'usage:apiCallsChanged', 'review:ready', 'review:finishing', 'review:progressChanged', 'meeting:progress',
   'visualReview:changed', 'valueUseCase:changed',
   'note:added', 'note:mode', 'note:error',
   'fs:changed',

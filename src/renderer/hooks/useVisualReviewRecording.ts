@@ -17,10 +17,12 @@ const ABANDON_MS = 1500
  * 録画が始まらなかった・止められなかった（review:ready が来ない）ときは、待つのをやめる（失敗は App の run が知らせている）。
  * 価値ユースケースの文書にも同じ流れで返す（kind が 'value-usecases'。添えるのは valueUseCase:attachRecording）
  */
-export function useVisualReviewRecording({ folderPath, active, onReviewUpdated }: {
+export function useVisualReviewRecording({ folderPath, active, finishing = false, onReviewUpdated }: {
   folderPath: string | null
   /** 録画中・開始や停止の途中 */
   active: boolean
+  /** 止めた録画のレビューを main が裏で作っている（review:ready を待ち続ける。新しい録画は始められる） */
+  finishing?: boolean
   /** 整理でレビューが変わった（開いている指摘を差し替える） */
   onReviewUpdated: (review: ReviewData) => void
 }): {
@@ -60,10 +62,10 @@ export function useVisualReviewRecording({ folderPath, active, onReviewUpdated }
 
   // 録画が止まった（・始まらなかった）のに review:ready が来なければ、待つのをやめる
   useEffect(() => {
-    if (active || ref.current?.phase !== 'recording') return
+    if (active || finishing || ref.current?.phase !== 'recording') return
     const timer = setTimeout(() => { if (!activeRef.current && ref.current?.phase === 'recording') set(null) }, ABANDON_MS)
     return () => clearTimeout(timer)
-  }, [active, pending, set])
+  }, [active, finishing, pending, set])
 
   useEffect(() => window.ade.on('review:ready', (review) => {
     const current = ref.current
