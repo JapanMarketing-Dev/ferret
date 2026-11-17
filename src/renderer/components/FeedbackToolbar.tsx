@@ -110,6 +110,7 @@ export function FeedbackToolbar({
   color = DEFAULT_ANNOTATION_COLOR,
   onColorChange,
   onToggleRecording,
+  finishing,
   noteMode = false,
   noteDisabled = false,
   onToggleNote,
@@ -145,6 +146,8 @@ export function FeedbackToolbar({
   color?: AnnotationColor
   onColorChange?: (color: AnnotationColor) => void
   onToggleRecording: () => void
+  /** 録画を止めたあと、裏でレビューを作っている進み具合（録画ボタンの右に出す） */
+  finishing?: ReactNode
   /** 文字で指摘（録画の右。録画していないときに枠と文字で指摘する。音声の代わり） */
   noteMode?: boolean
   noteDisabled?: boolean
@@ -423,6 +426,7 @@ export function FeedbackToolbar({
             data-testid="feedback-record"
           />
         )}
+        {finishing}
         {onToggleNote && slot(
           'note',
           <IconButton

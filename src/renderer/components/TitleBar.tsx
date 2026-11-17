@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import {
   MessageSquarePlus,
   MessageSquareQuote,
@@ -33,6 +34,7 @@ export function TitleBar({
   onOpenSettings,
   onFocusBrowser,
   busy = false,
+  finishing,
   noteMode = false,
   noteDisabled = false,
   onToggleNote
@@ -49,6 +51,8 @@ export function TitleBar({
   /** ブラウザに集中し始めたとき（中央のタブをブラウザへ） */
   onFocusBrowser?: () => void
   busy?: boolean
+  /** 録画を止めたあと、裏でレビューを作っている進み具合（録画ボタンの左に出す） */
+  finishing?: ReactNode
   /** 文字で指摘（録画の右。音声の代わりに枠と文字で指摘する）。押せないとき（録画中・プロジェクト未選択）は disabled */
   noteMode?: boolean
   noteDisabled?: boolean
@@ -92,6 +96,7 @@ export function TitleBar({
 
       <div className="titlebar__right">
         <LayoutToggles onFocusBrowser={onFocusBrowser} />
+        {finishing}
         <RecordButton
           recording={recording}
           disabled={busy}

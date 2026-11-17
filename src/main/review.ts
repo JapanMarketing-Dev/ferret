@@ -38,7 +38,7 @@ import { applyProgress, applyVerdict, pendingIds, queuedIds, recentComments, sen
 import type { ReviewProgressPatch } from '@shared/review'
 
 export async function finishReview(paths: SessionPaths, result: RecordingResult,
-  transcript: TranscriptSegment[], warnings: string[], twoSpeakers: boolean): Promise<ReviewData> {
+  transcript: TranscriptSegment[], warnings: string[], twoSpeakers: boolean, onProgress?: (fraction: number) => void): Promise<ReviewData> {
   // 録画を始めた時点の登録URL（index.ts が capture.json に控える）。環境のラベルに使う
   // 古い録画には capture.json が無い（想定内）
   const capture = parseSmallJson(await readFileNoFollow(join(paths.dir, 'capture.json'), 'utf8', { maxBytes: 1024 * 1024 }).catch(() => '{}'))
@@ -55,8 +55,11 @@ export async function finishReview(paths: SessionPaths, result: RecordingResult,
   const record: SessionRecord = { version: 1, meta: material.meta, transcript: material.transcript,
     removedDuplicates: merged.removed.map((r) => r.segment), frames: result.frames, draft: stage.draft.items,
     originalDocument: stage.document, document: stage.document, edits: [], captureGaps: [...result.warnings, ...warnings] }
-  await persist(paths, record)
-  return loadReviewAt(paths)
+  onProgress?.(0.1)
+  await persist(paths, record, (f) => onProgress?.(0.1 + f * 0.8))
+  const review = await loadReviewAt(paths)
+  onProgress?.(1)
+  return review
 }
 
 /**
@@ -231,7 +234,7 @@ export async function prepareReviewTake(projectDir: string, id: string): Promise
  * 既存の指摘・編集・全体への補足・進み具合は残す（sessions/takes.ts）
  */
 export async function appendReviewTake(paths: SessionPaths, n: number, result: RecordingResult,
-  transcript: TranscriptSegment[], warnings: string[]): Promise<ReviewData> {
+  transcript: TranscriptSegment[], warnings: string[], onProgress?: (fraction: number) => void): Promise<ReviewData> {
   // 編集・整理と同じ順番待ちに並ぶ（同じ session.json を書き換えるので）
   const work = (queues.get(paths.dir) ?? Promise.resolve()).catch(() => {}).then(async () => {
     const record = await loadSession(paths)
@@ -244,16 +247,22 @@ export async function appendReviewTake(paths: SessionPaths, n: number, result: R
       events: result.events, frames: result.frames, warnings: [...result.warnings, ...warnings] })
     // 操作ログはレビューの時間軸へずらしたものをレビューの events.jsonl へ足す（録画ごとの元の記録は takes/<n>/events.jsonl に残る）
     await appendEvents(paths, appended.events)
-    await persist(paths, appended.record)
-    return loadReviewAt(paths)
+    onProgress?.(0.1)
+    await persist(paths, appended.record, (f) => onProgress?.(0.1 + f * 0.8))
+    const review = await loadReviewAt(paths)
+    onProgress?.(1)
+    return review
   })
   queues.set(paths.dir, work)
   try { return await work } finally { if (queues.get(paths.dir) === work) queues.delete(paths.dir) }
 }
 
-async function persist(paths: SessionPaths, record: SessionRecord): Promise<void> {
+/** onProgress は書き出した画像の割合（0〜1。録画を止めたあとの進み具合の表示） */
+async function persist(paths: SessionPaths, record: SessionRecord, onProgress?: (fraction: number) => void): Promise<void> {
   // 編集で番号が変わったときも、画像名と内容を同時に作り直す。
-  for (const plan of imagePlan({ ...record.document, items: record.document.items.map((it) => ({ ...it, include: true })) }, record.frames)) {
+  const plans = imagePlan({ ...record.document, items: record.document.items.map((it) => ({ ...it, include: true })) }, record.frames)
+  for (const [index, plan] of plans.entries()) {
+    onProgress?.(index / plans.length)
     let frame = nativeImage.createFromPath(frameFilePath(paths, plan.frame.path))
     if (frame.isEmpty()) continue
     if (plan.needsCursorRing && plan.frame.cursor && plan.frame.size) {
@@ -263,6 +272,7 @@ async function persist(paths: SessionPaths, record: SessionRecord): Promise<void
     const width = Math.min(frame.getSize().width, 1568)
     await writeFileNoFollow(join(paths.dir, basename(plan.name)), frame.resize({ width }).toPNG())
   }
+  onProgress?.(1)
   await saveSession(paths, record)
   await writeFeedbackMarkdown(paths, renderFeedbackMarkdown(record.document, await feedbackOptions(paths, record)))
 }

@@ -33,6 +33,8 @@ import { isHtmlPath, projectPathFromPageUrl } from '@shared/htmlPreview'
 import { FeedbackToolbar, type AnnotationTool } from './components/FeedbackToolbar'
 import { ReviewTargetsPanel } from './components/ReviewTargetsPanel'
 import { FeedbackSideTabs, LiveTranscriptPanel } from './components/LiveTranscriptPanel'
+import { ReviewFinishing } from './components/ReviewFinishing'
+import type { ReviewFinishJob } from '@shared/reviewFinishing'
 import { TERMINAL_MOUNT_CLASS, readFeedbackSideTab, shownFeedbackSideTab, terminalPlacement, type FeedbackSideTab } from './lib/feedbackSide'
 import { getTerminal } from './terminal/terminalClient'
 import { useLiveTranscript } from './lib/liveTranscript'
@@ -251,9 +253,10 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   /** 録画中に「ほかのウインドウも同時に録る」の選択画面を開いているか */
   const [addTrackOpen, setAddTrackOpen] = useState(false)
   const [recordBusy, setRecordBusy] = useState(false)
-  /** 止めた録画のレビューを main が裏で作っている（録画はもう止まっている。次の録画は始められる） */
-  const [reviewFinishing, setReviewFinishing] = useState(false)
-  useEffect(() => window.ade.on('review:finishing', setReviewFinishing), [])
+  /** 止めた録画のレビューを main が裏で作っているものと進み具合（録画はもう止まっている。次の録画・プロジェクトの切り替えはできる） */
+  const [finishingJobs, setFinishingJobs] = useState<ReviewFinishJob[]>([])
+  useEffect(() => window.ade.on('review:finishing', setFinishingJobs), [])
+  const reviewFinishing = finishingJobs.length > 0
   const recordLock = useRef(false)
   /** 次の録画を足す先のレビュー（Findings の「追加で録る」）。toggleRecording が読んで空にする */
   const appendNext = useRef<string | null>(null)
@@ -1215,6 +1218,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onOpenSettings={() => openSettings()}
           onFocusBrowser={() => setCenterTab('browser')}
           busy={recordBusy}
+          finishing={<ReviewFinishing jobs={finishingJobs} />}
           noteMode={noteMode}
           noteDisabled={!noteStartable}
           onToggleNote={toggleNote}
@@ -1458,6 +1462,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           onUndo={() => void run(async () => { await window.ade.invoke('annotation:undo') })}
           onRedo={() => void run(async () => { await window.ade.invoke('annotation:redo') })}
           onToggleRecording={toggleRecording}
+          finishing={<ReviewFinishing jobs={finishingJobs} compact />}
           noteMode={noteMode}
           noteDisabled={!noteAllowed}
           onToggleNote={toggleNote}

@@ -70,6 +70,7 @@ import { installMenu } from './menu'
 import { allowCrashReload } from './crashReload'
 import { applyLocalePreference } from './locale'
 import { CDP_UNKNOWN_PROJECT_ERROR, cdpScopeOf } from './browserScope'
+import { finishPercent, nextPercent, transcribeFraction, type ReviewFinishJob, type ReviewFinishStage } from '@shared/reviewFinishing'
 import { PRODUCT_NAME, getLocale, t } from '@shared/i18n'
 import { UserFacingError, isStaleChunkError, toUserFacingFileError } from '@shared/errors'
 import { IS_PACKAGED } from './runtime'
@@ -2030,8 +2031,30 @@ async function stopReview(): Promise<RecordingStatus> {
   }
   const busyDir = append?.review.dir ?? paths?.dir
   if (busyDir) finishingReviews.add(busyDir)
-  send('review:finishing', finishingReviews.size > 0)
-  void finishStoppedReview({ result, writer, stt, paths, append, warnings, options, generation })
+  // 右下のカードに出す進み具合（音声の保存 → 残りの文字起こし → 指摘と画像のまとめ。@shared/reviewFinishing）
+  const jobKey = busyDir ?? `job-${generation}`
+  const project = busyDir ? currentSettings().projects.find((p) => isInsideDir(busyDir, p.folderPath)) : undefined
+  finishingJobs.set(jobKey, { id: (append?.review ?? paths)?.id ?? jobKey, percent: 0, stage: 'audio', ...(project ? { projectName: project.name } : {}) })
+  emitFinishing()
+  const report = (stage: ReviewFinishStage, fraction: number, pendingChunks?: number): void => {
+    const current = finishingJobs.get(jobKey)
+    if (!current) return
+    const percent = nextPercent(current.percent, finishPercent(stage, fraction))
+    const { pendingChunks: _old, ...rest } = current
+    const next = { ...rest, stage, percent, ...(pendingChunks !== undefined ? { pendingChunks } : {}) }
+    if (next.percent === current.percent && next.stage === current.stage && next.pendingChunks === current.pendingChunks) return
+    finishingJobs.set(jobKey, next)
+    emitFinishing()
+  }
+  // レビューができた（100%）。カードは finally で消える
+  const done = (): void => {
+    const current = finishingJobs.get(jobKey)
+    if (!current || current.percent === 100) return
+    const { pendingChunks: _old, ...rest } = current
+    finishingJobs.set(jobKey, { ...rest, stage: 'review', percent: 100 })
+    emitFinishing()
+  }
+  void finishStoppedReview({ result, writer, stt, paths, append, warnings, options, generation, report, done })
     .catch((err: unknown) => {
       reportHandled(err, { area: 'recording', op: 'finish review' })
       // 録画の素材は残っている（次に開けば復元できる）。消えたと思わせないよう、そう伝える
@@ -2039,9 +2062,23 @@ async function stopReview(): Promise<RecordingStatus> {
     })
     .finally(() => {
       if (busyDir) finishingReviews.delete(busyDir)
-      send('review:finishing', finishingReviews.size > 0)
+      // 100% を見えるくらい残してから消す（失敗したときはすぐ消す。知らせは recording:warning で出る）
+      const last = finishingJobs.get(jobKey)
+      const clear = (): void => {
+        if (finishingJobs.get(jobKey) !== last) return
+        finishingJobs.delete(jobKey)
+        emitFinishing()
+      }
+      if (last?.percent === 100) setTimeout(clear, 1500).unref?.()
+      else clear()
     })
   return recording.status
+}
+
+/** 録画を止めたあと裏でレビューを作っているものの進み具合（右下のカード） */
+const finishingJobs = new Map<string, ReviewFinishJob>()
+function emitFinishing(): void {
+  send('review:finishing', [...finishingJobs.values()])
 }
 
 /** 止めた録画の残りの文字起こしを済ませ、レビューを作る（stopReview が裏で呼ぶ） */
@@ -2054,10 +2091,26 @@ async function finishStoppedReview(job: {
   warnings: string[]
   options: typeof activeOptions
   generation: number
+  report: (stage: ReviewFinishStage, fraction: number, pendingChunks?: number) => void
+  done: () => void
 }): Promise<void> {
-  const { result, paths, append } = job
+  const { result, paths, append, report } = job
   await job.writer?.flush()
-  const stt = await job.stt?.flush()
+  report('audio', 1)
+  // 残りの文字起こし。済んだ区切りの数で進める（区切りの中の進みは分からないので、区切りごとに上がる）
+  const initialPending = job.stt?.pending ?? 0
+  report('transcribe', 0, initialPending)
+  const watch = job.stt ? setInterval(() => {
+    const pending = job.stt!.pending
+    report('transcribe', transcribeFraction(initialPending, pending), pending)
+  }, 300) : null
+  let stt: Awaited<ReturnType<IncrementalTranscriber['flush']>> | undefined
+  try {
+    stt = await job.stt?.flush()
+  } finally {
+    if (watch) clearInterval(watch)
+  }
+  report('review', 0)
   // 次の録画が始まっていれば、その文字起こしの表示はそのまま
   if (job.generation === recordingGeneration) liveFeed?.stop()
   if (stt) flow(stt.errors.length ? 'stt failed' : 'stt end', { segments: stt.segments.length, errors: stt.errors.length })
@@ -2067,13 +2120,15 @@ async function finishStoppedReview(job: {
   // 追記の録画は、開いていたレビューの末尾に足す（新しいレビューは作らない）
   let review: Awaited<ReturnType<typeof finishReview>>
   try {
+    const onProgress = (fraction: number) => report('review', fraction)
     review = append
-      ? await appendReviewTake(append.review, append.n, result, stt?.segments ?? [], warnings)
-      : await finishReview(paths, result, stt?.segments ?? [], warnings, job.options.captureSystemAudio)
+      ? await appendReviewTake(append.review, append.n, result, stt?.segments ?? [], warnings, onProgress)
+      : await finishReview(paths, result, stt?.segments ?? [], warnings, job.options.captureSystemAudio, onProgress)
   } catch (err) {
     reportHandled(err, { area: 'recording', op: 'finish review' })
     throw new UserFacingError(t('errors.reviewFinishFailed'))
   }
+  job.done()
   send('review:ready', review)
   recordStarMoment('reviews')
   // 何も起きていない時間を削った版は、指摘を出したあとに裏で作る（失敗しても元の動画のまま使える）

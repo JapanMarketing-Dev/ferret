@@ -659,8 +659,8 @@ export interface IpcEvents {
   /** API の呼び出しを記録したあとの集計（フッターの使用量を更新する） */
   'usage:apiCallsChanged': (summary: ApiUsageSummary) => void
   'review:ready': (review: ReviewData) => void
-  /** 止めた録画のレビューを裏で作っている（true）・作り終えた（false）。録画そのものはもう止まっている */
-  'review:finishing': (busy: boolean) => void
+  /** 止めた録画のレビューを裏で作っているものと、その進み具合（空なら無い）。録画そのものはもう止まっている */
+  'review:finishing': (jobs: import('./reviewFinishing').ReviewFinishJob[]) => void
   'meeting:progress': (progress: MeetingImportProgress) => void
   /** 文字で指摘を足した（足した後のレビューと、その中の打った指摘の数）。画面はブラウザのまま */
   'note:added': (result: { review: ReviewData; count: number }) => void

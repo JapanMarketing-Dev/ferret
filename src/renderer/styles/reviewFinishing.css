@@ -1,0 +1,21 @@
+/* 録画を止めたあとのレビュー作成の進み具合（録画ボタンの横） */
+.review-finishing {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 148px;
+  max-width: 240px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-hover);
+  font-size: 11px;
+  line-height: 1.3;
+  -webkit-app-region: no-drag;
+}
+.review-finishing--compact { min-width: 112px; }
+.review-finishing__head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.review-finishing__title { color: var(--color-text-muted); white-space: nowrap; }
+.review-finishing__percent { font-variant-numeric: tabular-nums; font-weight: 600; }
+.review-finishing__stage { color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.review-finishing .progress { width: 100%; }
