@@ -2529,6 +2529,16 @@ function registerIpc(): void {
       if (result.sent) return { state: 'sent', message: t('visualReview.recording.sent') }
       return { state: 'manual', message: result.message, copyText: result.copyText ?? '' }
     },
+    'visualReview:delete': async (id) => {
+      const root = workspace.folderPath
+      if (!root || typeof id !== 'string' || !isValidPlanId(id)) throw new UserFacingError(t('visualReview.errors.invalid'))
+      return (await import('./visualReview')).deleteVisualPlan(root, id)
+    },
+    'valueUseCase:delete': async (id) => {
+      const root = workspace.folderPath
+      if (!root || typeof id !== 'string' || !isValidPlanId(id)) throw new UserFacingError(t('visualReview.errors.invalid'))
+      return (await import('./valueUseCase')).deleteValueUseCase(root, id)
+    },
     'valueUseCase:list': async () => {
       const root = workspace.folderPath
       if (!root) return { docs: [], invalid: [] }

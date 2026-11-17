@@ -21,7 +21,7 @@ import type { PendingRecordingFeedback } from '@shared/visualReviewRecording'
 import type { LiveTranscriptSegment, LiveTranscriptStatus } from '@shared/liveTranscript'
 import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, type BadgeTone } from '../ui'
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
-import { CopyRef, InvalidPlans, ListToggle, ManualCopy, ResponseHistory, STATUS_TONE, Shot, formatTime, letter, useDocImages, useListCollapsed, type FeedbackBox, type Manual } from './VisualReview'
+import { CopyRef, DeleteDocButton, InvalidPlans, ListToggle, ManualCopy, ResponseHistory, STATUS_TONE, Shot, formatTime, letter, useDocImages, useListCollapsed, type FeedbackBox, type Manual } from './VisualReview'
 import { Whiteboard } from './Whiteboard'
 import { useT } from '../lib/i18n'
 import '../styles/visualReview.css'
@@ -319,6 +319,7 @@ function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
               <Badge tone={STATUS_TONE[doc.status]}>{t(`visualReview.status.${doc.status}`)}</Badge>
               <span className="vr__muted">{t('visualReview.revision', { n: doc.revision })}</span>
               <CopyRef text={docPath} label={t('reviewRefs.copyDoc')} testId="review-copy-doc" />
+              <DeleteDocButton kind="valueUseCase" id={doc.id} title={doc.title} onDeleted={onChanged} />
             </div>
             <div className="vuc__summary" data-testid="value-usecases-summary">
               <strong>{t('valueUseCase.summary', { values: summary.values, works: summary.works })}</strong>

@@ -437,3 +437,6 @@
 .vuc__statebar-seg.vuc-state--not-built { background: #9ca3af; }
 .vuc__statebar-seg.vuc-state--unknown { background: #d1d5db; }
 .vuc__statebar-text { font-size: 0.85em; color: var(--color-text-muted, inherit); }
+
+/* 文書の削除の確認（見出しの行の中に並べる） */
+.vr__delete-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-radius: var(--radius-md); background: var(--color-danger-quiet); }

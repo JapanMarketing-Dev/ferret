@@ -8,7 +8,7 @@ import {
   type ValueUseCaseDoc,
   type ValueUseCaseListing
 } from '@shared/valueUseCase'
-import { listReviewDocs, readReviewDoc, writeReviewDoc } from './visualReview'
+import { deleteReviewDoc, listReviewDocs, readReviewDoc, writeReviewDoc } from './visualReview'
 
 /**
  * 価値ユースケースの文書（@shared/valueUseCase）を、開いているプロジェクトの `.ferret/value-usecases/` から読む・返事を書き足す。
@@ -25,6 +25,11 @@ const parseDoc = (raw: unknown, id: string): { ok: true; value: ValueUseCaseDoc 
 export async function listValueUseCases(root: string): Promise<ValueUseCaseListing> {
   const { entries, invalid } = await listReviewDocs(root, VALUE_USECASE_DIR, parseDoc, { maxBytes: VALUE_LIMITS.docBytes, maxFiles: VALUE_LIMITS.docs * 2 })
   return { docs: sortValueDocs(entries), invalid }
+}
+
+/** 文書を消す（人が一覧から削除した）。消せたら true */
+export function deleteValueUseCase(root: string, id: string): Promise<boolean> {
+  return deleteReviewDoc(root, VALUE_USECASE_DIR, id)
 }
 
 /** 返事を書き足す前の文書（生の JSON と読んだもの）。読めなければ null */

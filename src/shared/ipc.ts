@@ -140,12 +140,16 @@ export interface IpcRequests {
   'visualReview:image': (rel: string) => string | null
   /** 計画に返事する（承認・フィードバック）。計画の JSON を書き換え、計画を書いた Agent のターミナルへ送る */
   'visualReview:respond': (id: string, reply: VisualPlanReply) => VisualPlanReplyResult
+  /** 計画を消す（.ferret/visual-review/<id>.json）。消せたら true */
+  'visualReview:delete': (id: string) => boolean
   /** 声と書き込みのフィードバック: 録画のレビュー（id）を計画の返事に添えて Agent へ送る。打った文・囲みも一緒に（@shared/visualReviewRecording） */
   'visualReview:attachRecording': (id: string, reviewId: string, note: RecordingNote, revision?: number) => AttachOutcome
   /** 開いているプロジェクトの価値ユースケース（.ferret/value-usecases/。新しい順。@shared/valueUseCase）。画像は visualReview:image で読む */
   'valueUseCase:list': () => ValueUseCaseListing
   /** 価値ユースケースに返事する（承認・フィードバック）。文書の JSON を書き換え、書いた Agent のターミナルへ送る。囲みの screen は手順の通しの番号 */
   'valueUseCase:respond': (id: string, reply: ValueReply) => ValueReplyResult
+  /** 文書を消す（.ferret/value-usecases/<id>.json）。消せたら true */
+  'valueUseCase:delete': (id: string) => boolean
   /** 声と書き込みのフィードバック: 録画のレビュー（id）を価値ユースケースの返事に添えて Agent へ送る */
   'valueUseCase:attachRecording': (id: string, reviewId: string, note: RecordingNote, revision?: number) => AttachOutcome
   /** Resource Manager。アプリ・内蔵ブラウザ・ターミナルの CPU と RSS */
@@ -745,8 +749,8 @@ export const IPC_REQUEST_CHANNELS = [
   'settingsFile:info', 'settingsFile:read', 'settingsFile:write', 'settingsFile:reveal', 'settings:feedbackTargets',
   'app:version',
   'app:checkUpdate',
-  'app:openUpdate', 'app:openExternal', 'agent:sendText', 'visualReview:list', 'visualReview:image', 'visualReview:respond', 'visualReview:attachRecording',
-  'valueUseCase:list', 'valueUseCase:respond', 'valueUseCase:attachRecording',
+  'app:openUpdate', 'app:openExternal', 'agent:sendText', 'visualReview:list', 'visualReview:image', 'visualReview:respond', 'visualReview:delete', 'visualReview:attachRecording',
+  'valueUseCase:list', 'valueUseCase:respond', 'valueUseCase:delete', 'valueUseCase:attachRecording',
   'update:status', 'update:download', 'update:install', 'update:setAutoDownload', 'update:versions', 'update:chooseVersion',
   'resources:snapshot',
   'resources:kill',

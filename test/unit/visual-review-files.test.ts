@@ -7,7 +7,8 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { NativeImage } from 'electron'
-import { listVisualPlans, readPlanImage, readVisualPlan, writeVisualPlanResponse } from '../../src/main/visualReview'
+import { deleteVisualPlan, listVisualPlans, readPlanImage, readVisualPlan, writeVisualPlanResponse } from '../../src/main/visualReview'
+import { deleteValueUseCase } from '../../src/main/valueUseCase'
 import { ScreenCache, type ScreenCacheTarget } from '../../src/main/screenCache'
 import { syncVisualReviewSkill } from '../../src/main/visualReviewSkill'
 import { shouldWatchDir } from '../../src/main/linuxTreeWatch'
@@ -278,5 +279,41 @@ describe('Linux の見張り', () => {
     expect(shouldWatchDir('.ferret/visual-review/p1')).toBe(true)
     expect(shouldWatchDir('.ferret/visual-review/p1/deep')).toBe(false)
     expect(shouldWatchDir('.ferret/screens')).toBe(false)
+  })
+})
+
+describe('文書を消す（返事を待ったまま要らなくなった計画・価値ユースケースで、件数が残り続けないように）', () => {
+  it('消した計画は一覧から消え、返事を待つ件数にも数えない。画像のフォルダは残す', async () => {
+    await writePlan('a', planJson('a'))
+    await writePlan('b', planJson('b'))
+    await mkdir(join(root, '.ferret', 'visual-review', 'a'), { recursive: true })
+    await writeFile(join(root, '.ferret', 'visual-review', 'a', 's.png'), 'png')
+    expect(await deleteVisualPlan(root, 'a')).toBe(true)
+    expect((await listVisualPlans(root)).plans.map((p) => p.id)).toEqual(['b'])
+    expect(await readFile(join(root, '.ferret', 'visual-review', 'a', 's.png'), 'utf8')).toBe('png')
+    // もう無い
+    expect(await deleteVisualPlan(root, 'a')).toBe(false)
+  })
+
+  it('形の違う id・フォルダ・リンクは消さない（リンクの先のファイルも残す）', async () => {
+    await writePlan('keep', planJson('keep'))
+    for (const bad of ['../keep', 'a/b', '', '.', 'x'.repeat(81)]) expect(await deleteVisualPlan(root, bad)).toBe(false)
+    await mkdir(join(root, '.ferret', 'visual-review', 'dir.json'), { recursive: true })
+    expect(await deleteVisualPlan(root, 'dir')).toBe(false)
+    const target = join(outside, 'secret.json')
+    await writeFile(target, '{}')
+    await symlink(target, join(root, '.ferret', 'visual-review', 'link.json'))
+    expect(await deleteVisualPlan(root, 'link')).toBe(false)
+    expect(await readFile(target, 'utf8')).toBe('{}')
+    expect((await readdir(join(root, '.ferret', 'visual-review'))).sort()).toEqual(['dir.json', 'keep.json', 'link.json'])
+  })
+
+  it('価値ユースケースも同じ（.ferret/value-usecases/<id>.json だけを消す）', async () => {
+    await mkdir(join(root, '.ferret', 'value-usecases'), { recursive: true })
+    await writeFile(join(root, '.ferret', 'value-usecases', 'v1.json'), '{}')
+    await writePlan('v1', planJson('v1'))
+    expect(await deleteValueUseCase(root, 'v1')).toBe(true)
+    expect(await readdir(join(root, '.ferret', 'value-usecases'))).toEqual([])
+    expect((await listVisualPlans(root)).plans.map((p) => p.id)).toEqual(['v1'])
   })
 })

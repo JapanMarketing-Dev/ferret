@@ -19,6 +19,7 @@ import { Badge, Button, EmptyState, IconButton, RecordDot, Spinner, useToast, ty
 import { LiveTranscriptPanel } from './LiveTranscriptPanel'
 import { Whiteboard, useConnectors } from './Whiteboard'
 import { useT } from '../lib/i18n'
+import { errorMessage } from '../lib/errors'
 import '../styles/visualReview.css'
 
 /**
@@ -120,6 +121,34 @@ export function VisualReview({ listing, onChanged, recording, folderPath }: {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * 文書（ビジュアルレビューの計画・価値ユースケース）を消すボタン。押すと確認を出し、［削除］で .ferret の文書ファイルを消す。
+ * 返事を待ったまま要らなくなった文書を消せないと、タブの件数（1・2…）がずっと消えなかった（2026-11-17）
+ */
+export function DeleteDocButton({ kind, id, title, onDeleted }: { kind: 'visualReview' | 'valueUseCase'; id: string; title: string; onDeleted: () => void }) {
+  const t = useT()
+  const toast = useToast()
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const remove = () => {
+    setBusy(true)
+    void window.ade.invoke(kind === 'visualReview' ? 'visualReview:delete' : 'valueUseCase:delete', id)
+      .then(() => { toast({ tone: 'success', message: t('visualReview.deleted', { title }) }); setConfirming(false); onDeleted() })
+      .catch((err: unknown) => toast({ tone: 'warning', message: errorMessage(err) }))
+      .finally(() => setBusy(false))
+  }
+  if (!confirming) {
+    return <IconButton size="sm" icon={<Trash2 size={14} />} label={t('visualReview.delete')} title={t('visualReview.delete')} onClick={() => setConfirming(true)} data-testid="review-doc-delete" />
+  }
+  return (
+    <span className="vr__delete-confirm" role="group" data-testid="review-doc-delete-confirm">
+      <span>{t('visualReview.deleteConfirm', { title })}</span>
+      <Button variant="ghost" disabled={busy} onClick={() => setConfirming(false)}>{t('common.cancel')}</Button>
+      <Button variant="danger" busy={busy} onClick={remove} data-testid="review-doc-delete-yes">{t('common.delete')}</Button>
+    </span>
   )
 }
 
@@ -383,6 +412,7 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording, docPath }: {
               <span className="vr__muted">{t('visualReview.revision', { n: plan.revision })}</span>
               {plan.createdAt && <span className="vr__muted">{formatTime(plan.createdAt)}</span>}
               <CopyRef text={docPath} label={t('reviewRefs.copyDoc')} testId="review-copy-doc" />
+              <DeleteDocButton kind="visualReview" id={plan.id} title={plan.title} onDeleted={onChanged} />
             </div>
             {plan.request && <blockquote className="vr__request"><span className="vr__muted">{t('visualReview.request')}</span> {plan.request}</blockquote>}
           </header>

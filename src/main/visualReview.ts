@@ -1,4 +1,4 @@
-import { lstat, readdir, stat } from 'node:fs/promises'
+import { lstat, readdir, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   LIMITS,
@@ -104,6 +104,30 @@ export async function writeReviewDoc(root: string, dirRel: string, id: string, n
   const file = join(root, ...dirRel.split('/'), `${id}.json`)
   assertContained(root, file)
   await writeFileNoFollow(file, `${JSON.stringify(next, null, 2)}\n`)
+}
+
+/**
+ * 文書を消す（人が一覧から削除した。ビジュアルレビューの計画と価値ユースケースで共用）。
+ * 消すのはフォルダの直下の普通のファイル <id>.json だけ（リンク・途中にリンクのある道は消さない）。画像は別の文書が使っていることがあるので残す。
+ * 消せたら true、もう無い・消さないものなら false
+ */
+export async function deleteReviewDoc(root: string, dirRel: string, id: string): Promise<boolean> {
+  if (!isValidPlanId(id)) return false
+  const file = join(root, ...dirRel.split('/'), `${id}.json`)
+  try {
+    assertContained(root, file)
+    const info = await lstat(file)
+    if (!info.isFile()) return false
+  } catch {
+    return false // もう無い・リンク（想定内。消さない）
+  }
+  await unlink(file)
+  return true
+}
+
+/** 計画を消す */
+export function deleteVisualPlan(root: string, id: string): Promise<boolean> {
+  return deleteReviewDoc(root, VISUAL_REVIEW_DIR, id)
 }
 
 const parsePlan: Parse<VisualPlan> = (raw, id) => {
