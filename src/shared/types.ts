@@ -757,6 +757,11 @@ export interface WhisperModelList {
   /** whisper-cli が見つかったか。無ければ installHint を案内する */
   binaryFound: boolean
   installHint: { command?: string; url: string }
+  /**
+   * 見つかった whisper-cli が GPU（Metal・CUDA・Vulkan など）を使えるか。見つからなければ null。
+   * false なら「CPU で動いています」と GPU 版の入れ方を出す（Issue #13）
+   */
+  gpu: boolean | null
   /** 今落としているモデル */
   downloading: WhisperModelName | null
   /** 使うように選ばれているモデル（userData/models のものだけ） */

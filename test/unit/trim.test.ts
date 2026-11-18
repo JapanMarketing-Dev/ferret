@@ -196,10 +196,23 @@ describe('削った版を裏で作る（review.ts の trimReviewTake）', () => 
   it('できたら削った区間を session.json に書き、feedback.md の長さを削ったあとにする。元の動画は残す', async () => {
     const paths = await setup()
     let kept: unknown = null
-    render.impl = async (src, out, spans) => { kept = spans; expect(src).toBe('ade-media://review/20261002-104012/recording.webm'); await writeFile(out, 'trimmed') }
+    let source: unknown = null
+    let srcUrl = ''
+    render.impl = async (src, out, spans) => {
+      kept = spans
+      srcUrl = src
+      // 元の動画は、いま開いているプロジェクトでなく、このレビューのフォルダに固定した口から読む（FERRET-2D）
+      expect(src).toMatch(/^ade-media:\/\/review\/pinned\/[0-9a-f]{32}$/)
+      source = pinnedMediaFor(new URL(src).pathname)
+      await writeFile(out, 'trimmed')
+    }
     const { trimReviewTake } = await import('../../src/main/review')
+    const { pinnedMediaFor } = await import('../../src/main/pinnedMedia')
     expect(await trimReviewTake(paths, 1, [{ start: 0, end: 1500 }, { start: 45_000, end: 60_000 }], meta.durationMs)).toBe(true)
     expect(kept).toEqual([{ start: 1500, end: 45_000 }])
+    expect(source).toEqual({ dir: paths.dir, file: paths.recording, contentType: 'video/webm' })
+    // 作り終えたら口は閉じる
+    expect(pinnedMediaFor(new URL(srcUrl).pathname)).toBeNull()
     expect(await readFile(paths.trimmedRecording, 'utf8')).toBe('trimmed')
     expect(await readFile(paths.recording, 'utf8')).toBe('original')
     const saved = JSON.parse(await readFile(paths.sessionJson, 'utf8')) as SessionRecord

@@ -29,14 +29,14 @@ export class WhisperModelDownloads {
     return downloadedWhisperModelPath(this.userDataDir, id)
   }
 
-  /** 画面に出す一覧（小さい順）。既定のモデルに recommended を付ける */
-  async list(): Promise<WhisperModelStatus[]> {
+  /** 画面に出す一覧（小さい順）。おすすめ（GPU の有無で変わる。environment.ts の chooseWhisperModel）に recommended を付ける */
+  async list(recommended: WhisperModelId = defaultWhisperModel): Promise<WhisperModelStatus[]> {
     return Promise.all(selectableWhisperModels.map(async (id) => {
       const info = whisperModels[id]
       return {
         id,
         bytes: info.bytes,
-        recommended: id === defaultWhisperModel,
+        recommended: id === recommended,
         downloaded: existsSync(this.pathOf(id)),
         partialBytes: await partialDownloadSize(this.pathOf(id)),
       }

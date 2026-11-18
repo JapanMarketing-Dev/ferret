@@ -132,7 +132,10 @@ say "依存の既知の脆弱性を調べます"
 if command -v osv-scanner >/dev/null 2>&1; then
   OSV_JSON="$(mktemp "${TMPDIR:-/tmp}/ferret-osv.XXXXXX")"
   osv_status=0
-  osv-scanner --format json -r "$STAGE" >"$OSV_JSON" 2>/dev/null || osv_status=$?
+  # 直した版がまだ無いものを期限付きで外す設定（直下の osv-scanner.toml）は、workers/* の lockfile にも同じものを使う
+  osv_config=()
+  [ -f "$STAGE/osv-scanner.toml" ] && osv_config=(--config "$STAGE/osv-scanner.toml")
+  osv-scanner --format json ${osv_config[@]+"${osv_config[@]}"} -r "$STAGE" >"$OSV_JSON" 2>/dev/null || osv_status=$?
   # 0 = 見つからない、1 = 見つかった。それ以外は調べられなかった
   [ "$osv_status" = "0" ] || [ "$osv_status" = "1" ] || die "osv-scanner で調べられませんでした（終了コード ${osv_status}）"
   node "$ROOT/scripts/vuln-gate.mjs" <"$OSV_JSON" \

@@ -21,7 +21,7 @@ import { UserFacingError } from '@shared/errors'
 import { reportHandled } from '@shared/report'
 import { delay } from '@shared/delay'
 import { parseMeetingTranscript } from '@shared/meetingTranscript'
-import { MEETING_SCORE_THRESHOLD, isAudioOnly, meetingDecisionBody, meetingFrameTimes, meetingMediaExtension, meetingScoreFromAnswer,
+import { MEETING_SCORE_THRESHOLD, isAudioOnly, meetingDecisionBody, meetingFrameTimes, meetingMediaExtension, meetingMediaType, meetingScoreFromAnswer,
   type MeetingImportProgress, type MeetingImportRequest, type MeetingItemScore, type MeetingMediaPick, type MeetingScoreResult } from '@shared/meetingImport'
 import type { ReviewData } from '@shared/review'
 import type { FrameRef, Material, TranscriptSegment } from '../pipeline/types'
@@ -31,6 +31,7 @@ import type { DecisionAskSession } from '../decision/service'
 import { assertContained, mkdirContained, openNewFileContained, readFileNoFollow, writeFileNoFollow, writeNewFileContained } from '../sessions/containment'
 import { createSession, ensureGitExclude, frameFilePath, loadSession, type SessionPaths } from '../sessions'
 import { MAX_AUDIO_DECODE_MS, MeetingMedia } from './media'
+import { pinMedia } from '../pinnedMedia'
 
 // ─── 選んだファイル（パスは main だけが持つ）────────────────────────
 
@@ -110,7 +111,7 @@ export async function importMeeting(deps: MeetingImportDeps): Promise<ReviewData
   const paths = await createSession(deps.projectDir)
   const warnings: string[] = []
   const startedAt = new Date().toISOString()
-  let videoUrl: string | null = null
+  let pinned: { url: string; release: () => void } | null = null
   let ext: ReturnType<typeof meetingMediaExtension> = null
   if (media) {
     ext = meetingMediaExtension(media.name)
@@ -118,12 +119,13 @@ export async function importMeeting(deps: MeetingImportDeps): Promise<ReviewData
     const dest = join(paths.dir, `meeting.${ext}`)
     assertContained(paths.dir, dest)
     await copyIntoReview(media.path, dest)
-    videoUrl = `ade-media://review/${paths.id}/meeting.${ext}`
+    // 取り込みの非表示ウィンドウはこのレビューのフォルダに固定して読む（途中でプロジェクトを切り替えても読める。FERRET-2D）
+    pinned = pinMedia(paths.dir, dest, ext ? meetingMediaType(ext) : 'application/octet-stream')
   }
   await writeFileNoFollow(join(paths.dir, 'capture.json'), JSON.stringify({ startedAt, twoSpeakers: (parsed?.speakers.length ?? 0) > 1,
     meeting: { ...(media ? { media: media.name } : {}), ...(request.transcript?.name ? { transcript: request.transcript.name } : {}) }, urlPresets: deps.urlPresets }))
 
-  const player = videoUrl ? new MeetingMedia(videoUrl) : null
+  const player = pinned ? new MeetingMedia(pinned.url) : null
   try {
     const info = player ? await player.probe().catch((err: unknown) => { reportHandled(err, { area: 'review', op: 'meeting: probe media' }); return null }) : null
     if (player && !info) warnings.push(t('meeting.warnings.unplayable'))
@@ -172,6 +174,7 @@ export async function importMeeting(deps: MeetingImportDeps): Promise<ReviewData
     return await deps.createReview(paths, material, warnings)
   } finally {
     player?.close()
+    pinned?.release()
   }
 }
 
@@ -203,18 +206,18 @@ export async function importShareRecording(deps: ShareRecordingImportDeps): Prom
   const paths = await createSession(deps.projectDir)
   const warnings: string[] = []
   const ext = recording.mime ? SHARE_MEDIA_TYPES[recording.mime] : null
-  let videoUrl: string | null = null
+  let pinned: { url: string; release: () => void } | null = null
   if (ext) {
     deps.onProgress({ stage: 'copy' })
     const dest = join(paths.dir, `meeting.${ext}`)
     assertContained(paths.dir, dest)
     await deps.download(dest)
-    videoUrl = `ade-media://review/${paths.id}/meeting.${ext}`
+    pinned = pinMedia(paths.dir, dest, recording.mime!)
   }
   await writeFileNoFollow(join(paths.dir, 'capture.json'), JSON.stringify({ startedAt: recording.createdAt, twoSpeakers: false,
     share: { mode: recording.mode, ...(recording.name ? { name: recording.name } : {}) }, urlPresets: deps.urlPresets }))
 
-  const player = videoUrl ? new MeetingMedia(videoUrl) : null
+  const player = pinned ? new MeetingMedia(pinned.url) : null
   try {
     const info = player ? await player.probe().catch((err: unknown) => { reportHandled(err, { area: 'review', op: 'share: probe media' }); return null }) : null
     if (player && !info) warnings.push(t('meeting.warnings.unplayable'))
@@ -267,6 +270,7 @@ export async function importShareRecording(deps: ShareRecordingImportDeps): Prom
     }, warnings)
   } finally {
     player?.close()
+    pinned?.release()
   }
 }
 

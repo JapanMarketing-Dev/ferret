@@ -168,10 +168,13 @@ export function trimReviewTake(review: SessionPaths, n: number, cuts: TrimCut[],
   const run = trimQueue.catch(() => {}).then(async () => {
     const files = takePaths(review, n)
     const { renderTrimmedVideo } = await import('./trimVideo')
+    const { pinMedia } = await import('./pinnedMedia')
     // 途中のファイルは毎回別の名前にし、排他で作る（trimVideo.ts）。先回りのリンクへ書かない。置き換え・片付けは親を開いて持ったまま（containment.ts）
     const part = `${files.trimmedRecording}.${randomBytes(4).toString('hex')}.part`
+    // 元の動画はこのレビューのフォルダに固定して読む（途中でプロジェクトを切り替えても同じ動画。FERRET-2D）
+    const source = pinMedia(dirname(files.recording), files.recording, 'video/webm')
     try {
-      await renderTrimmedVideo(takeVideoUrl(review.id, n), part, keptSpans(sourceDurationMs, cuts))
+      await renderTrimmedVideo(source.url, part, keptSpans(sourceDurationMs, cuts))
       await renameContained(part, files.trimmedRecording, { replace: true })
     } catch (err) {
       await removeContained(dirname(part), part).catch(() => undefined)
@@ -182,6 +185,8 @@ export function trimReviewTake(review: SessionPaths, n: number, cuts: TrimCut[],
         if (record) await saveSession(review, withTrimFailure(record, n, err))
       }).catch((e: unknown) => reportHandled(e, { area: 'review', op: 'record trim failure' }))
       return false
+    } finally {
+      source.release()
     }
     // 編集・整理と同じ順番待ちに並んで、削った区間を session.json に書く
     return inReviewQueue(review, async () => {

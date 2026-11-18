@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { request } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
-import { BrowserCdpServer, CdpRouter, type BrowserCdpDeps, type ContentsLike, type DebuggerLike } from '../../src/main/browserCdp'
+import { BrowserCdpServer, CdpRouter, IGNORED_TAB_METHODS, type BrowserCdpDeps, type ContentsLike, type DebuggerLike } from '../../src/main/browserCdp'
 
 /**
  * 内蔵ブラウザの CDP の中継（browser-use などが内蔵ブラウザを動かす口）。
@@ -120,6 +120,18 @@ describe('CdpRouter', () => {
     expect((await h.call('Runtime.evaluate', {}, 'BAD')).error?.message).toContain('Session')
     expect((await h.call('Page.fail', {}, sessionId)).error?.message).toBe('boom')
     expect((await h.call('Browser.close')).error?.message).toContain("wasn't found")
+  })
+
+  it('端末の大きさの上書き（Emulation.setDeviceMetricsOverride など）はタブへ通さず成功だけ返す（FERRET-1Q：Windows で main ごと落ちた）', async () => {
+    const h = setup()
+    const { sessionId } = (await h.call('Target.attachToTarget', { targetId: 'tab-1' })).result as { sessionId: string }
+    for (const m of [...IGNORED_TAB_METHODS]) {
+      expect(await h.call(m, { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false }, sessionId)).toMatchObject({ result: {}, sessionId })
+    }
+    expect(h.tabs[0]!.contents.debugger.commands).toEqual([])
+    // ほかの Emulation.* は通す（ユーザーエージェント・タッチなど）
+    await h.call('Emulation.setUserAgentOverride', { userAgent: 'x' }, sessionId)
+    expect(h.tabs[0]!.contents.debugger.commands.map((c) => c.method)).toEqual(['Emulation.setUserAgentOverride'])
   })
 
   it('タブを開く・前に出す・閉じるは内蔵ブラウザの操作になる（about:blank は空のタブ）', async () => {

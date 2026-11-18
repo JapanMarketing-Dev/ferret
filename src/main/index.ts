@@ -15,7 +15,7 @@ import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
 import { existsSync, realpathSync, watch } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
-import { homedir, totalmem } from 'node:os'
+import { availableParallelism, homedir, totalmem } from 'node:os'
 import type { SessionPaths } from './sessions/paths'
 import type { IncrementalTranscriber } from './pipeline/stt/engine'
 import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
@@ -697,21 +697,30 @@ async function sttEngineFor(transcription: import('@shared/types').SttProvider, 
       return { engine: null, kind: 'openai', warning: t('errors.endpointMissingWarning') }
     }
   }
-  const { nodeProbes, resolveWhisperBinary } = await import('./pipeline/environment')
-  const binary = await resolveWhisperBinary({ modelDir: '' }, nodeProbes(workspace.folderPath))
+  const { nodeProbes, resolveWhisperBinary, whisperThreads, whisperUsesGpu } = await import('./pipeline/environment')
+  const probes = nodeProbes(workspace.folderPath)
+  const binary = await resolveWhisperBinary({ modelDir: '' }, probes)
   const { WhisperCppEngine } = await import('./pipeline/stt/whisper')
-  if (binary && existsSync(localModel())) return { engine: new WhisperCppEngine({ binary, model: localModel(), language, greedy: true }), kind: 'local-cpu' }
-  return { engine: null, kind: 'local-cpu', warning: t('errors.localModelMissingWarning') }
+  // GPU の有無でモデル・区切りの長さを変え、CPU のスレッドは -t で渡す（渡さないと 4 スレッドだけ。Issue #13）
+  const gpu = binary ? await whisperUsesGpu(binary, probes) : false
+  const model = await localModel(gpu)
+  const kind = gpu ? 'local-gpu' as const : 'local-cpu' as const
+  if (binary && existsSync(model)) return { engine: new WhisperCppEngine({ binary, model, language, greedy: true, threads: whisperThreads(availableParallelism()) }), kind }
+  return { engine: null, kind, warning: t('errors.localModelMissingWarning') }
 }
 
 let sttWarnings: string[] = []
 let recordingBusy = false
 
-function localModel(): string {
-  if (process.env.ADE_WHISPER_MODEL) return process.env.ADE_WHISPER_MODEL
-  // 設定の「モデルをダウンロード」で落とした既定のモデル（userData/models）
-  const downloaded = join(app.getPath('userData'), 'models', 'ggml-large-v3-turbo.bin')
-  return existsSync(downloaded) ? downloaded : join(homedir(), '.cache/ade-movie/models/ggml-small.bin')
+/**
+ * 端末内の文字起こしのモデルのファイル。選んだもの（設定の whisperModel → ADE_WHISPER_MODEL）が無ければ、
+ * 設定の「モデルをダウンロード」で落としたもの（userData/models）から GPU の有無に合うものを選ぶ（pickLocalWhisperModel）。
+ * gpu を知らないとき（録画の可否の表示など）は、取得済みかどうかだけが分かればよいので GPU ありの順で探す
+ */
+async function localModel(gpu = true): Promise<string> {
+  const { pickLocalWhisperModel } = await import('./pipeline/environment')
+  return pickLocalWhisperModel({ explicit: process.env.ADE_WHISPER_MODEL, gpu, exists: existsSync,
+    pathOf: (id) => join(app.getPath('userData'), 'models', `ggml-${id}.bin`), fallback: join(homedir(), '.cache/ade-movie/models/ggml-small.bin') })
 }
 
 /** 設定の「モデルをダウンロード」（pipeline/stt/modelManager.ts）。使うときに読み込む */
@@ -3357,12 +3366,15 @@ function registerIpc(): void {
       return (await import('./recording/apps')).launchDesktopApp(id)
     },
     'capture:whisperModels': async () => {
-      const { nodeProbes, resolveWhisperBinary } = await import('./pipeline/environment')
+      const { chooseWhisperModel, nodeProbes, resolveWhisperBinary, whisperUsesGpu } = await import('./pipeline/environment')
       const { whisperInstallHint } = await import('./pipeline/stt/modelManager')
+      const probes = nodeProbes(workspace.folderPath)
+      const binary = await resolveWhisperBinary({ modelDir: '' }, probes)
+      const gpu = binary ? await whisperUsesGpu(binary, probes) : null
       const downloads = await whisperModelDownloads()
-      const models = await downloads.list()
-      const current = localModel()
-      return { models, binaryFound: !!(await resolveWhisperBinary({ modelDir: '' }, nodeProbes(workspace.folderPath))), installHint: whisperInstallHint(process.platform),
+      const models = await downloads.list(chooseWhisperModel(gpu ?? process.platform === 'darwin'))
+      const current = await localModel(gpu ?? true)
+      return { models, binaryFound: !!binary, installHint: whisperInstallHint(process.platform), gpu,
         downloading: downloads.downloading(), selected: models.find((m) => m.downloaded && downloads.pathOf(m.id) === current)?.id ?? null }
     },
     'capture:downloadModel': async (id) => {
@@ -3388,7 +3400,7 @@ function registerIpc(): void {
       const configured = new Map<AiVendor, SttKeySource>()
       for (const p of ai.STT_REMOTE_PROVIDERS) { const found = sttRef(p); if (found) configured.set(ai.STT_PROVIDER_PRESETS[p].vendor, found.source) }
       for (const p of ai.LLM_API_PROVIDERS) { const found = llmRef(p); if (found) configured.set(ai.LLM_PROVIDER_PRESETS[p].vendor, found.source) }
-      return { localReady: !!(await resolveWhisperBinary({ modelDir: '' }, nodeProbes(workspace.folderPath))) && existsSync(localModel()),
+      return { localReady: !!(await resolveWhisperBinary({ modelDir: '' }, nodeProbes(workspace.folderPath))) && existsSync(await localModel()),
         // 復号しない（起動直後にも呼ばれるため）。dev 版は保存しないことを画面に出す
         keyStorage: IS_PACKAGED ? keys.storage() : 'dev' as const,
         keys: Object.fromEntries(ai.AI_VENDORS.map((v) => [v, configured.get(v) ?? keys.source(v)])) as Record<AiVendor, SttKeySource>,
@@ -3952,6 +3964,13 @@ async function main(): Promise<void> {
       const { TRIM_HOST_HTML } = await import('./trimVideo')
       return new Response(TRIM_HOST_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
     }
+    // 裏の処理が読む動画（作り始めたときのレビューのフォルダに固定。プロジェクトを切り替えても読める。FERRET-2D・pinnedMedia.ts）
+    if (url.hostname === 'review' && url.pathname.startsWith('/pinned/')) {
+      const { pinnedMediaFor } = await import('./pinnedMedia')
+      const media = pinnedMediaFor(url.pathname)
+      if (!media) return new Response('Not found', { status: 404 })
+      return containedVideoResponse(media.dir, media.file, request.headers.get('range'), media.contentType)
+    }
     // 取り込んだ mtg の動画からコマ・音声を取り出す非表示ウィンドウのページ（meeting/media.ts）
     if (url.hostname === 'review' && url.pathname === '/meeting-host') {
       const { MEETING_HOST_HTML } = await import('./meeting/media')
@@ -3988,13 +4007,20 @@ async function main(): Promise<void> {
     const review = checkedPaths(workspace.folderPath, match[1]!)
     const files = takePaths(review, Number(match[2] ?? 1))
     const file = match[3] ? files.trimmedRecording : files.recording
-    // 末端がリンクの動画は返さない（外のファイルを読ませない）。確かめたあとに差し替えられないよう、
-    // 開いた fd がレビューのフォルダの中の実体と同じかを確かめ、その fd から返す（security-7 [13]）
+    return containedVideoResponse(review.dir, file, request.headers.get('range'))
+  })
+
+  /**
+   * レビューのフォルダ（dir）の中の録画（file）を返す。
+   * 末端がリンクの動画は返さない（外のファイルを読ませない）。確かめたあとに差し替えられないよう、
+   * 開いた fd がレビューのフォルダの中の実体と同じかを確かめ、その fd から返す（security-7 [13]）
+   */
+  async function containedVideoResponse(dir: string, file: string, range: string | null, contentType = 'video/webm'): Promise<Response> {
     const { lstat } = await import('node:fs/promises')
     const leaf = await lstat(file).catch(() => null)
     if (!leaf?.isFile()) return new Response('Not found', { status: 404 })
     const { openContained } = await import('./containedFile')
-    const handle = await openContained(review.dir, file, 'read').catch(() => null)
+    const handle = await openContained(dir, file, 'read').catch(() => null)
     if (!handle) return new Response('Not found', { status: 404 })
     const opened = await handle.stat().catch(() => null)
     if (!opened?.isFile()) {
@@ -4003,8 +4029,8 @@ async function main(): Promise<void> {
     }
     // Range に答えないと video が seek できず、▷ が指摘の時刻でなく 0 秒から始まる
     const { mediaResponseFromHandle } = await import('./mediaRange')
-    return mediaResponseFromHandle(handle, request.headers.get('range'), 'video/webm')
-  })
+    return mediaResponseFromHandle(handle, range, contentType)
+  }
 
   // 起動時にプロジェクトフォルダ・URLを指定できる（`ferret <folder>` 相当の用途）。
   // 指定がなければ WS-1 のとおり前回の値を復元する。

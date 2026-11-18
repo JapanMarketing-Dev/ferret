@@ -57,6 +57,10 @@ export function WhisperModelSection({ disabled, onPickModel, onChanged }: { disa
       {hint.command && <code className="st-model__cmd">{hint.command}</code>}
       <code className="st-model__cmd">{hint.url}</code>
     </div>}
+    {list.gpu === false && <div className="st-note" data-testid="whisper-cpu-only">
+      <span><CircleAlert size={12} aria-hidden="true" />{t('stt.gpu.cpuOnly')}</span>
+      <span>{t(window.ade.platform === 'win32' ? 'stt.gpu.windows' : window.ade.platform === 'darwin' ? 'stt.gpu.mac' : 'stt.gpu.linux')}</span>
+    </div>}
     <label className="st-row"><span className="st-row__label">{t('stt.model.label')}</span>
       <span className="rv-select"><select className="st-select" aria-label={t('stt.model.label')} value={choice ?? ''} disabled={disabled || running} onChange={(e) => setChoice(e.target.value as WhisperModelName)}>
         {list.models.map((m) => <option key={m.id} value={m.id}>

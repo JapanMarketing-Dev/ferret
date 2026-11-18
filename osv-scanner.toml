@@ -1,0 +1,7 @@
+# 公開前の依存の脆弱性の関門（scripts/publish-squash.sh → scripts/vuln-gate.mjs）で、直した版がまだ無いものだけを期限付きで外す。
+# 期限を過ぎたら関門がまた止める。そのときに直した版が出ていれば上げ、ここから消す。
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-18
+reason = "picomatch の ReDoS（すべての版が対象で、直した版がまだ無い）。vite・vitest・electron-builder などビルドとテストのときだけの依存で、配布するアプリには入らない（pnpm why picomatch --prod が空）。パターンは自分たちが書いたものだけを渡す"

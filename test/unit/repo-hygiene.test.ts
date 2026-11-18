@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
  * 公開リポジトリに残ったことがあるので、直下のファイルは決めたものだけにする。足すときはここにも足す。
  */
 const ROOT_FILES = new Set([
-  '.gitattributes', '.gitignore', '.gitleaks.toml', 'CONTRIBUTING.md', 'LICENSE', 'README.ja.md', 'README.md', 'SECURITY.md',
+  '.gitattributes', '.gitignore', '.gitleaks.toml', 'osv-scanner.toml', 'CONTRIBUTING.md', 'LICENSE', 'README.ja.md', 'README.md', 'SECURITY.md',
   'THIRD_PARTY_NOTICES.md', 'electron-builder.config.cjs', 'electron-builder.dev.cjs', 'electron.vite.config.ts', 'package.json',
   'pnpm-lock.yaml', 'tsconfig.json', 'tsconfig.node.json', 'tsconfig.preload.json', 'tsconfig.test.json',
   'tsconfig.web.json', 'vitest.config.ts', 'wrangler.jsonc'

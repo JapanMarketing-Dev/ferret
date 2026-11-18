@@ -301,8 +301,22 @@ describe('ブランチは main だけ（develop は 2026-10-15 に廃止）', ()
     expect(gate).toBeLessThan(text.indexOf('# --- 4.'))
     expect(gate).toBeLessThan(text.indexOf('PUBLISH_DRY_RUN:-}" = "1"'))
     const step = text.slice(gate, text.indexOf('# --- 4.'))
-    expect(step).toMatch(/osv-scanner --format json -r "\$STAGE"/)
+    expect(step).toMatch(/osv-scanner --format json \$\{osv_config\[@\]\+"\$\{osv_config\[@\]\}"\} -r "\$STAGE"/)
+    expect(step).toContain('[ -f "$STAGE/osv-scanner.toml" ] && osv_config=(--config "$STAGE/osv-scanner.toml")')
     expect(step).toMatch(/node "\$ROOT\/scripts\/vuln-gate\.mjs" <"\$OSV_JSON" \\\n\s+\|\| die/)
     expect(step).toMatch(/pnpm audit --audit-level high\) \\\n\s+\|\| die/)
+  })
+
+  it('脆弱性の関門で外すもの（osv-scanner.toml）は、どれも理由と 90 日以内の期限を持つ（ずっと外したままにしない）', () => {
+    const text = read('osv-scanner.toml')
+    const entries = text.split('[[IgnoredVulns]]').slice(1)
+    for (const entry of entries) {
+      expect(entry).toMatch(/^id = "[A-Z]+-[\w-]+"$/m)
+      expect(entry).toMatch(/^reason = ".{20,}"$/m)
+      const until = /^ignoreUntil = (\d{4}-\d{2}-\d{2})$/m.exec(entry)?.[1]
+      expect(until).toBeTruthy()
+      expect(Date.parse(until!) - Date.now()).toBeLessThanOrEqual(90 * 86_400_000)
+    }
+    expect(text).not.toMatch(/^\s*\[\[PackageOverrides\]\]/m)
   })
 })

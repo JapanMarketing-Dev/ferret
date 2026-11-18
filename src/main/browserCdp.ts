@@ -94,6 +94,26 @@ export interface BrowserCdpDeps {
 /** タブへ通さない命令（ブラウザ全体・端末に効くもの。Target.* は中継が答える） */
 const BLOCKED_PREFIXES = ['Browser.', 'Target.', 'SystemInfo.', 'Tethering.', 'Tracing.', 'Memory.', 'HeapProfiler.']
 
+/**
+ * タブへ通さず、成功だけを返す命令（端末の大きさの上書き）。
+ *
+ * 開発者ツールの端末エミュレーション（Emulation.setDeviceMetricsOverride など）は、Chromium の中で
+ * WebContentsImpl::SetDeviceEmulationSize を呼ぶ。タブを隠した・閉じかけ・プロジェクトの切り替えでフレームが入れ替わった
+ * 瞬間に呼ばれると、壊れた WebContents を触ってメインプロセスごと落ちる（FERRET-1Q の 0.8.16 の Windows。
+ * 落ちた場所は symbols で content::WebContentsImpl::SetDeviceEmulationSize）。
+ * 内蔵ブラウザの表示幅は Ferret が枠（bounds）と enableDeviceEmulation で決めるので、外からの上書きは受け取るだけにする。
+ * browser-use は失敗を返すと起動をやめることがあるため、エラーにはしない。
+ */
+export const IGNORED_TAB_METHODS: ReadonlySet<string> = new Set([
+  'Emulation.setDeviceMetricsOverride',
+  'Emulation.clearDeviceMetricsOverride',
+  'Emulation.setVisibleSize',
+  'Emulation.resetPageScaleFactor',
+  'Emulation.setPageScaleFactor',
+  'Page.setDeviceMetricsOverride',
+  'Page.clearDeviceMetricsOverride'
+])
+
 export const BROWSER_TARGET_ID = 'ferret-browser'
 
 interface Session {
@@ -224,6 +244,7 @@ export class CdpRouter {
         if (!session || session.client !== client) return reply({ error: cdpError(-32001, `Session with given id not found.`) })
         if (BLOCKED_PREFIXES.some((p) => method.startsWith(p))) return reply({ error: cdpError(-32601, `'${method}' is not available in Ferret's built-in browser`) })
         if (session.contents.isDestroyed()) return reply({ error: cdpError(-32000, 'Target closed') })
+        if (IGNORED_TAB_METHODS.has(method)) return reply({ result: {} })
         // 画面に出ていないタブは CDP のスクリーンショットが返らないので、Electron の撮影で答える
         if (method === 'Page.captureScreenshot' && this.deps.capture) {
           const format = params.format === 'jpeg' ? 'jpeg' : 'png'

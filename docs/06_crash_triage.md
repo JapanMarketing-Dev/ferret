@@ -90,6 +90,12 @@ tags と添付で分かること（どれも利用者の内容は含まない）
   応答の本文は `fetch` の時間切れが読み込みにも効くので、読み込みの失敗と形の失敗を分ける（`usage/fetchers.ts` の `readUsageBody`）
 - GPU プロセスが GPU の文脈を失って自分から終わったもの（終了コード 34。macOS・Linux は 34 << 8 = 8704）は Chromium が起動し直すので、
   10分に3回続いたときだけ送る（FERRET-24。`isGpuContextLostExit`・`createGpuContextLostGate`）
+- 内蔵ブラウザの CDP の中継（`browserCdp.ts`）は、端末の大きさの上書き（`Emulation.setDeviceMetricsOverride` など。`IGNORED_TAB_METHODS`）をタブへ通さず成功だけ返す。
+  Chromium の中で `WebContentsImpl::SetDeviceEmulationSize` が壊れかけの WebContents を触り、main ごと落ちた（FERRET-1Q の 0.8.16 の Windows。browser-use が送る。
+  symbols で `content::WebContentsImpl::SetDeviceEmulationSize` の入口）。表示幅は Ferret が枠と `enableDeviceEmulation` で決める
+- 裏で動く処理の非表示ウィンドウ（削った版・mtg の取り込み）には、`ade-media://review/<id>/…`（いま開いているプロジェクトで探す）を渡さず、
+  `pinMedia`（`src/main/pinnedMedia.ts`）の口を渡す。録画を止めてから文字起こしが終わる前にプロジェクトを切り替えると、別のプロジェクトで探して
+  `DEMUXER_ERROR_COULD_NOT_OPEN` になっていた（FERRET-2D）。`test/unit/pinned-media-policy.test.ts` が落とす
 - 起動の遅さ：更新直後の初回は、画面の JS の読み込み（`browser:attached` → `renderer:firstIpc`。冷えた app.asar を OS が検査しながら読む）も数えない（FERRET-K の 0.7.8 の Windows）。
   節目 `renderer:painted`（画面が最初のデータを描いた時刻）と `interactive` の差は main の順番待ち
 

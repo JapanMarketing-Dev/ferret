@@ -85,19 +85,77 @@ export async function detectGpu(binary: string | null, probes: EnvironmentProbes
   if (binary && probes.run) {
     const out = await probes.run(binary, ['--help'])
     if (out !== null) {
-      return /loaded (MTL|CUDA|Vulkan|HIP|SYCL) backend/i.test(out)
+      // 動的に読む版（公式の zip・Homebrew）は load_backend の行、静的にリンクした版は初期化の行で分かる
+      return /loaded (MTL|Metal|CUDA|Vulkan|HIP|SYCL|OpenCL|MUSA|CANN) backend|ggml_cuda_init: found [1-9]|ggml_vulkan: Found [1-9]|ggml_metal_device_init|using (CUDA|Vulkan|Metal)\d* backend/i.test(out)
     }
   }
   return probes.platform === 'darwin'
 }
 
 /**
- * 使うモデルを決める。
- * CPUのみでは `large-v3-turbo` が実時間の0.84倍かかり逐次処理が追いつかないため、
- * `small`（0.32倍）へ落とす（設計 5章①、05_pipeline_findings.md）。
+ * 使うモデル（おすすめ）を決める。
+ * CPUのみでは `large-v3-turbo`（f16）が遅く、録画中の区切りの処理がたまって停止後に長く待たせる
+ * （Issue #13: Windows の Ryzen AI MAX+ 395 で 4 スレッドだと実時間の 1.26 倍）。
+ * CPU では量子化した `large-v3-turbo-q5_0`（メモリの読み出しが約 1/3 で速く、日本語の精度はほぼ同じ）をすすめる。
+ * `small` は日本語の誤変換が目立つので、CPU でも既定にはしない（設計 5章①、05_pipeline_findings.md）。
  */
 export function chooseWhisperModel(gpuAvailable: boolean): WhisperModelId {
-  return gpuAvailable ? 'large-v3-turbo' : 'small'
+  return gpuAvailable ? 'large-v3-turbo' : 'large-v3-turbo-q5_0'
+}
+
+/**
+ * whisper-cli に渡すスレッド数（-t）。
+ * 渡さないと whisper-cli は min(4, コア数) しか使わず、16 コア 32 スレッドの CPU でも 4 スレッドで動いていた
+ * （Issue #13: -t 16 で 2.3 倍速くなった）。区切りは1つずつ順に処理する（IncrementalTranscriber）ので、
+ * 論理コアの半分（だいたい物理コアの数）を使う。少なくとも 4（コアが 4 未満ならその数）、多くても 16
+ * （それより増やしても速くならず、ほかの操作が重くなる）。
+ */
+export function whisperThreads(logicalCpus: number): number {
+  const n = Number.isFinite(logicalCpus) ? Math.floor(logicalCpus) : 0
+  if (n <= 0) return 4
+  if (n <= 4) return n
+  return Math.min(16, Math.max(4, Math.floor(n / 2)))
+}
+
+/** detectGpu の結果を実行ファイルごとに覚える（--help の起動は Metal のライブラリの準備などで数百 ms かかる） */
+const gpuCache = new Map<string, Promise<boolean>>()
+
+/**
+ * その whisper-cli が GPU を使えるか（覚えた結果を返す）。
+ * timeoutMs を過ぎても分からなければ、OS からの控えめな既定（detectGpu と同じ）を返し、調べるのは裏で続ける
+ */
+export async function whisperUsesGpu(binary: string, probes: EnvironmentProbes, timeoutMs = 3000): Promise<boolean> {
+  let hit = gpuCache.get(binary)
+  if (!hit) {
+    hit = detectGpu(binary, probes).catch(() => probes.platform === 'darwin')
+    gpuCache.set(binary, hit)
+  }
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([hit, new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(probes.platform === 'darwin'), timeoutMs) })])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+/** テスト用：覚えた GPU の判定を消す */
+export function clearWhisperGpuCache(): void {
+  gpuCache.clear()
+}
+
+/**
+ * 端末内の文字起こしで使うモデルのファイルを選ぶ。
+ * 利用者が選んだもの（explicit。設定の whisperModel）があればそれ。無ければ、取得済みのモデルから
+ * GPU なら large-v3-turbo を、CPU なら large-v3-turbo-q5_0 を先に選ぶ。どれも無ければ fallback（古い置き場所の small）
+ */
+export function pickLocalWhisperModel(opt: { explicit?: string | null; gpu: boolean; pathOf: (id: WhisperModelId) => string; exists: (path: string) => boolean; fallback: string }): string {
+  if (opt.explicit) return opt.explicit
+  const order: WhisperModelId[] = opt.gpu ? ['large-v3-turbo', 'large-v3-turbo-q5_0', 'small'] : ['large-v3-turbo-q5_0', 'large-v3-turbo', 'small']
+  for (const id of order) {
+    const path = opt.pathOf(id)
+    if (opt.exists(path)) return path
+  }
+  return opt.fallback
 }
 
 interface WhisperRuntime {

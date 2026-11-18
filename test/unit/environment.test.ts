@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   chooseWhisperModel,
+  clearWhisperGpuCache,
   detectGpu,
+  pickLocalWhisperModel,
+  whisperThreads,
+  whisperUsesGpu,
   detectLlmRuntime,
   resolveWhisperBinary,
   resolveWhisperRuntime,
@@ -103,9 +107,83 @@ describe('GPUの判定とモデルの既定', () => {
     expect(await detectGpu(null, probes({ platform: 'linux' }))).toBe(false)
   })
 
-  it('CPUのみなら small を既定にする（large-v3-turbo は逐次処理が追いつかない）', () => {
+  it('CPUのみなら量子化した large-v3-turbo-q5_0 をすすめる（f16 は CPU で遅い。small は日本語の精度が落ちる。Issue #13）', () => {
     expect(chooseWhisperModel(true)).toBe('large-v3-turbo')
-    expect(chooseWhisperModel(false)).toBe('small')
+    expect(chooseWhisperModel(false)).toBe('large-v3-turbo-q5_0')
+  })
+
+  it('Windows の公式の CPU 版（load_backend が CPU だけ）は GPU なし。Vulkan・静的リンクの CUDA・Metal の初期化の行は GPU あり', async () => {
+    const win = (out: string) => detectGpu('C:\\w\\whisper-cli.exe', probes({ platform: 'win32', run: async () => out }))
+    expect(await win('load_backend: loaded CPU backend from C:\\w\\ggml-cpu-zen4.dll')).toBe(false)
+    expect(await win('load_backend: loaded Vulkan backend from C:\\w\\ggml-vulkan.dll\nload_backend: loaded CPU backend')).toBe(true)
+    expect(await win('ggml_cuda_init: found 1 CUDA devices:')).toBe(true)
+    expect(await win('ggml_cuda_init: found 0 CUDA devices:')).toBe(false)
+    expect(await win('ggml_vulkan: Found 1 Vulkan devices:')).toBe(true)
+    expect(await win('whisper_backend_init_gpu: using Vulkan0 backend')).toBe(true)
+    expect(await win('load_backend: loaded BLAS backend')).toBe(false)
+  })
+})
+
+describe('whisper-cli のスレッド数（-t。Issue #13）', () => {
+  it('論理コアの半分を使い、4〜16 に収める。コアが 4 以下ならその数。壊れた値は 4', () => {
+    expect(whisperThreads(32)).toBe(16)
+    expect(whisperThreads(64)).toBe(16)
+    expect(whisperThreads(24)).toBe(12)
+    expect(whisperThreads(16)).toBe(8)
+    expect(whisperThreads(10)).toBe(5)
+    expect(whisperThreads(8)).toBe(4)
+    expect(whisperThreads(6)).toBe(4)
+    expect(whisperThreads(5)).toBe(4)
+    expect(whisperThreads(4)).toBe(4)
+    expect(whisperThreads(2)).toBe(2)
+    expect(whisperThreads(1)).toBe(1)
+    expect(whisperThreads(0)).toBe(4)
+    expect(whisperThreads(-3)).toBe(4)
+    expect(whisperThreads(Number.NaN)).toBe(4)
+    expect(whisperThreads(33.9)).toBe(16)
+  })
+})
+
+describe('GPU の判定を覚える（whisperUsesGpu）', () => {
+  it('同じ実行ファイルは1度だけ調べる。実行ファイルが違えば別に調べる', async () => {
+    clearWhisperGpuCache()
+    let runs = 0
+    const p = probes({ platform: 'win32', run: async () => { runs++; return 'load_backend: loaded CPU backend' } })
+    expect(await whisperUsesGpu('C:\\a\\whisper-cli.exe', p)).toBe(false)
+    expect(await whisperUsesGpu('C:\\a\\whisper-cli.exe', p)).toBe(false)
+    expect(runs).toBe(1)
+    expect(await whisperUsesGpu('C:\\b\\whisper-cli.exe', p)).toBe(false)
+    expect(runs).toBe(2)
+  })
+
+  it('調べるのが遅ければ OS の既定で答え、結果はあとで使う。調べるのが失敗しても OS の既定', async () => {
+    clearWhisperGpuCache()
+    let finish: (v: string) => void = () => {}
+    const p = probes({ platform: 'win32', run: () => new Promise<string>((r) => { finish = r }) })
+    expect(await whisperUsesGpu('/w', p, 5)).toBe(false)
+    finish('load_backend: loaded CUDA backend')
+    expect(await whisperUsesGpu('/w', p, 5)).toBe(true)
+    clearWhisperGpuCache()
+    expect(await whisperUsesGpu('/m', probes({ platform: 'darwin', run: async () => { throw new Error('x') } }))).toBe(true)
+    expect(await whisperUsesGpu('/l', probes({ platform: 'linux', run: async () => { throw new Error('x') } }))).toBe(false)
+  })
+})
+
+describe('使うモデルのファイル（pickLocalWhisperModel）', () => {
+  const pathOf = (id: string) => `/m/ggml-${id}.bin`
+  const base = { pathOf, fallback: '/old/ggml-small.bin' } as const
+  it('利用者が選んだものを最優先する', () => {
+    expect(pickLocalWhisperModel({ ...base, explicit: '/x/mine.bin', gpu: false, exists: () => true })).toBe('/x/mine.bin')
+  })
+  it('GPU は large-v3-turbo、CPU は large-v3-turbo-q5_0 を先に選ぶ。無ければ取得済みのほか、何も無ければ古い置き場所', () => {
+    const all = () => true
+    expect(pickLocalWhisperModel({ ...base, gpu: true, exists: all })).toBe('/m/ggml-large-v3-turbo.bin')
+    expect(pickLocalWhisperModel({ ...base, gpu: false, exists: all })).toBe('/m/ggml-large-v3-turbo-q5_0.bin')
+    const only = (name: string) => (p: string) => p === `/m/ggml-${name}.bin`
+    expect(pickLocalWhisperModel({ ...base, gpu: false, exists: only('large-v3-turbo') })).toBe('/m/ggml-large-v3-turbo.bin')
+    expect(pickLocalWhisperModel({ ...base, gpu: true, exists: only('large-v3-turbo-q5_0') })).toBe('/m/ggml-large-v3-turbo-q5_0.bin')
+    expect(pickLocalWhisperModel({ ...base, gpu: true, exists: only('small') })).toBe('/m/ggml-small.bin')
+    expect(pickLocalWhisperModel({ ...base, gpu: false, exists: () => false, explicit: '' })).toBe('/old/ggml-small.bin')
   })
 })
 
@@ -126,7 +204,7 @@ describe('whisper の実行環境をまとめて解決する', () => {
     expect(runtime.needsDownload).toBe(true)
   })
 
-  it('CPUのみの端末では small になる', async () => {
+  it('CPUのみの端末では large-v3-turbo-q5_0 になる（Issue #13）', async () => {
     const runtime = await resolveWhisperRuntime(
       paths,
       probes({
@@ -136,7 +214,7 @@ describe('whisper の実行環境をまとめて解決する', () => {
       })
     )
     if ('error' in runtime) throw new Error('解決できるはず')
-    expect(runtime.modelId).toBe('small')
+    expect(runtime.modelId).toBe('large-v3-turbo-q5_0')
     expect(runtime.gpuAvailable).toBe(false)
   })
 
