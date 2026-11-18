@@ -96,6 +96,11 @@ tags と添付で分かること（どれも利用者の内容は含まない）
 - 裏で動く処理の非表示ウィンドウ（削った版・mtg の取り込み）には、`ade-media://review/<id>/…`（いま開いているプロジェクトで探す）を渡さず、
   `pinMedia`（`src/main/pinnedMedia.ts`）の口を渡す。録画を止めてから文字起こしが終わる前にプロジェクトを切り替えると、別のプロジェクトで探して
   `DEMUXER_ERROR_COULD_NOT_OPEN` になっていた（FERRET-2D）。`test/unit/pinned-media-policy.test.ts` が落とす
+- 終了の途中（before-quit のあと）に renderer の `invoke` が `reply was never sent` で拒否されたものは送らない（FERRET-2E の 0.8.16 の Windows。
+  ［再起動して更新］で main がウインドウを閉じ、`terminal:screen` の返事が届かなかっただけ）。`isShutdownIpcReplyError`。終了の途中でなければ送る
+- 単一起動の鍵（`requestSingleInstanceLock`）は Sentry を始める前に取る。2つ目の起動が Sentry を始めると、動いている1つ目のまだ終わっていない
+  セッションを abnormal として送る（0.8.17 の Windows の更新直後に、クラッシュの記録が無いのに abnormal が付いた）。
+  abnormal だけでイベントも minidump も無いときは、まず二重起動・タスクの終了・電源断を疑う。`test/unit/single-instance-telemetry-policy.test.ts` が落とす
 - 起動の遅さ：更新直後の初回は、画面の JS の読み込み（`browser:attached` → `renderer:firstIpc`。冷えた app.asar を OS が検査しながら読む）も数えない（FERRET-K の 0.7.8 の Windows）。
   節目 `renderer:painted`（画面が最初のデータを描いた時刻）と `interactive` の差は main の順番待ち
 

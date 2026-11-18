@@ -44,6 +44,7 @@ import {
   type ScrubContext,
   type SentryTestKind,
   classifyStaleBuild,
+  isShutdownIpcReplyError,
   gcKindName,
   isNativeCrashEvent,
   minimizeNativeCrash,
@@ -500,6 +501,8 @@ export function initCrashReporting(): void {
       const classified = classifyStaleBuild(event, packaged)
       if (!classified) return null
       event = classified
+      // 終了の途中で renderer の invoke の返事が届かなかっただけの失敗（FERRET-2E）は送らない
+      if (isShutdownIpcReplyError(event, appQuitting)) return null
       const minidump = (hint.attachments ?? []).find((a) => a.attachmentType === 'event.minidump')
       const native = isNativeCrashEvent(event, Boolean(minidump))
       // minidump からは例外の種類と落ちた場所のモジュール名だけを読む（本体は送らない）

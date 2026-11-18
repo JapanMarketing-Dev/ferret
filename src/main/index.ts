@@ -158,8 +158,14 @@ app.commandLine.appendSwitch('disable-features', 'FedCm')
  * （配布版は electron-builder の productName、開発版は scripts/prepare-dev-electron.mjs）から出る。
  * Windows / Linux の「について」の表示だけ、起動後に製品名にする（whenReady の直後）。
  */
+/*
+ * 同じプロジェクトを二重に開かない。Sentry より先に確かめる：2つ目の起動が Sentry を始めると、
+ * 動いている1つ目のまだ終わっていないセッションを「前回は異常終了」と送ってしまう（0.8.17 の Windows で、
+ * クラッシュの記録が無いのに abnormal が付いた）。2つ目は Sentry も Crashpad も始めずに終わる（main()）
+ */
+const singleInstanceLock = app.requestSingleInstanceLock()
 // 配布版で設定が ON なら Sentry へ送る。それ以外は Crashpad でローカルに受けるだけ（src/main/telemetry.ts）
-initCrashReporting()
+if (singleInstanceLock) initCrashReporting()
 
 // 開発用の .env は dev 起動のときだけ読む。配布版は読まない（pipeline/stt/keys.ts）
 loadDevDotEnv(IS_PACKAGED)
@@ -3886,8 +3892,8 @@ let loadedSettings: Settings = {
 }
 
 async function main(): Promise<void> {
-  // 同じプロジェクトを二重に開かない
-  if (!app.requestSingleInstanceLock()) {
+  // 同じプロジェクトを二重に開かない（鍵は Sentry を始める前に取った: singleInstanceLock）
+  if (!singleInstanceLock) {
     app.quit()
     return
   }

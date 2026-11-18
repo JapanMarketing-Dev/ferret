@@ -634,6 +634,20 @@ export function classifyStaleBuild<E extends { exception?: unknown; tags?: Recor
   return { ...event, tags: { ...event.tags, kind: 'stale-build' }, fingerprint: ['stale-build'] }
 }
 
+/** renderer の invoke の返事が、main の終了で届かなかったときの文言（Electron の ipcRenderer.invoke） */
+const IPC_REPLY_NEVER_SENT = /^Error invoking remote method '[^']+': reply was never sent$/
+
+/**
+ * 終了の途中（before-quit のあと）に、renderer の invoke の返事が届かなかった失敗は送らない（FERRET-2E）。
+ * main が後始末でウインドウを閉じるので、返事を待っていた renderer の Promise が拒否されるだけで、不具合ではない。
+ * 終了の途中でなければ、返事を返さない handler の不具合かもしれないので送る
+ */
+export function isShutdownIpcReplyError(event: { exception?: unknown }, quitting: boolean): boolean {
+  if (!quitting) return false
+  const values = (event.exception as { values?: Array<{ value?: unknown }> } | undefined)?.values ?? []
+  return values.length > 0 && values.every((v) => IPC_REPLY_NEVER_SENT.test(String(v.value ?? '').replace(/^Error: /, '')))
+}
+
 /** 添付する main のログの行数と、1行の長さの上限 */
 const LOG_RING_LINES = 50
 export const LOG_LINE_MAX = 160
