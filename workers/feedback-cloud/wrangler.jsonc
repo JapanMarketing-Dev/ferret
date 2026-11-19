@@ -1,0 +1,27 @@
+{
+  // メールでログインして、自分の指摘を PC をまたいで・チームの指摘をメンバーをまたいで共有する Worker（README.md に手順）。
+  // 公開: node scripts/release-tools.mjs wrangler deploy --config workers/feedback-cloud/wrangler.jsonc
+  // 秘密（AUTH_SECRET・RATE_LIMIT_SALT）は wrangler secret put で入れる。このファイルにもリポジトリにも書かない。
+  "name": "ferret-feedback-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  // account.ferretade.dev だけで受ける（*.workers.dev では受けない）
+  "workers_dev": false,
+  "routes": [{ "pattern": "account.ferretade.dev", "custom_domain": true }],
+  "vars": {
+    "PUBLIC_BASE": "https://account.ferretade.dev",
+    "MAIL_FROM": "noreply@ferretade.dev"
+  },
+  // ユーザー・セッション・指摘・チームの置き場。表は migrations/ に書く
+  "d1_databases": [{ "binding": "DB", "database_name": "ferret-account", "database_id": "6ac57dc0-627e-47f6-8b67-91f88b378c13", "migrations_dir": "migrations" }],
+  // ログインのコードと招待のメール（Cloudflare Email Service）
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["noreply@ferretade.dev"] }],
+  // 頻度の上限（feedback-relay の FeedbackLimiter と同じもの）。無料のプランで使える SQLite の Durable Object
+  "durable_objects": {
+    "bindings": [{ "name": "LIMITER", "class_name": "FeedbackLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FeedbackLimiter"] }],
+  // 要求の記録（URL・ヘッダー・IP・メールアドレスを含みうる）は残さない。残すのは console.error のエラーの種類だけ
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
+  "logpush": false
+}

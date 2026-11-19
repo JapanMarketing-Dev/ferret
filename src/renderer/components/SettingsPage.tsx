@@ -25,6 +25,7 @@ import { TranscriptionSection } from './TranscriptionSection'
 import { OrganizeSection } from './OrganizeSection'
 import { DecisionSection } from './DecisionSection'
 import { CrashReportsSetting } from './CrashReportsSetting'
+import { CloudAccountSection } from './CloudAccountSection'
 import { SettingsFileCard } from './SettingsFileCard'
 import { useSettingsRevision } from '../lib/settingsFile'
 import { PRODUCT_NAME } from '@shared/i18n'
@@ -410,6 +411,10 @@ export function SettingsPage({
         <h3 className="st-page__subheading">{t('settings.projects.title')}</h3>
         {/* 作業用のフォルダ「work」とアーカイブ。読み込み・保存は自分で行う（src/renderer/components/ProjectsSetting.tsx） */}
         <ProjectsSetting />
+    </PageSection>,
+    cloud: <PageSection key="cloud" id="cloud" title={titleOf('cloud')}>
+      {/* メールのコードでログインし、指摘を PC とチームで共有する。読み込み・ログインは自分で行う（src/renderer/components/CloudAccountSection.tsx） */}
+      <CloudAccountSection />
     </PageSection>,
     appearance: <PageSection key="appearance" id="appearance" title={titleOf('appearance')}>
       {/* 配色の保存と反映は lib/theme.ts が持つ */}

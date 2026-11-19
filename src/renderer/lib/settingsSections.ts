@@ -10,6 +10,8 @@ export const SETTINGS_SECTIONS = [
   // セットアップのチェックリスト（済んだ項目が緑になる）。いつでも見られるよう一番上に置く
   'setup',
   'general',
+  // Ferret アカウント（ログインすると指摘を PC とチームで共有する）
+  'cloud',
   // よく使う・大事なもの（Agent と判定モデル）を一般のすぐ下に置く
   'agents',
   'verify',
@@ -41,6 +43,8 @@ const SECTION_KEYWORDS: Record<SettingsSectionId, readonly string[]> = {
   setup: ['setup', 'checklist', 'onboarding', 'getting started', 'progress', 'セットアップ', 'チェックリスト', '初期設定', '進み具合'],
   general: ['storage', 'keep', 'retention', 'days', 'delete', 'feedback screen', 'stop', 'crash', 'report', 'privacy', 'sentry',
     '保管', '保存期間', '削除', '日', '停止', 'フィードバック画面', 'クラッシュ', 'プライバシー'],
+  cloud: ['ferret account', 'account', 'login', 'log in', 'sign in', 'email', 'code', 'team', 'sync', 'share', 'feedback', 'pc', 'device',
+    'アカウント', 'ログイン', 'メール', 'コード', 'チーム', '同期', '共有', '指摘'],
   appearance: ['theme', 'color', 'dark', 'light', 'system', 'テーマ', '配色', 'ダーク', 'ライト', '外観'],
   language: ['language', 'locale', 'english', 'japanese', 'interface', '言語', '英語', '日本語', '表示言語'],
   layout: ['layout', 'panel', 'dock', 'footer', 'terminal', 'sidebar', 'files', 'position', '配置', 'パネル', 'フッター', 'ターミナル', 'サイドバー', 'レイアウト'],

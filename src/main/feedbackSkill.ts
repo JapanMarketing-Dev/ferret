@@ -15,6 +15,7 @@ import {
   renderFeedbackSkill,
   reviewFolderTime,
   type ApprovalEntry,
+  type FeedbackCloudExtra,
   type FeedbackEntry
 } from '@shared/feedbackSkill'
 import { PROJECTS_LIST_FILE, PROJECTS_SKILL_NAME, referenceProjects } from '@shared/projectsSkill'
@@ -82,11 +83,24 @@ export async function projectFeedback(project: Pick<Project, 'name' | 'folderPat
   return (await projectSignals(project)).entries
 }
 
-/** feedback.md の中身（登録したプロジェクト全部から） */
-export async function buildFeedbackList(projects: readonly Project[]): Promise<string> {
+/**
+ * Ferret アカウントにログインしていれば、この PC の指摘を送り、ほかの PC とチームの指摘を返す（src/main/feedbackCloud/service.ts）。
+ * ログインしていない・失敗して控えも無いときは null（feedback.md はこの PC の分だけになる）。投げない
+ */
+export type FeedbackCloudHook = (entries: readonly FeedbackEntry[]) => Promise<FeedbackCloudExtra | null>
+
+/** 登録したプロジェクト全部の指摘と承認の言葉 */
+export async function collectFeedback(projects: readonly Project[]): Promise<{ entries: FeedbackEntry[]; approvals: ApprovalEntry[] }> {
   const { local } = referenceProjects(projects)
   const all = await Promise.all(local.map((p) => projectSignals(p)))
-  return renderFeedbackList(all.flatMap((a) => a.entries), undefined, all.flatMap((a) => a.approvals))
+  return { entries: all.flatMap((a) => a.entries), approvals: all.flatMap((a) => a.approvals) }
+}
+
+/** feedback.md の中身（登録したプロジェクト全部から。cloud があればほかの PC とチームの指摘も） */
+export async function buildFeedbackList(projects: readonly Project[], cloud?: FeedbackCloudHook): Promise<string> {
+  const { entries, approvals } = await collectFeedback(projects)
+  const extra = cloud ? await cloud(entries).catch(() => null) : null
+  return renderFeedbackList(entries, undefined, approvals, extra ?? undefined)
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -98,9 +112,10 @@ async function isLink(path: string): Promise<boolean> {
 }
 
 /** skill と feedback.md を入れて、今の版・今の指摘に合わせる。書いたファイルの数を返す */
-export async function syncFeedbackSkill(version: string, projects: readonly Project[], home: string = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<number> {
+export async function syncFeedbackSkill(version: string, projects: readonly Project[], home: string = homedir(), env: NodeJS.ProcessEnv = process.env, cloud?: FeedbackCloudHook): Promise<number> {
   const { writeSkill } = await import('./agentSkill')
-  let list: string | null = null
+  // ログインしていれば、skill を入れた Agent が無くても送る（ほかの PC・チームが読めるように）
+  let list: string | null = cloud ? await buildFeedbackList(projects, cloud) : null
   let written = 0
   for (const agent of AGENT_SKILL_AGENTS) {
     const configDir = agentConfigDir(agent, env, home, join)

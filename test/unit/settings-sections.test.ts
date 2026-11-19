@@ -32,9 +32,9 @@ describe('設定の検索', () => {
 })
 
 describe('左の一覧の並び', () => {
-  it('一番上にセットアップのチェックリスト、その下に一般 → Agent → 判定モデル', () => {
-    expect(SETTINGS_SECTIONS.slice(0, 4)).toEqual(['setup', 'general', 'agents', 'verify'])
-    expect(SETTINGS_SECTIONS).toEqual(['setup', 'general', 'agents', 'verify', 'orchestra', 'remote', 'recording', 'transcription', 'organize', 'accounts',
+  it('一番上にセットアップのチェックリスト、その下に一般 → Ferret アカウント → Agent → 判定モデル', () => {
+    expect(SETTINGS_SECTIONS.slice(0, 5)).toEqual(['setup', 'general', 'cloud', 'agents', 'verify'])
+    expect(SETTINGS_SECTIONS).toEqual(['setup', 'general', 'cloud', 'agents', 'verify', 'orchestra', 'remote', 'recording', 'transcription', 'organize', 'accounts',
       'appearance', 'language', 'layout', 'extensions', 'browserProfiles', 'browserImport', 'cli', 'about'])
   })
 
@@ -44,6 +44,13 @@ describe('左の一覧の並び', () => {
 
   it('スマホから操作の節は スマホ・tailscale・QR で引ける', () => {
     for (const word of ['スマホ', 'tailscale', 'QR', 'phone']) expect(filterSettingsSections(word, (id) => id)).toContain('remote')
+  })
+
+  it('Ferret アカウントの節は ログイン・メール・チーム・同期・共有で引ける（英語でも）', () => {
+    for (const word of ['login', 'email', 'account', 'team', 'sync', 'ログイン', 'メール', 'アカウント', 'チーム', '同期', '共有']) {
+      expect(filterSettingsSections(word, (id) => id)).toContain('cloud')
+    }
+    expect(filterSettingsSections('チーム 同期', (id) => id)).toEqual(['cloud'])
   })
 
   it('チェックリストは「setup」「チェックリスト」で引ける', () => {

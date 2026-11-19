@@ -15,7 +15,7 @@ import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
 import { existsSync, realpathSync, watch } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
-import { availableParallelism, homedir, totalmem } from 'node:os'
+import { availableParallelism, homedir, hostname, totalmem } from 'node:os'
 import type { SessionPaths } from './sessions/paths'
 import type { IncrementalTranscriber } from './pipeline/stt/engine'
 import { loadDevDotEnv, type SttKeyStore } from './pipeline/stt/keys'
@@ -62,6 +62,9 @@ import { browserPartition, sanitizeBrowserProfile } from '@shared/browserProfile
 import { BrowserExtensions } from './browserExtensions'
 import { browserImportHandlers } from './browserImport/ipc'
 import { feedbackShareHandlers } from './feedbackShare/ipc'
+import { feedbackCloudHandlers } from './feedbackCloud/ipc'
+import type { CloudService } from './feedbackCloud/service'
+import type { FeedbackEntry } from '@shared/feedbackSkill'
 import { MAX_BROWSER_EXTENSIONS, relativeRect, sanitizeBrowserExtensions, type BrowserExtensionEntry, type BrowserExtensionInfo } from '@shared/browserExtensions'
 import { APP_ALLOWED_PERMISSIONS, installPermissionPolicy, isAllowedExternalUrl, isAppPageUrl, isBrowserPageExternalUrl, isSnapshotableBrowserUrl, type PermissionSessionLike } from './webPolicy'
 import { pathToFileURL } from 'node:url'
@@ -1177,10 +1180,45 @@ function scheduleFeedbackSkillSync(delayMs = 15_000): void {
   feedbackSkillTimer = setTimeout(() => {
     feedbackSkillTimer = null
     void import('./feedbackSkill')
-      .then(({ syncFeedbackSkill }) => syncFeedbackSkill(app.getVersion(), currentSettings().projects))
+      .then(({ syncFeedbackSkill }) => syncFeedbackSkill(app.getVersion(), currentSettings().projects, homedir(), process.env, feedbackCloudHook))
       .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync feedback skill' }))
   }, delayMs)
   feedbackSkillTimer.unref?.()
+}
+
+/** 開発版だけ、手元で動かした Ferret アカウントの Worker（127.0.0.1 / localhost）に向けて確かめられる。配布版は常に account.ferretade.dev */
+const FEEDBACK_CLOUD_BASE = !IS_PACKAGED && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(process.env.FERRET_CLOUD_BASE ?? '') ? process.env.FERRET_CLOUD_BASE : undefined
+let feedbackCloudService: Promise<CloudService> | null = null
+/** Ferret アカウント（メールのコードでログインし、指摘を PC とチームで共有する。src/main/feedbackCloud/）。初めて使うときに作る */
+function feedbackCloud(): Promise<CloudService> {
+  feedbackCloudService ??= (async () => {
+    const [{ CloudService: Service }, { CloudClient }, { CloudStore }, { chooseKeyCipher }] = await Promise.all([
+      import('./feedbackCloud/service'), import('./feedbackCloud/client'), import('./feedbackCloud/store'), import('./pipeline/stt/keys')
+    ])
+    return new Service({
+      client: new CloudClient({
+        fetch: (url, init) => import('electron').then(({ net }) => net.fetch(url, init)),
+        userAgent: `${PRODUCT_NAME}/${app.getVersion()}`,
+        ...(FEEDBACK_CLOUD_BASE ? { base: FEEDBACK_CLOUD_BASE } : {})
+      }),
+      store: new CloudStore(join(app.getPath('userData'), 'feedback-cloud'), chooseKeyCipher({ isPackaged: IS_PACKAGED, safeStorage })),
+      // ほかの PC の feedback.md・Web に出る名前（.local などは落とす）
+      deviceName: () => hostname().replace(/\.(local|lan|home)$/i, '').trim() || 'PC'
+    })
+  })()
+  return feedbackCloudService
+}
+/** skill「ferret-feedback」の書き直しで、ログインしていれば指摘を送り、ほかの PC とチームの分を返す（つながらなければ控え） */
+function feedbackCloudHook(entries: readonly FeedbackEntry[]) {
+  return feedbackCloud().then((s) => s.extraFor(entries, (err) => reportHandled(err, { area: 'agent-launch', op: 'sync feedback cloud' })))
+}
+/** 起動している間、30 分ごとにチームの指摘を読み直す（ログインしているときだけ。配布版だけ） */
+function startFeedbackCloudRefresh(): void {
+  if (!IS_PACKAGED) return
+  const timer = setInterval(() => {
+    void feedbackCloud().then((s) => s.status()).then((st) => { if (st.loggedIn) scheduleFeedbackSkillSync(0) }).catch(() => undefined)
+  }, 30 * 60_000)
+  timer.unref?.()
 }
 
 function scheduleProjectsSkillSync(delayMs = 1000): void {
@@ -1195,7 +1233,7 @@ function scheduleProjectsSkillSync(delayMs = 1000): void {
       .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync projects skill' }))
     // 登録したプロジェクトの人の指摘を集める skill「ferret-feedback」（作る前に読ませ、同じ指摘を人に繰り返させない）
     void import('./feedbackSkill')
-      .then(({ syncFeedbackSkill }) => syncFeedbackSkill(app.getVersion(), currentSettings().projects))
+      .then(({ syncFeedbackSkill }) => syncFeedbackSkill(app.getVersion(), currentSettings().projects, homedir(), process.env, feedbackCloudHook))
       .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync feedback skill' }))
   }, delayMs)
   projectsSkillTimer.unref?.()
@@ -2990,6 +3028,18 @@ function registerIpc(): void {
       isPackaged: IS_PACKAGED,
       notifyChanged: () => send('passwords:changed')
     }),
+    // Ferret アカウント（メールのコードでログイン。指摘を PC とチームで共有。src/main/feedbackCloud/ipc.ts）
+    ...feedbackCloudHandlers({
+      service: feedbackCloud,
+      openExternal: (url) => shell.openExternal(url),
+      ...(FEEDBACK_CLOUD_BASE ? { base: FEEDBACK_CLOUD_BASE } : {}),
+      syncNow: async () => {
+        const [service, { collectFeedback }] = await Promise.all([feedbackCloud(), import('./feedbackSkill')])
+        await service.sync((await collectFeedback(currentSettings().projects)).entries)
+        // 読んだ分で feedback.md を書き直す（直後なので読み直さず控えを使う。配布版だけ）
+        scheduleFeedbackSkillSync(0)
+      }
+    }),
     // ログイン無しで誰でも指摘を送れる共有リンク（作る・届いた録画を取り込む。src/main/feedbackShare/ipc.ts）
     ...feedbackShareHandlers({
       projectId: () => workspace.projectId ?? null,
@@ -4277,6 +4327,7 @@ async function main(): Promise<void> {
   syncBrowserSkillNow()
   syncVisualReviewSkillNow()
   scheduleProjectsSkillSync(3000)
+  startFeedbackCloudRefresh()
   scheduleGlobalRulesSync(3000)
   startScreenCache()
 

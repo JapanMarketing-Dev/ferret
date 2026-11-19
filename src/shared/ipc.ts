@@ -2,6 +2,7 @@ import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserE
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
 import type { ShareRecordingStatus, ShareSettingsInput, ShareSettingsView, ShareSnapshot, ShareSummaryInfo, ShareUrl } from './feedbackShare'
+import type { CloudAppStatus } from './feedbackCloud'
 import type { MeetingImportProgress, MeetingImportRequest, MeetingMediaPick, MeetingScoreResult, MeetingTranscriptPick } from './meetingImport'
 import type { AgentNotifyOpen, AgentNotifyRequest } from './agentNotify'
 import type { MemoryAlertNotice } from './memoryAlert'
@@ -347,6 +348,17 @@ export interface IpcRequests {
   'share:import': (shareId: string, recordingId: string) => ReviewData
   /** 共有を消す（相手の画面も見られなくなる） */
   'share:delete': (shareId: string) => void
+  /** Ferret アカウント（src/main/feedbackCloud/）。ログインの状態（トークンは返さない） */
+  'cloud:status': () => CloudAppStatus
+  /** メールにログインのコードを送ってもらう */
+  'cloud:start': (email: string) => void
+  /** cloud:start で送ったメールの6桁のコードでログインする */
+  'cloud:verify': (code: string) => CloudAppStatus
+  'cloud:logout': () => CloudAppStatus
+  /** チームの管理の Web 画面を既定のブラウザで開く */
+  'cloud:openWeb': () => void
+  /** この PC の指摘を送り、ほかの PC とチームの指摘を読んで feedback.md を書き直す */
+  'cloud:syncNow': () => CloudAppStatus
 
   'terminal:create': (options: TerminalCreateOptions) => TerminalTabInfo
   'terminal:write': (id: string, data: string) => void
@@ -818,6 +830,7 @@ export const IPC_REQUEST_CHANNELS = [
   'browserExtensions:list', 'browserExtensions:addFolder', 'browserExtensions:scanInstalled', 'browserExtensions:import', 'browserExtensions:setEnabled', 'browserExtensions:remove', 'browserExtensions:menu', 'browserExtensions:open', 'browserExtensions:installFromStore', 'browserExtensions:addCrx',
   'browserImport:status', 'browserImport:importPasswords', 'browserImport:findExports', 'browserImport:trashExport', 'browserImport:clearPasswords', 'browserImport:historySources', 'browserImport:importHistory', 'browserImport:clearHistory', 'browserImport:suggest', 'passwords:forPage', 'passwords:fill', 'passwords:menu',
   'share:list', 'share:forPage', 'share:create', 'share:settings', 'share:update', 'share:copyPassword', 'share:open', 'share:setStatus', 'share:import', 'share:delete',
+  'cloud:status', 'cloud:start', 'cloud:verify', 'cloud:logout', 'cloud:openWeb', 'cloud:syncNow',
   'terminal:create',
   'terminal:write',
   'terminal:resize',
