@@ -3,8 +3,8 @@
  *
  * 画面を作るときは、まずここにある部品で組む。足りなければここへ足す
  * （画面ごとに独自のボタンや行を作らない。見た目がばらけ、トークンの変更が効かなくなる）。
- * 全部品の見た目と状態は、部品見本の画面で確認できる（表示メニュー → 部品見本、
- * または URL の #gallery）。
+ * 全部品の見た目と状態は Storybook（`pnpm storybook`、Ferret のデザインシステムのタブ）で状態ごとに見られる。
+ * stories は src/renderer/design-system/。部品を足したら story も足す（test/unit/design-system-stories.test.ts が見る）。
  *
  * 守ること:
  *   - 色・寸法・時間は tokens.css の var(--…) だけを使う

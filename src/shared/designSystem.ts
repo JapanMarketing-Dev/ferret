@@ -122,3 +122,29 @@ export function designSystemRequest(lang: 'ja' | 'en'): string {
     ? 'このプロジェクトのデザインシステムを Storybook で作ってください（skill ferret-design-system）。色・文字・余白のトークンと、画面で使う部品をすべて、状態ごと（通常・ホバー・無効・読み込み中・エラー・空）に stories にしてください。過去の指摘（skill ferret-feedback）で繰り返し出ているものは、部品とトークンに先に反映してください。できたら起動して、Ferret のデザインシステムのタブで見られるようにしてください。'
     : 'Build this project\'s design system in Storybook (skill ferret-design-system). Add stories for the colour, type and spacing tokens and for every component the screens use, in each state (default, hover, disabled, loading, error, empty). Build the recurring points from past feedback (skill ferret-feedback) into the components and tokens up front. When done, start it so it shows in Ferret\'s Design system tab.'
 }
+
+/**
+ * Storybook は「埋め込んでよい親は localhost のページだけ」（CSP の frame-ancestors）を返す。配布版の Ferret の画面は
+ * file:// なので、そのままだとタブの iframe が止められる。アプリの画面の中の手元の iframe の返事に限って、
+ * frame-ancestors の指定と X-Frame-Options だけを外す（ほかの CSP の指定は残す）。変えるものが無ければ null
+ */
+export function allowFrameInApp(headers: Record<string, string[] | string> | undefined): Record<string, string[]> | null {
+  if (!headers) return null
+  let changed = false
+  const out: Record<string, string[]> = {}
+  for (const [name, raw] of Object.entries(headers)) {
+    const values = Array.isArray(raw) ? raw : [raw]
+    const lower = name.toLowerCase()
+    if (lower === 'x-frame-options') { changed = true; continue }
+    if (lower === 'content-security-policy') {
+      const kept = values
+        .map((value) => value.split(';').map((d) => d.trim()).filter((d) => d && !/^frame-ancestors(\s|$)/i.test(d)).join('; '))
+        .filter((value) => value.length > 0)
+      if (kept.length !== values.length || kept.some((v, i) => v !== values[i])) changed = true
+      if (kept.length > 0) out[name] = kept
+      continue
+    }
+    out[name] = values
+  }
+  return changed ? out : null
+}

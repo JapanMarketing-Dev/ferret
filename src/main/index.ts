@@ -116,6 +116,7 @@ import { isValidPort } from '@shared/mobileRemote'
 import { delay } from '@shared/delay'
 import { TerminalRestoreStore } from './terminalRestore'
 import { systemAudioFeatures } from '@shared/systemAudio'
+import { allowFrameInApp, isLocalStorybookUrl } from '@shared/designSystem'
 import { acceptsDuringShutdown, replyAfterShutdown } from './ipcShutdown'
 
 /*
@@ -3949,6 +3950,12 @@ async function main(): Promise<void> {
   installPermissionPolicy(session.defaultSession as unknown as PermissionSessionLike, (query) =>
     APP_ALLOWED_PERMISSIONS.has(query.permission) && query.isMainFrame !== false && isAppPageUrl(query.origin, appPageRoots()) &&
     (query.permission !== 'media' || appMediaAllowed(query, isRecorderContents(query.webContents))))
+  // デザインシステムのタブ：アプリの画面（file://）の中の手元の Storybook の iframe だけ、埋め込みを止める指定（frame-ancestors）を外す
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (details.resourceType !== 'subFrame' || !mainWindow || details.webContents !== mainWindow.webContents || !isLocalStorybookUrl(details.url)) return callback({})
+    const responseHeaders = allowFrameInApp(details.responseHeaders)
+    callback(responseHeaders ? { responseHeaders } : {})
+  })
   // Windows のタスクバーで、インストーラが作るショートカット（appId）と同じアイコンにまとめる
   if (process.platform === 'win32') app.setAppUserModelId('dev.ferretade.ferret')
   // 開発版は名前を変えず、「について」の版の行にだけ (dev) と添える

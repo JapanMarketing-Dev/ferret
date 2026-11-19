@@ -1,0 +1,101 @@
+/* Storybook の中だけの見た目。アプリの app.css は画面全体を動かさない（overflow: clip）ので、見本の中では戻す。色・寸法はトークンだけ */
+
+html,
+body {
+  overflow: auto;
+  height: auto;
+  min-height: 100%;
+}
+
+#storybook-root {
+  height: auto;
+}
+
+/* 見本を並べる入れ物。間はトークンの余白だけ */
+.dss-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.dss-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.dss-label {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.dss-narrow {
+  width: 320px;
+  max-width: 100%;
+}
+
+.dss-frame {
+  height: 420px;
+  display: grid;
+  border: var(--size-border) solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Foundations: 色の見本 */
+.dss-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.dss-swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.dss-swatch__chip {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: var(--size-border) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.dss-swatch__name {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Foundations: 余白・角丸・影の見本 */
+.dss-scale {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: var(--space-3) var(--space-6);
+}
+
+.dss-scale__name {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.dss-bar {
+  height: var(--space-4);
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
+.dss-box {
+  width: 64px;
+  height: 40px;
+  background: var(--color-bg-elevated);
+  border: var(--size-border) solid var(--color-border-strong);
+}

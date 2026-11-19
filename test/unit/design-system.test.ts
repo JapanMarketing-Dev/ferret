@@ -8,6 +8,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  allowFrameInApp,
   DEFAULT_STORYBOOK_PORT,
   designSystemRequest,
   isLocalStorybookUrl,
@@ -189,5 +190,31 @@ describe('skill「ferret-design-system」', () => {
     } finally {
       await rm(home, { recursive: true, force: true })
     }
+  })
+})
+
+describe('allowFrameInApp（配布版の file:// の画面に Storybook を埋め込む）', () => {
+  it('Storybook の frame-ancestors だけを外し、ほかの指定は残す', () => {
+    const out = allowFrameInApp({ 'Content-Security-Policy': ["frame-ancestors 'self' http://localhost:*; script-src 'self'"], 'Content-Type': ['text/html'] })
+    expect(out).toEqual({ 'Content-Security-Policy': ["script-src 'self'"], 'Content-Type': ['text/html'] })
+  })
+
+  it('frame-ancestors だけの CSP はヘッダーごと外す', () => {
+    const out = allowFrameInApp({ 'content-security-policy': ["frame-ancestors 'self' http://localhost:* http://127.0.0.1:*"], 'Cache-Control': ['no-store'] })
+    expect(out).toEqual({ 'Cache-Control': ['no-store'] })
+  })
+
+  it('X-Frame-Options は外す（大文字小文字を問わない）', () => {
+    expect(allowFrameInApp({ 'x-frame-options': ['DENY'], A: 'b' })).toEqual({ A: ['b'] })
+  })
+
+  it('変えるものが無ければ null（ヘッダーはそのまま）', () => {
+    expect(allowFrameInApp({ 'Content-Type': ['text/html'] })).toBeNull()
+    expect(allowFrameInApp({ 'Content-Security-Policy': ["default-src 'self'"] })).toBeNull()
+    expect(allowFrameInApp(undefined)).toBeNull()
+  })
+
+  it('frame-ancestors で始まらない指定（名前が似ているだけ）は残す', () => {
+    expect(allowFrameInApp({ 'Content-Security-Policy': ['frame-src http://localhost:*'] })).toBeNull()
   })
 })

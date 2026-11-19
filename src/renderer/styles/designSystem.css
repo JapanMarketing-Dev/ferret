@@ -9,7 +9,8 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-  background: var(--color-bg-canvas);
+  /* 空の状態はアプリの面の色（白にするとダークで見出しの白い文字が消える）。白は埋め込んだ Storybook の中だけ */
+  background: var(--color-bg-app);
 }
 
 .ds--loading {
@@ -21,7 +22,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 32px;
+  height: var(--size-tabbar);
   padding: 0 var(--space-4);
   border-bottom: var(--size-border) solid var(--color-border);
   flex: none;
@@ -43,7 +44,7 @@
   min-height: 0;
   width: 100%;
   border: 0;
-  background: #fff;
+  background: var(--color-bg-canvas);
 }
 
 .ds__cmd {
