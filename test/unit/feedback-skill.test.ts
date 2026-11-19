@@ -10,8 +10,13 @@ import {
   FEEDBACK_LIST_MARKER,
   FEEDBACK_SKILL_NAME,
   MAX_FEEDBACK_TEXT,
+  FEEDBACK_THEMES,
+  extractPlanApprovals,
   extractPlanFeedback,
   extractRecordingFeedback,
+  feedbackThemes,
+  isNoiseFeedback,
+  pickFeedback,
   isFeedbackList,
   isFeedbackSkill,
   renderFeedbackList,
@@ -120,7 +125,7 @@ describe('feedback.md', () => {
   })
 
   it('上限を超えた分は数だけ書く。長い文・改行は1行に縮める', () => {
-    const many = Array.from({ length: 5 }, (_, i) => e({ text: `t${i}`, at: `2026-01-0${i + 1}` }))
+    const many = Array.from({ length: 5 }, (_, i) => e({ text: `item${i}`, at: `2026-01-0${i + 1}` }))
     const md = renderFeedbackList(many, 3)
     expect(md.split('\n').filter((l) => l.startsWith('- '))).toHaveLength(3)
     expect(md).toContain('(2 older items omitted')
@@ -244,5 +249,111 @@ describe('価値ユースケース・ビジュアルレビューの skill の決
   it('本来と違うところは1つずつ詳しいビジュアルレビューにする', () => {
     expect(value).toContain('Register every gap as a visual review')
     expect(visual).toContain('Plenty of plans is good')
+  })
+})
+
+describe('相づち・断片を落とす', () => {
+  it('言いよどみだけ・短すぎる断片は指摘として数えない', () => {
+    for (const text of ['えっとですね', 'で、と', 'なんでしょうね', 'De...', 'はい', 'まあ', '  ', 'ok', 'えー、あの']) expect(isNoiseFeedback(text), text).toBe(true)
+  })
+  it('短くても意味のある指摘は残す', () => {
+    for (const text of ['これ削除', 'ここ削除', '古い', 'Too long', 'まあ取り込み履歴', 'remove this']) expect(isNoiseFeedback(text), text).toBe(false)
+  })
+  it('一覧から落とす', () => {
+    const md = renderFeedbackList([e({ text: 'えっとですね' }), e({ text: 'ボタンを右へ' })])
+    const lines = md.split('\n').filter((l) => l.startsWith('- '))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('ボタンを右へ')
+  })
+})
+
+describe('繰り返し出る指摘の型（この人の既定）', () => {
+  const entries = [
+    e({ project: 'A', text: 'これ削除しておいてください', at: '2026-11-10' }),
+    e({ project: 'B', text: '項目名の読み替えはいらないです', at: '2026-11-12' }),
+    e({ project: 'A', text: '文字多いんですよね', at: '2026-11-11' }),
+    e({ project: 'C', text: 'Too much text on this page', at: '2026-11-09' }),
+    e({ project: 'A', text: '押しても何も反応しない', at: '2026-11-08' })
+  ]
+  it('2件以上の型だけを、多い順に、件数・プロジェクト数・新しい例と出す', () => {
+    const themes = feedbackThemes(entries)
+    expect(themes.map((t) => t.id)).toEqual(['remove', 'text'])
+    expect(themes[0]).toMatchObject({ count: 2, projects: 2 })
+    expect(themes[0]!.examples[0]!.text).toContain('いらない')
+  })
+  it('1件だけの型は出さない・指摘が無ければ空', () => {
+    expect(feedbackThemes(entries).some((t) => t.id === 'broken')).toBe(false)
+    expect(feedbackThemes([])).toEqual([])
+  })
+  it('feedback.md の先頭に、守る形の一文と例を書く', () => {
+    const md = renderFeedbackList(entries)
+    const head = md.indexOf('## Recurring themes')
+    expect(head).toBeGreaterThan(0)
+    expect(head).toBeLessThan(md.indexOf('## All feedback'))
+    expect(md).toContain('**Remove what is not needed** (2 times, 2 projects)')
+    expect(md).toContain('e.g. B: "項目名の読み替えはいらないです"')
+  })
+  it('どの型にも、日本語と英語の言い方の両方が当たる', () => {
+    const samples: Record<string, [string, string]> = {
+      remove: ['これ消しておいて', 'please remove this'],
+      text: ['説明が長すぎる', 'too long'],
+      noise: ['デモっていうのを全面的に削除', 'no demo banner'],
+      broken: ['ボタンが動かない', 'the link is broken'],
+      layout: ['ここズレてます', 'cards overlap'],
+      clarity: ['何のことか分からない', 'this label is confusing'],
+      'empty-state': ['何もない場合は作成を出す', 'empty state'],
+      speed: ['もうちょっとスピード上げて', 'it is slow'],
+      editable: ['送付先を編集できるように', 'make it editable'],
+      visual: ['グラフの色いらない', 'chart colors']
+    }
+    for (const theme of FEEDBACK_THEMES) {
+      const [ja, en] = samples[theme.id]!
+      expect(theme.pattern.test(ja), `${theme.id} ja`).toBe(true)
+      expect(theme.pattern.test(en), `${theme.id} en`).toBe(true)
+    }
+  })
+})
+
+describe('プロジェクトに偏らないように選ぶ', () => {
+  it('1つのプロジェクトの大量の指摘で、ほかのプロジェクトを押し出さない', () => {
+    const flood = Array.from({ length: 50 }, (_, i) => e({ project: 'Big', text: `big ${i}`, at: `2026-11-18T00:${String(i).padStart(2, '0')}` }))
+    const old = [e({ project: 'Small', text: 'small one', at: '2026-01-01' }), e({ project: 'Tiny', text: 'tiny one', at: '2025-01-01' })]
+    const picked = pickFeedback([...flood, ...old], 10)
+    expect(picked).toHaveLength(10)
+    expect(picked.map((p) => p.project)).toEqual(expect.arrayContaining(['Small', 'Tiny']))
+    expect(picked[0]!.text).toBe('big 49')
+    expect(picked.at(-1)!.project).toBe('Tiny')
+  })
+  it('上限以下なら全部・新しい順', () => {
+    const list = [e({ text: 'a1', at: '2026-01-01' }), e({ text: 'b2', at: '2026-02-01' })]
+    expect(pickFeedback(list, 10).map((x) => x.text)).toEqual(['b2', 'a1'])
+  })
+})
+
+describe('承認に添えた言葉（良かった形）', () => {
+  it('approve の文だけを取り、文の無い承認・相づち・feedback は取らない', () => {
+    const json = plan([
+      { at: '2026-11-13T10:00:00Z', action: 'approve', text: 'この並びが見やすい' },
+      { action: 'approve' },
+      { action: 'approve', text: 'はい' },
+      { action: 'feedback', text: '直して' }
+    ])
+    expect(extractPlanApprovals(json, 'A', 'visual-review', '/f/a.json')).toEqual([
+      { project: 'A', source: 'visual-review', title: 'Settings', at: '2026-11-13T10:00:00Z', text: 'この並びが見やすい', file: '/f/a.json' }
+    ])
+    expect(extractPlanApprovals('{', 'A', 'visual-review', 'f')).toEqual([])
+  })
+  it('feedback.md に「続けること」として載る', () => {
+    const md = renderFeedbackList([], undefined, [{ project: 'A', source: 'value-usecases', text: '3ステップが分かりやすい', file: 'f', at: '2026-11-01' }])
+    expect(md).toContain('## What people approved with a comment')
+    expect(md).toContain('3ステップが分かりやすい')
+    expect(md).not.toContain('No feedback has been recorded yet in the registered projects.\n\n## What')
+  })
+})
+
+describe('SKILL.md の強化', () => {
+  const text = renderFeedbackSkill('9.9.9', '/l/feedback.md', '/l/projects.md')
+  it('一発目で通す: 既定の型・見せる前の自己点検・appliedFeedback・デザインシステム・全体へ直す', () => {
+    for (const word of ['first version', 'Recurring themes', 'Self-check before showing', 'appliedFeedback', 'ferret-design-system', 'fix it everywhere']) expect(text).toContain(word)
   })
 })

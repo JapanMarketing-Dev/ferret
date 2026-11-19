@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, ScanEye, Settings, Target, X } from 'lucide-react'
+import { FileCode, FileText, Globe, LayoutDashboard, ListChecks, Palette, ScanEye, Settings, Target, X } from 'lucide-react'
 import { moveItem } from '@shared/layout'
 import { CountBadge } from '../ui'
 import { useT } from '../lib/i18n'
@@ -16,7 +16,7 @@ import '../styles/editor.css'
 /**
  * settings … 設定のページ（⌘, で開閉。開いている間だけタブを出す）。
  */
-export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'visual-review' | 'value-usecases' | 'settings' | FileTabId
+export type CenterTab = 'dashboard' | 'browser' | 'findings' | 'visual-review' | 'value-usecases' | 'design-system' | 'settings' | FileTabId
 
 /** タブのドラッグで運ぶデータの種類（ほかの DnD と混ざらないように） */
 const DRAG_TYPE = 'application/x-ade-center-tab'
@@ -187,6 +187,12 @@ export function CenterTabs({
               <Target size={13} strokeWidth={1.75} />
               <span className="cview__label">{t('centerTabs.valueUseCases')}</span>
               <CountBadge count={valueUseCaseCount} tone="warning" />
+            </button>
+          )
+          if (tab === 'design-system') return (
+            <button key={tab} type="button" role="tab" className="cview" aria-selected={active === 'design-system'} onClick={() => onChange('design-system')} data-testid="ctab-design-system" title={t('centerTabs.designSystem')}>
+              <Palette size={13} strokeWidth={1.75} />
+              <span className="cview__label">{t('centerTabs.designSystem')}</span>
             </button>
           )
           return (

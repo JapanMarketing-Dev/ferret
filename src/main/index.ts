@@ -764,7 +764,11 @@ const fileWatcher = new ProjectWatcher((event) => {
   send('review:progressChanged', ids)
   // Agent が直した（human_review にした）ことを、オーケストラのフィードバックの記録に足す
   recordProgressFromDisk(ids)
-}, (kind) => send(kind === 'value-usecases' ? 'valueUseCase:changed' : 'visualReview:changed'))
+  scheduleFeedbackSkillSync()
+}, (kind) => {
+  send(kind === 'value-usecases' ? 'valueUseCase:changed' : 'visualReview:changed')
+  scheduleFeedbackSkillSync()
+})
 
 /** Office の文書の形式を変える LibreOffice（1つを使い回す。作業フォルダは利用者のデータの下） */
 let officeConverterInstance: import('./officeConvert').OfficeConverter | null = null
@@ -1160,6 +1164,24 @@ let projectsSkillTimer: NodeJS.Timeout | null = null
  * skill「ferret-projects」と、その一覧（projects.md）を今の登録に合わせる。続けて変わったときは1回にまとめる。
  * 配布版だけ（開発版は、ふだん使う Agent の skill に触らない）
  */
+/** 指摘が増えたときの feedback.md の書き直し（続けて変わったら1回にまとめる） */
+let feedbackSkillTimer: ReturnType<typeof setTimeout> | null = null
+/**
+ * ビジュアルレビュー・価値ユースケースに返事が付いた・録画のレビューができたとき、skill「ferret-feedback」の一覧を
+ * 書き直す。起動時だけだと、同じ日に人が言った指摘を Agent が読めず、同じことを言わせてしまう。配布版だけ
+ */
+function scheduleFeedbackSkillSync(delayMs = 15_000): void {
+  if (!IS_PACKAGED) return
+  if (feedbackSkillTimer) clearTimeout(feedbackSkillTimer)
+  feedbackSkillTimer = setTimeout(() => {
+    feedbackSkillTimer = null
+    void import('./feedbackSkill')
+      .then(({ syncFeedbackSkill }) => syncFeedbackSkill(app.getVersion(), currentSettings().projects))
+      .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync feedback skill' }))
+  }, delayMs)
+  feedbackSkillTimer.unref?.()
+}
+
 function scheduleProjectsSkillSync(delayMs = 1000): void {
   // グローバルのオーケストラの見張り（隠した・戻した・置き場が変わった）を合わせる
   watchGlobalRules()
@@ -1663,6 +1685,10 @@ function syncVisualReviewSkillNow(): void {
   void import('./valueUseCaseSkill')
     .then(({ syncValueUseCaseSkill }) => syncValueUseCaseSkill(app.getVersion()))
     .catch((err: unknown) => reportHandled(err, { area: 'review', op: 'sync value use case skill' }))
+  // どのプロジェクトでも Storybook のデザインシステムを作り、画面はそれだけで組む skill（ferret-design-system）
+  void import('./designSystemSkill')
+    .then(({ syncDesignSystemSkill }) => syncDesignSystemSkill(app.getVersion()))
+    .catch((err: unknown) => reportHandled(err, { area: 'review', op: 'sync design system skill' }))
 }
 
 /** 内蔵ブラウザの最新の画面の控え（プロジェクトの .ferret/screens/。src/main/screenCache.ts）。E2E では書かない */
@@ -2608,6 +2634,11 @@ function registerIpc(): void {
       const root = workspace.folderPath
       if (!root || typeof id !== 'string' || !isValidPlanId(id)) throw new UserFacingError(t('visualReview.errors.invalid'))
       return (await import('./valueUseCase')).deleteValueUseCase(root, id)
+    },
+    'designSystem:status': async () => {
+      const root = workspace.folderPath
+      if (!root) return null
+      return (await import('./designSystem')).designSystemStatus(root)
     },
     'valueUseCase:list': async () => {
       const root = workspace.folderPath

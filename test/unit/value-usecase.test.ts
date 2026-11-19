@@ -319,3 +319,14 @@ describe('見張るパス', () => {
     expect(isValueUseCasePath('src/value-usecases/a.json')).toBe(false)
   })
 })
+
+describe('過去の指摘から先に反映したもの（appliedFeedback）', () => {
+  it('空の項目を落とし、上限まで読む（数は questions と同じく文字にする）', () => {
+    expect(parse({ appliedFeedback: ['ログインを最初の流れに', '', 3, null, '  '] }).appliedFeedback).toEqual(['ログインを最初の流れに', '3'])
+    expect(parse({ appliedFeedback: Array.from({ length: LIMITS.listItems + 5 }, (_, i) => `p${i}`) }).appliedFeedback).toHaveLength(LIMITS.listItems)
+  })
+  it('無い・形の違うものは空', () => {
+    expect(parse().appliedFeedback).toEqual([])
+    expect(parse({ appliedFeedback: 'x' }).appliedFeedback).toEqual([])
+  })
+})

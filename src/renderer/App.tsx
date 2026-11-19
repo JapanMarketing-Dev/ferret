@@ -109,6 +109,7 @@ const { Component: SettingsPage } = preloadable<PropsOf<typeof import('./compone
 const { Component: OrchestraDashboard } = preloadable<PropsOf<typeof import('./components/OrchestraDashboard').OrchestraDashboard>>(() => import('./components/OrchestraDashboard').then((m) => ({ default: m.OrchestraDashboard })))
 const { Component: OnboardingFlow } = preloadable<PropsOf<typeof import('./onboarding/OnboardingFlow').OnboardingFlow>>(() => import('./onboarding/OnboardingFlow').then((m) => ({ default: m.OnboardingFlow })))
 const { Component: MeetingImportDialog } = preloadable<PropsOf<typeof import('./components/MeetingImportDialog').MeetingImportDialog>>(() => import('./components/MeetingImportDialog').then((m) => ({ default: m.MeetingImportDialog })))
+const { Component: DesignSystem } = preloadable<PropsOf<typeof import('./components/DesignSystem').DesignSystem>>(() => import('./components/DesignSystem').then((m) => ({ default: m.DesignSystem })))
 const { Component: ValueUseCases } = preloadable<PropsOf<typeof import('./components/ValueUseCases').ValueUseCases>>(() => import('./components/ValueUseCases').then((m) => ({ default: m.ValueUseCases })))
 const { Component: VisualReview } = preloadable<PropsOf<typeof import('./components/VisualReview').VisualReview>>(() => import('./components/VisualReview').then((m) => ({ default: m.VisualReview })))
 const { Component: Gallery } = preloadable<PropsOf<typeof import('./gallery/Gallery').Gallery>>(() => import('./gallery/Gallery').then((m) => ({ default: m.Gallery })))
@@ -1319,6 +1320,10 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                   <ValueUseCases listing={valueUseCases.listing} onChanged={valueUseCases.reload} folderPath={workspace.folderPath}
                     recording={{ pending: planRecording.pending?.kind === 'value-usecases' ? planRecording.pending : null, busy: recording || recordBusy || (!!planRecording.pending && planRecording.pending.kind !== 'value-usecases'), live,
                       onStart: (doc, note) => { if (planRecording.begin('value-usecases', doc, note)) recordWith('plan') }, onNote: (id, note) => planRecording.updateNote('value-usecases', id, note), onStop: toggleRecording }} />
+                </Suspense></ErrorBoundary>
+              ) : centerTab === 'design-system' ? (
+                <ErrorBoundary name="design-system"><Suspense fallback={<div className="editor-area" />}>
+                  <DesignSystem folderPath={workspace.folderPath} />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'browser' ? (
                 <ErrorBoundary name="browser">

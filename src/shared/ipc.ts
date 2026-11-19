@@ -86,6 +86,7 @@ import type { DroppedEntry } from './externalDrop'
 import type { PlanListing, RecordingNote, VisualPlanReply, VisualPlanReplyResult } from './visualReview'
 import type { AttachOutcome } from './visualReviewRecording'
 import type { ValueReply, ValueReplyResult, ValueUseCaseListing } from './valueUseCase'
+import type { DesignSystemStatus } from './designSystem'
 
 /**
  * IPC の全チャネルを1か所で宣言する。
@@ -146,6 +147,8 @@ export interface IpcRequests {
   'visualReview:attachRecording': (id: string, reviewId: string, note: RecordingNote, revision?: number) => AttachOutcome
   /** 開いているプロジェクトの価値ユースケース（.ferret/value-usecases/。新しい順。@shared/valueUseCase）。画像は visualReview:image で読む */
   'valueUseCase:list': () => ValueUseCaseListing
+  /** デザインシステムのタブ: 開いているプロジェクトの Storybook があるか・動いているか・起動のコマンド */
+  'designSystem:status': () => DesignSystemStatus | null
   /** 価値ユースケースに返事する（承認・フィードバック）。文書の JSON を書き換え、書いた Agent のターミナルへ送る。囲みの screen は手順の通しの番号 */
   'valueUseCase:respond': (id: string, reply: ValueReply) => ValueReplyResult
   /** 文書を消す（.ferret/value-usecases/<id>.json）。消せたら true */
@@ -750,7 +753,7 @@ export const IPC_REQUEST_CHANNELS = [
   'app:version',
   'app:checkUpdate',
   'app:openUpdate', 'app:openExternal', 'agent:sendText', 'visualReview:list', 'visualReview:image', 'visualReview:respond', 'visualReview:delete', 'visualReview:attachRecording',
-  'valueUseCase:list', 'valueUseCase:respond', 'valueUseCase:delete', 'valueUseCase:attachRecording',
+  'valueUseCase:list', 'designSystem:status', 'valueUseCase:respond', 'valueUseCase:delete', 'valueUseCase:attachRecording',
   'update:status', 'update:download', 'update:install', 'update:setAutoDownload', 'update:versions', 'update:chooseVersion',
   'resources:snapshot',
   'resources:kill',

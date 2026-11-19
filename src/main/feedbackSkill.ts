@@ -6,6 +6,7 @@ import { AGENT_SKILL_AGENTS, agentConfigDir } from '@shared/agentSkill'
 import {
   FEEDBACK_LIST_FILE,
   FEEDBACK_SKILL_NAME,
+  extractPlanApprovals,
   extractPlanFeedback,
   extractRecordingFeedback,
   isFeedbackList,
@@ -13,6 +14,7 @@ import {
   renderFeedbackList,
   renderFeedbackSkill,
   reviewFolderTime,
+  type ApprovalEntry,
   type FeedbackEntry
 } from '@shared/feedbackSkill'
 import { PROJECTS_LIST_FILE, PROJECTS_SKILL_NAME, referenceProjects } from '@shared/projectsSkill'
@@ -51,16 +53,19 @@ async function listDir(dir: string): Promise<string[]> {
   }
 }
 
-/** 1つのプロジェクトの指摘を集める */
-export async function projectFeedback(project: Pick<Project, 'name' | 'folderPath'>): Promise<FeedbackEntry[]> {
+/** 1つのプロジェクトの指摘と、承認に添えた言葉を集める */
+export async function projectSignals(project: Pick<Project, 'name' | 'folderPath'>): Promise<{ entries: FeedbackEntry[]; approvals: ApprovalEntry[] }> {
   const entries: FeedbackEntry[] = []
+  const approvals: ApprovalEntry[] = []
   for (const [dir, source] of [[VISUAL_REVIEW_DIR, 'visual-review'], [VALUE_USECASE_DIR, 'value-usecases']] as const) {
     const base = join(project.folderPath, ...dir.split('/'))
     for (const name of await listDir(base)) {
       if (!name.endsWith('.json')) continue
       const file = join(base, name)
       const text = await readSmallFile(file)
-      if (text !== null) entries.push(...extractPlanFeedback(text, project.name, source, file))
+      if (text === null) continue
+      entries.push(...extractPlanFeedback(text, project.name, source, file))
+      approvals.push(...extractPlanApprovals(text, project.name, source, file))
     }
   }
   const reviews = join(project.folderPath, '.ferret', 'reviews')
@@ -69,14 +74,19 @@ export async function projectFeedback(project: Pick<Project, 'name' | 'folderPat
     const text = await readSmallFile(file)
     if (text !== null) entries.push(...extractRecordingFeedback(text, project.name, file, reviewFolderTime(name)))
   }
-  return entries
+  return { entries, approvals }
+}
+
+/** 1つのプロジェクトの指摘を集める */
+export async function projectFeedback(project: Pick<Project, 'name' | 'folderPath'>): Promise<FeedbackEntry[]> {
+  return (await projectSignals(project)).entries
 }
 
 /** feedback.md の中身（登録したプロジェクト全部から） */
 export async function buildFeedbackList(projects: readonly Project[]): Promise<string> {
   const { local } = referenceProjects(projects)
-  const all = await Promise.all(local.map((p) => projectFeedback(p)))
-  return renderFeedbackList(all.flat())
+  const all = await Promise.all(local.map((p) => projectSignals(p)))
+  return renderFeedbackList(all.flatMap((a) => a.entries), undefined, all.flatMap((a) => a.approvals))
 }
 
 async function exists(path: string): Promise<boolean> {

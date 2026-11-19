@@ -9,7 +9,7 @@ import { applyOrder } from '@shared/layout'
  */
 
 /** いつもある画面のタブ（並びは固定） */
-export const VIEW_TABS = ['dashboard', 'browser', 'findings', 'visual-review', 'value-usecases'] as const
+export const VIEW_TABS = ['dashboard', 'browser', 'findings', 'visual-review', 'value-usecases', 'design-system'] as const
 export type ViewTab = (typeof VIEW_TABS)[number]
 
 export function isViewTab(tab: string): tab is ViewTab {

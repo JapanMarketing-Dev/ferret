@@ -467,6 +467,12 @@ function PlanDetail({ plan, onChanged, manual, onManual, recording, docPath }: {
                 <ul className="vr__plain">{plan.outOfScope.map((item, i) => <li key={i}>{item}</li>)}</ul>
               </section>
             )}
+            {plan.appliedFeedback.length > 0 && (
+              <section className="wbl__card wbl__sticky wbl__sticky--muted" data-board-card data-testid="vr-applied-feedback">
+                <h3>{t('visualReview.appliedFeedback')}</h3>
+                <ul className="vr__plain">{plan.appliedFeedback.map((item, i) => <li key={i}>{item}</li>)}</ul>
+              </section>
+            )}
             {plan.questions.length > 0 && (
               <section className="wbl__card wbl__sticky wbl__sticky--question" data-board-card>
                 <h3>{t('visualReview.questions')}</h3>

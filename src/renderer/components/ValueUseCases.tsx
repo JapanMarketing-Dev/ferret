@@ -377,12 +377,18 @@ function DocDetail({ doc, onChanged, manual, onManual, recording, docPath }: {
                 {doc.values.map((_, v) => lane(v))}
               </div>
             )}
-            {(doc.outOfScope.length > 0 || doc.questions.length > 0 || doc.responses.length > 0) && (
+            {(doc.outOfScope.length > 0 || doc.questions.length > 0 || doc.appliedFeedback.length > 0 || doc.responses.length > 0) && (
               <div className="wbl__side">
                 {doc.questions.length > 0 && (
                   <section className="wbl__card wbl__sticky wbl__sticky--question" data-board-card>
                     <h3>{t('valueUseCase.questions')}</h3>
                     <ul className="vr__plain">{doc.questions.map((item, i) => <li key={i}>{item}</li>)}</ul>
+                  </section>
+                )}
+                {doc.appliedFeedback.length > 0 && (
+                  <section className="wbl__card wbl__sticky wbl__sticky--muted" data-board-card data-testid="vu-applied-feedback">
+                    <h3>{t('valueUseCase.appliedFeedback')}</h3>
+                    <ul className="vr__plain">{doc.appliedFeedback.map((item, i) => <li key={i}>{item}</li>)}</ul>
                   </section>
                 )}
                 {doc.outOfScope.length > 0 && (

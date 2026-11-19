@@ -435,3 +435,11 @@ describe('プロジェクトを開き直したときに戻す中央のタブ', a
     expect(decodeCenterTab('visual-review', '/p')).toBe('visual-review')
   })
 })
+
+describe('過去の指摘から先に反映したもの（appliedFeedback）', () => {
+  it('空の項目を落として読み、無ければ空', () => {
+    expect(parse(validRaw({ appliedFeedback: ['説明文を1行に（繰り返し: 文字が多い）', 5, ''] })).appliedFeedback).toEqual(['説明文を1行に（繰り返し: 文字が多い）', '5'])
+    expect(parse(validRaw()).appliedFeedback).toEqual([])
+    expect(parse(validRaw({ appliedFeedback: { a: 1 } })).appliedFeedback).toEqual([])
+  })
+})

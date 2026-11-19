@@ -96,6 +96,8 @@ export interface VisualPlan {
   behaviour: PlanBehaviour[]
   outOfScope: string[]
   questions: string[]
+  /** 過去の指摘（skill ferret-feedback）から、この計画に先に反映したもの。人が同じことを言わずに済んだかを見られるように出す */
+  appliedFeedback: string[]
   /** 計画を書いた Agent のターミナル（$FERRET_TERMINAL_ID）。承認・フィードバックの送り先 */
   terminalId?: string
   responses: PlanResponse[]
@@ -357,6 +359,7 @@ export function parseVisualPlan(raw: unknown, fileId: string): { ok: true; plan:
       behaviour,
       outOfScope: list(raw.outOfScope, LIMITS.listItems, (value) => optionalText(value, LIMITS.text) ?? null),
       questions: list(raw.questions, LIMITS.listItems, (value) => optionalText(value, LIMITS.text) ?? null),
+      appliedFeedback: list(raw.appliedFeedback, LIMITS.listItems, (value) => optionalText(value, LIMITS.text) ?? null),
       ...(terminalId ? { terminalId } : {}),
       responses: list(raw.responses, LIMITS.responses, parseResponse)
     }

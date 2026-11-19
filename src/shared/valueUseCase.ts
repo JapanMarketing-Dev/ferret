@@ -117,6 +117,8 @@ export interface ValueUseCaseDoc {
   values: ValueItem[]
   outOfScope: string[]
   questions: string[]
+  /** 過去の指摘（skill ferret-feedback）から、この文書に先に反映したもの */
+  appliedFeedback: string[]
   responses: ValueResponse[]
 }
 
@@ -301,6 +303,7 @@ export function parseValueUseCase(raw: unknown, fileId: string): { ok: true; doc
       values,
       outOfScope: list(raw.outOfScope, VR_LIMITS.listItems, (value) => optionalText(value, VR_LIMITS.text) ?? null),
       questions: list(raw.questions, VR_LIMITS.listItems, (value) => optionalText(value, VR_LIMITS.text) ?? null),
+      appliedFeedback: list(raw.appliedFeedback, VR_LIMITS.listItems, (value) => optionalText(value, VR_LIMITS.text) ?? null),
       responses: list(raw.responses, VR_LIMITS.responses, parseValueResponse)
     }
   }

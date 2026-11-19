@@ -1,0 +1,52 @@
+/* デザインシステムのタブ（components/DesignSystem.tsx）。Storybook をタブいっぱいに出す。色はトークンだけ */
+
+.pane:has(> .ds) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.ds {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--color-bg-canvas);
+}
+
+.ds--loading {
+  align-items: center;
+  justify-content: center;
+}
+
+.ds__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-4);
+  border-bottom: var(--size-border) solid var(--color-border);
+  flex: none;
+}
+
+.ds__url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.ds__frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.ds__cmd {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
