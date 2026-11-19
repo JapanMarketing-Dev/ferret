@@ -3035,7 +3035,7 @@ function registerIpc(): void {
       ...(FEEDBACK_CLOUD_BASE ? { base: FEEDBACK_CLOUD_BASE } : {}),
       syncNow: async () => {
         const [service, { collectFeedback }] = await Promise.all([feedbackCloud(), import('./feedbackSkill')])
-        await service.sync((await collectFeedback(currentSettings().projects)).entries)
+        await service.sync((await collectFeedback(currentSettings().projects, { home: homedir(), env: process.env })).entries)
         // 読んだ分で feedback.md を書き直す（直後なので読み直さず控えを使う。配布版だけ）
         scheduleFeedbackSkillSync(0)
       }

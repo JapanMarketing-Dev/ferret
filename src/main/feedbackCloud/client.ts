@@ -5,13 +5,17 @@
 import {
   CLOUD_BASE,
   CLOUD_ERROR_STATUS,
+  CLOUD_IMAGE_TYPES,
+  CLOUD_LIMITS,
   CODE_PATTERN,
+  IMAGE_HASH_PATTERN,
   TOKEN_PATTERN,
   cleanLine,
   sanitizeCloudEntry,
   type CloudEntryRead,
   type CloudErrorCode,
   type CloudFeedback,
+  type CloudImageType,
   type CloudMe,
   type CloudUpload
 } from '@shared/feedbackCloud'
@@ -137,6 +141,45 @@ export class CloudClient {
   async upload(token: string, upload: CloudUpload): Promise<number> {
     const body = await this.call('/v1/feedback', this.json('PUT', upload), token)
     return typeof body.stored === 'number' ? body.stored : upload.entries.length
+  }
+
+  /** 画像のうち、Worker にまだ無いもの（hashes は IMAGE_HASH_PATTERN・200 件まで） */
+  async missingImages(token: string, hashes: readonly string[]): Promise<string[]> {
+    const asked = hashes.filter((h) => IMAGE_HASH_PATTERN.test(h)).slice(0, 200)
+    if (!asked.length) return []
+    const body = await this.call('/v1/images/missing', this.json('POST', { hashes: asked }), token)
+    if (!Array.isArray(body.missing)) throw new CloudApiError('bad_response')
+    const set = new Set(asked)
+    return body.missing.filter((h): h is string => typeof h === 'string' && set.has(h))
+  }
+
+  /** 画像を1枚上げる（本文は画像のバイト） */
+  async putImage(token: string, hash: string, type: CloudImageType, bytes: Uint8Array): Promise<void> {
+    if (!IMAGE_HASH_PATTERN.test(hash) || bytes.byteLength > CLOUD_LIMITS.imageBytes) throw new CloudApiError('bad_request')
+    await this.call(`/v1/images/${hash}`, { method: 'PUT', headers: { 'content-type': CLOUD_IMAGE_TYPES[type] }, body: bytes as unknown as RequestInit["body"] }, token)
+  }
+
+  /** 画像を1枚読む（自分か同じチームの人が上げたもの）。中身の確かめ（hash）は呼ぶ側で行う */
+  async getImage(token: string, hash: string): Promise<{ bytes: Uint8Array; type: CloudImageType | null }> {
+    if (!IMAGE_HASH_PATTERN.test(hash)) throw new CloudApiError('bad_request')
+    if (!TOKEN_PATTERN.test(token)) throw new CloudApiError('unauthorized')
+    const headers = new Headers({ authorization: `Bearer ${token}` })
+    if (this.opt.userAgent) headers.set('user-agent', this.opt.userAgent)
+    let res: Response
+    try {
+      res = await this.opt.fetch(`${this.base}/v1/images/${hash}`, { method: 'GET', headers, signal: AbortSignal.timeout(this.opt.timeoutMs ?? 30_000) })
+    } catch {
+      throw new CloudApiError('network')
+    }
+    if (!res.ok) throw new CloudApiError(statusCode(res.status) === 'bad_response' && res.status === 404 ? 'not_found' : statusCode(res.status), res.status)
+    const length = Number(res.headers.get('content-length') ?? 0)
+    if (length > CLOUD_LIMITS.imageBytes) throw new CloudApiError('too_large', res.status)
+    let bytes: Uint8Array
+    try { bytes = new Uint8Array(await res.arrayBuffer()) } catch { throw new CloudApiError('network') }
+    if (bytes.byteLength > CLOUD_LIMITS.imageBytes) throw new CloudApiError('too_large', res.status)
+    const mime = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+    const type = (Object.keys(CLOUD_IMAGE_TYPES) as CloudImageType[]).find((k) => CLOUD_IMAGE_TYPES[k] === mime) ?? null
+    return { bytes, type }
   }
 
   /** 自分の全部の PC の指摘と、チームのメンバーの指摘 */

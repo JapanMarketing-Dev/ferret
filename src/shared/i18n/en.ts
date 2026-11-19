@@ -2798,6 +2798,7 @@ export const en = {
   'remote.firewall': "On first use, macOS or Windows may ask whether Ferret can accept incoming connections. Allow it.",
   "settings.section.cloud": "Ferret account",
   "cloud.intro": "Log in to share feedback across your PCs and your team, so the same feedback comes back less.",
+  "cloud.includesAgents": "Shares your Ferret feedback and the instructions you typed to AI agents across your PCs and team.",
   "cloud.email": "Email",
   "cloud.emailPlaceholder": "you@example.com",
   "cloud.sendCode": "Send code",

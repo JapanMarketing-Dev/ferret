@@ -2792,6 +2792,7 @@ export const ja: Messages = {
   'remote.firewall': "初めて使うとき、macOS や Windows が「受信の接続を許可するか」を聞くことがあります。許可してください。",
   "settings.section.cloud": "Ferret アカウント",
   "cloud.intro": "ログインすると、指摘が PC とチームで共有され、同じ指摘が減ります。",
+  "cloud.includesAgents": "Ferret の指摘と、AI に打った指示を PC とチームで共有します。",
   "cloud.email": "メールアドレス",
   "cloud.emailPlaceholder": "you@example.com",
   "cloud.sendCode": "コードを送る",

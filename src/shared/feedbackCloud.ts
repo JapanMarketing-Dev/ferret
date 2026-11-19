@@ -34,10 +34,33 @@ export const CLOUD_LIMITS = {
   webSessionMs: 30 * 24 * 60 * 60 * 1000,
   inviteTtlMs: 7 * 24 * 60 * 60 * 1000,
   /** 送る本文の上限（指摘の全部を1回で送る） */
-  uploadBytes: 4 * 1024 * 1024
+  uploadBytes: 4 * 1024 * 1024,
+  /** 指摘1件に付ける画像の数と、画像1枚の大きさ */
+  imagesPerEntry: 4,
+  imageBytes: 5 * 1024 * 1024,
+  /** POST /v1/images/missing に1回で渡せる hash の数 */
+  imageCheckHashes: 200,
+  /** 1人が置ける画像の合計（同じ画像を2人が上げれば、2人ともに数える。超えると PUT は limit） */
+  imageQuotaBytes: 1024 * 1024 * 1024
 } as const
 
-export const CLOUD_SOURCES: readonly FeedbackSource[] = ['visual-review', 'value-usecases', 'recording']
+/** 画像の形式（SVG は <img> でだけ出し、Worker は sandbox の CSP 付きで返す） */
+export const CLOUD_IMAGE_TYPES = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', svg: 'image/svg+xml' } as const
+export type CloudImageType = keyof typeof CLOUD_IMAGE_TYPES
+
+/**
+ * 指摘に付ける画像。中身の SHA-256 で指す（同じ画像は1回だけ上げる）。
+ * box は人が囲んだ場所（画像の width×height の座標で x,y,w,h）。録画の指摘の画像は枠が描き込み済みなので box は無い。
+ * 上げ方: POST /v1/images/missing {hashes} → {missing}、PUT /v1/images/<hash>（本文は画像のバイト、content-type は CLOUD_IMAGE_TYPES）。
+ * 読み方: GET /v1/images/<hash>（自分か、同じチームの人が上げた画像だけ）
+ */
+export interface CloudImage {
+  hash: string
+  type: CloudImageType
+  box?: { x: number; y: number; w: number; h: number; width: number; height: number }
+}
+
+export const CLOUD_SOURCES: readonly FeedbackSource[] = ['visual-review', 'value-usecases', 'recording', 'agent-prompt']
 
 export const CODE_PATTERN = /^\d{6}$/
 /** アプリのトークン・招待のトークン（256 bit の16進） */
@@ -46,6 +69,8 @@ export const TOKEN_PATTERN = /^[0-9a-f]{64}$/
 export const ID_PATTERN = /^[0-9a-f]{32}$/
 /** 指摘の key（文の SHA-256 の16進） */
 export const ENTRY_KEY_PATTERN = /^[0-9a-f]{64}$/
+/** 画像の hash（中身の SHA-256 の16進） */
+export const IMAGE_HASH_PATTERN = /^[0-9a-f]{64}$/
 
 export const CLOUD_ERROR_STATUS = {
   bad_request: 400,
@@ -73,6 +98,8 @@ export interface CloudEntry {
   /** ISO 8601 */
   at?: string
   text: string
+  /** その状態の画像（どの状態に何の指摘か）。最大 CLOUD_LIMITS.imagesPerEntry */
+  images?: CloudImage[]
 }
 
 /** PUT /v1/feedback の本文 */
@@ -161,7 +188,31 @@ export function sanitizeCloudEntry(raw: unknown): CloudEntry | null {
     if (!Number.isFinite(ms)) return null
     at = new Date(ms).toISOString()
   }
-  return { key: r.key, project, source: r.source as FeedbackSource, ...(title ? { title } : {}), ...(at ? { at } : {}), text }
+  const images = sanitizeCloudImages(r.images)
+  return { key: r.key, project, source: r.source as FeedbackSource, ...(title ? { title } : {}), ...(at ? { at } : {}), text, ...(images.length ? { images } : {}) }
+}
+
+/** 指摘に付いた画像を確かめる。合わないものは落とし、hash の重複を除いて上限まで */
+export function sanitizeCloudImages(raw: unknown): CloudImage[] {
+  if (!Array.isArray(raw)) return []
+  const out: CloudImage[] = []
+  const seen = new Set<string>()
+  const num = (v: unknown, max = 100_000) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? Math.round(v) : null)
+  for (const item of raw) {
+    const r = (item ?? {}) as Record<string, unknown>
+    if (typeof r.hash !== 'string' || !IMAGE_HASH_PATTERN.test(r.hash) || seen.has(r.hash)) continue
+    if (typeof r.type !== 'string' || !Object.hasOwn(CLOUD_IMAGE_TYPES, r.type)) continue
+    let box: CloudImage['box']
+    if (r.box && typeof r.box === 'object') {
+      const b = r.box as Record<string, unknown>
+      const [x, y, w, h, width, height] = [num(b.x), num(b.y), num(b.w), num(b.h), num(b.width), num(b.height)]
+      if (x !== null && y !== null && w && h && width && height) box = { x, y, w, h, width, height }
+    }
+    seen.add(r.hash)
+    out.push({ hash: r.hash, type: r.type as CloudImageType, ...(box ? { box } : {}) })
+    if (out.length >= CLOUD_LIMITS.imagesPerEntry) break
+  }
+  return out
 }
 
 /** PUT /v1/feedback の本文を確かめる。合わなければ null。指摘は key で重複を除き、新しい順に上限まで */

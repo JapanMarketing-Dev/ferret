@@ -22,6 +22,8 @@ import { PROJECTS_LIST_FILE, PROJECTS_SKILL_NAME, referenceProjects } from '@sha
 import { VALUE_USECASE_DIR } from '@shared/valueUseCase'
 import { VISUAL_REVIEW_DIR } from '@shared/visualReview'
 import { writePrivateFileAtomic } from './atomicFile'
+import { collectAgentPrompts } from './agentPrompts'
+import { resolveImages } from './feedbackImages'
 
 /**
  * skill「ferret-feedback」（@shared/feedbackSkill）を入れ、横の feedback.md に登録したプロジェクトの人の指摘を集める
@@ -65,15 +67,18 @@ export async function projectSignals(project: Pick<Project, 'name' | 'folderPath
       const file = join(base, name)
       const text = await readSmallFile(file)
       if (text === null) continue
-      entries.push(...extractPlanFeedback(text, project.name, source, file))
+      // 囲んだ画面・録画のレビューの画像は、このプロジェクトの .ferret/ の中のものだけ
+      entries.push(...await resolveImages(extractPlanFeedback(text, project.name, source, file, project.folderPath), () => join(project.folderPath, '.ferret')))
       approvals.push(...extractPlanApprovals(text, project.name, source, file))
     }
   }
   const reviews = join(project.folderPath, '.ferret', 'reviews')
   for (const name of await listDir(reviews)) {
-    const file = join(reviews, name, 'feedback.md')
+    const dir = join(reviews, name)
+    const file = join(dir, 'feedback.md')
     const text = await readSmallFile(file)
-    if (text !== null) entries.push(...extractRecordingFeedback(text, project.name, file, reviewFolderTime(name)))
+    // 録画の指摘の画像は、そのレビューのフォルダの ./NN.png だけ
+    if (text !== null) entries.push(...await resolveImages(extractRecordingFeedback(text, project.name, file, reviewFolderTime(name)), () => dir))
   }
   return { entries, approvals }
 }
@@ -89,16 +94,25 @@ export async function projectFeedback(project: Pick<Project, 'name' | 'folderPat
  */
 export type FeedbackCloudHook = (entries: readonly FeedbackEntry[]) => Promise<FeedbackCloudExtra | null>
 
-/** 登録したプロジェクト全部の指摘と承認の言葉 */
-export async function collectFeedback(projects: readonly Project[]): Promise<{ entries: FeedbackEntry[]; approvals: ApprovalEntry[] }> {
+/** Agent の履歴を読む場所（ホームと環境変数。CODEX_HOME・CLAUDE_CONFIG_DIR など）。渡さなければ Agent への指示は集めない */
+export interface AgentHistoryPlace {
+  home: string
+  env: NodeJS.ProcessEnv
+}
+
+/** 登録したプロジェクト全部の指摘と承認の言葉。agents があれば、Agent に人が打った指示も足す */
+export async function collectFeedback(projects: readonly Project[], agents?: AgentHistoryPlace): Promise<{ entries: FeedbackEntry[]; approvals: ApprovalEntry[] }> {
   const { local } = referenceProjects(projects)
-  const all = await Promise.all(local.map((p) => projectSignals(p)))
-  return { entries: all.flatMap((a) => a.entries), approvals: all.flatMap((a) => a.approvals) }
+  const [all, prompts] = await Promise.all([
+    Promise.all(local.map((p) => projectSignals(p))),
+    agents ? collectAgentPrompts(local, agents.home, agents.env).catch(() => []) : Promise.resolve([])
+  ])
+  return { entries: [...all.flatMap((a) => a.entries), ...prompts], approvals: all.flatMap((a) => a.approvals) }
 }
 
 /** feedback.md の中身（登録したプロジェクト全部から。cloud があればほかの PC とチームの指摘も） */
-export async function buildFeedbackList(projects: readonly Project[], cloud?: FeedbackCloudHook): Promise<string> {
-  const { entries, approvals } = await collectFeedback(projects)
+export async function buildFeedbackList(projects: readonly Project[], cloud?: FeedbackCloudHook, agents?: AgentHistoryPlace): Promise<string> {
+  const { entries, approvals } = await collectFeedback(projects, agents)
   const extra = cloud ? await cloud(entries).catch(() => null) : null
   return renderFeedbackList(entries, undefined, approvals, extra ?? undefined)
 }
@@ -115,7 +129,7 @@ async function isLink(path: string): Promise<boolean> {
 export async function syncFeedbackSkill(version: string, projects: readonly Project[], home: string = homedir(), env: NodeJS.ProcessEnv = process.env, cloud?: FeedbackCloudHook): Promise<number> {
   const { writeSkill } = await import('./agentSkill')
   // ログインしていれば、skill を入れた Agent が無くても送る（ほかの PC・チームが読めるように）
-  let list: string | null = cloud ? await buildFeedbackList(projects, cloud) : null
+  let list: string | null = cloud ? await buildFeedbackList(projects, cloud, { home, env }) : null
   let written = 0
   for (const agent of AGENT_SKILL_AGENTS) {
     const configDir = agentConfigDir(agent, env, home, join)
@@ -133,7 +147,7 @@ export async function syncFeedbackSkill(version: string, projects: readonly Proj
       await writeSkill(skillPath, text)
       written++
     }
-    list ??= await buildFeedbackList(projects)
+    list ??= await buildFeedbackList(projects, undefined, { home, env })
     if (currentList !== list) {
       await mkdir(dir, { recursive: true })
       await writePrivateFileAtomic(listPath, list)

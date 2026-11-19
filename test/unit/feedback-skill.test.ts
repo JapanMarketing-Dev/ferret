@@ -304,7 +304,10 @@ describe('繰り返し出る指摘の型（この人の既定）', () => {
       'empty-state': ['何もない場合は作成を出す', 'empty state'],
       speed: ['もうちょっとスピード上げて', 'it is slow'],
       editable: ['送付先を編集できるように', 'make it editable'],
-      visual: ['グラフの色いらない', 'chart colors']
+      visual: ['グラフの色いらない', 'chart colors'],
+      autonomy: ['質問せずに最後まで進めて', 'keep going without asking'],
+      parallel: ['サブエージェントで並列に進めて', 'run these in parallel'],
+      verify: ['ちゃんと動くか確かめてから報告して', 'make sure it works before you report']
     }
     for (const theme of FEEDBACK_THEMES) {
       const [ja, en] = samples[theme.id]!

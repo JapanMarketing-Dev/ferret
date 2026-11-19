@@ -74,6 +74,13 @@ header.top .who { margin-left: auto; text-align: right; min-width: 0; overflow: 
 .entry .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
 .entry .title { font-weight: 600; margin-top: 2px; }
 .entry .text { white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+.shots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.shot { position: relative; display: inline-block; line-height: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--chip); cursor: zoom-in; }
+.shot img { height: 96px; width: auto; max-width: 240px; display: block; }
+.mark { position: absolute; border: 2px solid #ff3b30; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255,255,255,.7); pointer-events: none; }
+.viewer { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.82); display: flex; align-items: center; justify-content: center; padding: 16px; cursor: zoom-out; }
+.viewer .frame { position: relative; line-height: 0; }
+.viewer img { max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); display: block; }
 .empty { text-align: center; padding: 40px 16px; color: var(--muted); }
 .empty .btn { margin-top: 12px; }
 .people { list-style: none; margin: 0; padding: 0; }
@@ -90,14 +97,15 @@ header.top .who { margin-left: auto; text-align: right; min-width: 0; overflow: 
 export const APP_JS = String.raw`(function () {
   'use strict';
   var root = document.getElementById('app');
-  var state = { me: null, feedback: null, tab: 'mine', device: '', team: '', teamView: 'feedback', author: '', invite: null, inviteToken: null, inviteError: '' };
+  var state = { me: null, feedback: null, tab: 'mine', kind: '', device: '', team: '', teamView: 'feedback', author: '', invite: null, inviteToken: null, inviteError: '' };
 
   var MESSAGES = {
     bad_email: 'メールアドレスを確かめてください', bad_code: 'コードが違います', code_expired: 'コードが切れました。もう一度送ってください',
     rate_limited: '少し待ってからもう一度お試しください', mail_failed: 'メールを送れませんでした', limit: '上限に達しています',
     forbidden: 'この操作はできません', not_found: '見つかりません', unauthorized: 'ログインし直してください', too_large: '大きすぎます'
   };
-  var SOURCES = { 'visual-review': '画面の指摘', 'value-usecases': '価値ユースケース', recording: '録画' };
+  var SOURCES = { 'visual-review': '画面の指摘', 'value-usecases': '価値ユースケース', recording: '録画', 'agent-prompt': 'AIへの指示' };
+  var HASH = /^[0-9a-f]{64}$/;
 
   function message(e) { return MESSAGES[e && e.code] || '問題が起きました。もう一度お試しください'; }
 
@@ -300,15 +308,67 @@ export const APP_JS = String.raw`(function () {
     }));
   }
 
+  /** 囲んだ場所を画像の上に % で重ねる（style は CSSOM で入れる。CSP は style 属性を許さない） */
+  function framed(img, box) {
+    var frame = [img];
+    if (box && box.width > 0 && box.height > 0) {
+      var mark = el('span', { class: 'mark' });
+      mark.style.left = (box.x / box.width * 100) + '%';
+      mark.style.top = (box.y / box.height * 100) + '%';
+      mark.style.width = (box.w / box.width * 100) + '%';
+      mark.style.height = (box.h / box.height * 100) + '%';
+      frame.push(mark);
+    }
+    return frame;
+  }
+
+  function openViewer(image) {
+    var viewer = el('div', { class: 'viewer', role: 'dialog', 'aria-label': '画像' }, [
+      el('div', { class: 'frame' }, framed(el('img', { src: '/v1/images/' + image.hash, alt: '' }), image.box))
+    ]);
+    function close() { viewer.remove(); document.removeEventListener('keydown', onKey); }
+    function onKey(ev) { if (ev.key === 'Escape') close(); }
+    viewer.addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(viewer);
+  }
+
+  function shots(images) {
+    var list = (images || []).filter(function (i) { return i && HASH.test(i.hash); });
+    if (!list.length) return null;
+    return el('div', { class: 'shots' }, list.map(function (image) {
+      var img = el('img', { src: '/v1/images/' + image.hash, alt: '指摘の画像', loading: 'lazy' });
+      return el('button', { class: 'shot', type: 'button', title: '大きく見る', onclick: function () { openViewer(image); } }, framed(img, image.box));
+    }));
+  }
+
   function entryList(entries, showAuthor) {
     return el('ul', { class: 'entries' }, entries.map(function (e) {
-      var meta = [e.project, SOURCES[e.source] || e.source, formatDate(e.at), showAuthor ? e.author.name : e.deviceName].filter(Boolean);
+      // AIへの指示は title にエージェントの名前（Claude Code など）が入っている
+      var agent = e.source === 'agent-prompt';
+      var label = (SOURCES[e.source] || e.source) + (agent && e.title ? '・' + e.title : '');
+      var meta = [e.project, label, formatDate(e.at), showAuthor ? e.author.name : e.deviceName].filter(Boolean);
       return el('li', { class: 'entry' }, [
         el('div', { class: 'meta' }, meta.map(function (m) { return el('span', { text: m }); })),
-        e.title ? el('div', { class: 'title', text: e.title }) : null,
-        el('div', { class: 'text', text: e.text })
+        e.title && !agent ? el('div', { class: 'title', text: e.title }) : null,
+        el('div', { class: 'text', text: e.text }),
+        shots(e.images)
       ]);
     }));
+  }
+
+  /** 指摘と AIへの指示の両方があるときだけ、種類で絞るチップを出す */
+  function kindFilter(entries) {
+    var prompts = entries.filter(function (e) { return e.source === 'agent-prompt'; }).length;
+    if (!prompts || prompts === entries.length) { state.kind = ''; return { chips: null, shown: entries }; }
+    var shown = state.kind === 'prompt' ? entries.filter(function (e) { return e.source === 'agent-prompt'; })
+      : state.kind === 'feedback' ? entries.filter(function (e) { return e.source !== 'agent-prompt'; }) : entries;
+    var items = [
+      { id: '', label: 'すべて', count: entries.length },
+      { id: 'feedback', label: '指摘', count: entries.length - prompts },
+      { id: 'prompt', label: 'AIへの指示', count: prompts }
+    ];
+    return { chips: chips(items, state.kind, function (id) { state.kind = id; render(); }), shown: shown };
   }
 
   function mineView() {
@@ -319,12 +379,15 @@ export const APP_JS = String.raw`(function () {
         el('p', { class: 'small', text: 'Ferret の設定で、このメールアドレスでログインすると届きます。' })
       ]);
     }
+    var kind = kindFilter(entries);
+    entries = kind.shown;
     var devices = {};
     entries.forEach(function (e) { devices[e.deviceId] = devices[e.deviceId] || { id: e.deviceId, label: e.deviceName, count: 0 }; devices[e.deviceId].count++; });
     var list = Object.keys(devices).map(function (k) { return devices[k]; });
     if (state.device && !devices[state.device]) state.device = '';
     var shown = state.device ? entries.filter(function (e) { return e.deviceId === state.device; }) : entries;
     return el('section', {}, [
+      kind.chips,
       list.length > 1 ? chips([{ id: '', label: 'すべて', count: entries.length }].concat(list), state.device, function (id) { state.device = id; render(); }) : null,
       entryList(shown, false)
     ]);
@@ -390,12 +453,15 @@ export const APP_JS = String.raw`(function () {
       }
       return el('div', { class: 'empty' }, [el('p', { text: 'メンバーの指摘はまだありません' })]);
     }
+    var kind = kindFilter(entries);
+    entries = kind.shown;
     var authors = {};
     entries.forEach(function (e) { authors[e.author.id] = authors[e.author.id] || { id: e.author.id, label: e.author.name, count: 0 }; authors[e.author.id].count++; });
     var list = Object.keys(authors).map(function (k) { return authors[k]; });
     if (state.author && !authors[state.author]) state.author = '';
     var shown = state.author ? entries.filter(function (e) { return e.author.id === state.author; }) : entries;
     return el('section', {}, [
+      kind.chips,
       list.length > 1 ? chips([{ id: '', label: 'すべて', count: entries.length }].concat(list), state.author, function (id) { state.author = id; render(); }) : null,
       entryList(shown, true)
     ]);

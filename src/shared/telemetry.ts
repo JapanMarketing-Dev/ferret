@@ -128,7 +128,7 @@ const IPV6 = new RegExp(
 const IP_PLACEHOLDER = '<ip>'
 
 /** よく使われる API キーの形（redact.ts の looksSecret と同じ前置き）、Bearer、JWT、長い16進 */
-const SECRET_PATTERNS: RegExp[] = [
+export const SECRET_PATTERNS: RegExp[] = [
   /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{10,}/g,
   /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}/g,
   /\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{10,}/g,

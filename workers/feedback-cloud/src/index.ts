@@ -12,6 +12,9 @@
  *   PUT    /v1/feedback                      CloudUpload その PC の指摘を置き換える → {stored}
  *   GET    /v1/feedback                      CloudFeedback（自分の全部の PC の分と、チームのほかのメンバーの分）
  *   DELETE /v1/devices/<id>                  PC とその指摘を消す
+ *   POST   /v1/images/missing                {hashes} → {missing}: まだ自分が上げていない画像（CLOUD_LIMITS.imageCheckHashes まで）
+ *   PUT    /v1/images/<hash>                 本文は画像のバイト（content-type は CLOUD_IMAGE_TYPES）。中身の SHA-256 が hash と合うこと
+ *   GET    /v1/images/<hash>                 自分か、同じチームの人が上げた画像だけ（Web の <img> は cookie で読む）
  *   POST   /v1/teams                         {name} チームを作る（作った人が持ち主）
  *   PATCH  /v1/teams/<id>                    {name}（持ち主）
  *   DELETE /v1/teams/<id>                    （持ち主）
@@ -31,17 +34,24 @@
  *   - 頻度の上限は狭い順に予約し、断られたら先に取った予約を戻す（feedback-relay と同じ決まり）
  *   - 画面は厳しい CSP（自分のスクリプトだけ）・noindex・Referrer を送らない。文字は textContent で出す
  *   - 失敗は短い code だけを返し、メールアドレス・IP・本文・トークン・コードはログに出さない
+ *   - 画像は中身を上げた人だけが持ち主になる（hash を知っているだけでは読めない）。形式は先頭のバイトで確かめ、
+ *     SVG はスクリプトらしいものを断る。返すときは sandbox の CSP・nosniff を付ける（画面では <img> でだけ出す）
+ *   - 毎日の cron で、どの指摘からも指されなくなった持ち主の行を消し、持ち主のいなくなった画像を R2 から消す
  */
 import {
   CLOUD_ERROR_STATUS,
+  CLOUD_IMAGE_TYPES,
   CLOUD_LIMITS,
   CODE_PATTERN,
   ID_PATTERN,
+  IMAGE_HASH_PATTERN,
   TOKEN_PATTERN,
   cleanLine,
   defaultName,
   normalizeEmail,
+  sanitizeCloudImages,
   sanitizeCloudUpload,
+  type CloudImageType,
   type CloudEntryRead,
   type CloudErrorCode,
   type CloudFeedback,
@@ -50,9 +60,14 @@ import {
 } from '../../../src/shared/feedbackCloud'
 import type { FeedbackSource } from '../../../src/shared/feedbackSkill'
 import { FeedbackLimiter, limiterKey, sourceIdentity, type LimiterResult, type Window } from '../../feedback-relay/src/limiter'
-import type { D1PreparedStatement, Env } from './env'
+import type { D1PreparedStatement, Env, ScheduledContext } from './env'
 import {
+  CLEANUP_BATCH,
+  CLEANUP_ROUNDS,
   COOKIE_NAME,
+  IMAGE_CHECK_PER_USER,
+  IMAGE_GRACE_MS,
+  IMAGE_PUT_PER_USER,
   INSERT_CHUNK_BYTES,
   INVITE_PER_USER,
   READ_LIMIT,
@@ -118,7 +133,12 @@ export async function handle(request: Request, env: Env, deps: Deps = defaultDep
 }
 
 export default {
-  fetch: (request: Request, env: Env) => handle(request, env)
+  fetch: (request: Request, env: Env) => handle(request, env),
+  scheduled: (_controller: unknown, env: Env, ctx: ScheduledContext) => {
+    ctx.waitUntil(cleanupImages(env, Date.now()).catch((e) => {
+      console.error('feedback-cloud: cleanup failed', e instanceof Error ? e.name : typeof e)
+    }))
+  }
 }
 
 /* ── 画面 ─────────────────────────────────── */
@@ -306,6 +326,11 @@ async function api(ctx: Ctx, parts: string[]): Promise<Response> {
     if (m === 'PUT') return upload(ctx)
   }
   if (a === 'devices' && n === 2 && m === 'DELETE') return deleteDevice(ctx, b!)
+  if (a === 'images' && n === 2) {
+    if (b === 'missing' && m === 'POST') return missingImages(ctx)
+    if (m === 'PUT') return putImage(ctx, b!)
+    if (m === 'GET') return getImage(ctx, b!)
+  }
   if (a === 'teams') {
     if (n === 1 && m === 'POST') return createTeam(ctx)
     if (n === 2 && m === 'PATCH') return renameTeam(ctx, b!)
@@ -504,7 +529,7 @@ async function upload(ctx: Ctx): Promise<Response> {
   let size = 0
   const encoder = new TextEncoder()
   for (const e of data.entries) {
-    const item = JSON.stringify({ key: e.key, project: e.project, source: e.source, title: e.title ?? null, at: e.at ?? null, text: e.text })
+    const item = JSON.stringify({ key: e.key, project: e.project, source: e.source, title: e.title ?? null, at: e.at ?? null, text: e.text, images: e.images ?? null })
     const bytes = encoder.encode(item).byteLength + 1
     if (current.length > 0 && size + bytes > INSERT_CHUNK_BYTES) {
       chunks.push(`[${current.join(',')}]`)
@@ -520,11 +545,19 @@ async function upload(ctx: Ctx): Promise<Response> {
     env.DB.prepare('INSERT INTO devices (user_id, id, name, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at')
       .bind(s.userId, data.deviceId, data.deviceName, now),
     env.DB.prepare('DELETE FROM entries WHERE user_id = ? AND device_id = ?').bind(s.userId, data.deviceId),
-    ...chunks.map((chunk) => env.DB.prepare(
-      'INSERT OR REPLACE INTO entries (user_id, device_id, key, project, source, title, at, text) ' +
-      "SELECT ?, ?, json_extract(value, '$.key'), json_extract(value, '$.project'), json_extract(value, '$.source'), " +
-      "json_extract(value, '$.title'), json_extract(value, '$.at'), json_extract(value, '$.text') FROM json_each(?)"
-    ).bind(s.userId, data.deviceId, chunk))
+    env.DB.prepare('DELETE FROM entry_images WHERE user_id = ? AND device_id = ?').bind(s.userId, data.deviceId),
+    ...chunks.flatMap((chunk) => [
+      env.DB.prepare(
+        'INSERT OR REPLACE INTO entries (user_id, device_id, key, project, source, title, at, text, images) ' +
+        "SELECT ?, ?, json_extract(value, '$.key'), json_extract(value, '$.project'), json_extract(value, '$.source'), " +
+        "json_extract(value, '$.title'), json_extract(value, '$.at'), json_extract(value, '$.text'), json_extract(value, '$.images') FROM json_each(?)"
+      ).bind(s.userId, data.deviceId, chunk),
+      // どの指摘がどの画像を指しているか（掃除が索引で引く）。同じ塊から1つの文で入れる
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO entry_images (user_id, device_id, key, hash) SELECT ?, ?, json_extract(e.value, '$.key'), json_extract(i.value, '$.hash') " +
+        "FROM json_each(?) e, json_each(e.value, '$.images') i WHERE json_type(e.value, '$.images') = 'array'"
+      ).bind(s.userId, data.deviceId, chunk)
+    ])
   ]
   await env.DB.batch(statements)
   return json({ ok: true, stored: data.entries.length })
@@ -533,8 +566,9 @@ async function upload(ctx: Ctx): Promise<Response> {
 async function deleteDevice(ctx: Ctx, deviceId: string): Promise<Response> {
   const s = await authenticate(ctx)
   if (!ID_PATTERN.test(deviceId)) throw new Rejection('not_found')
-  const [, removed] = await ctx.env.DB.batch([
+  const [, , removed] = await ctx.env.DB.batch([
     ctx.env.DB.prepare('DELETE FROM entries WHERE user_id = ? AND device_id = ?').bind(s.userId, deviceId),
+    ctx.env.DB.prepare('DELETE FROM entry_images WHERE user_id = ? AND device_id = ?').bind(s.userId, deviceId),
     ctx.env.DB.prepare('DELETE FROM devices WHERE user_id = ? AND id = ?').bind(s.userId, deviceId)
   ])
   if ((removed?.meta?.changes ?? 0) === 0) throw new Rejection('not_found')
@@ -542,18 +576,29 @@ async function deleteDevice(ctx: Ctx, deviceId: string): Promise<Response> {
 }
 
 type EntryRow = {
-  key: string; project: string; source: FeedbackSource; title: string | null; at: string | null; text: string
+  key: string; project: string; source: FeedbackSource; title: string | null; at: string | null; text: string; images: string | null
   device_id: string; device_name: string; author_id: string; author_name: string; author_email: string
 }
 
 const ENTRY_SELECT =
-  'SELECT e.key, e.project, e.source, e.title, e.at, e.text, e.device_id, d.name AS device_name, u.id AS author_id, u.name AS author_name, u.email AS author_email ' +
+  'SELECT e.key, e.project, e.source, e.title, e.at, e.text, e.images, e.device_id, d.name AS device_name, u.id AS author_id, u.name AS author_name, u.email AS author_email ' +
   'FROM entries e JOIN devices d ON d.user_id = e.user_id AND d.id = e.device_id JOIN users u ON u.id = e.user_id '
 const ENTRY_ORDER = ' ORDER BY e.at IS NULL, e.at DESC, e.key LIMIT ?'
 
+function parseImages(raw: string | null) {
+  if (!raw) return []
+  try {
+    return sanitizeCloudImages(JSON.parse(raw))
+  } catch {
+    return []
+  }
+}
+
 function toEntry(r: EntryRow): CloudEntryRead {
+  const images = parseImages(r.images)
   return {
     key: r.key, project: r.project, source: r.source, ...(r.title ? { title: r.title } : {}), ...(r.at ? { at: r.at } : {}), text: r.text,
+    ...(images.length ? { images } : {}),
     deviceId: r.device_id, deviceName: r.device_name, author: { id: r.author_id, name: r.author_name, email: r.author_email }
   }
 }
@@ -575,6 +620,137 @@ async function readFeedback(ctx: Ctx): Promise<Response> {
     teams: teams.results.map((t, i) => ({ id: t.id, name: t.name, entries: perTeam[i]!.results.map(toEntry) }))
   }
   return json({ ok: true, ...body })
+}
+
+/* ── 画像 ─────────────────────────────────── */
+
+const imageKey = (hash: string) => `img/${hash}`
+
+/** 先頭のバイトで形式を確かめる。SVG はスクリプトらしいものを含めば断る（<img> でだけ出すので、念のための守り） */
+export function sniffImage(type: CloudImageType, bytes: Uint8Array): boolean {
+  const starts = (sig: number[], at = 0) => bytes.length >= at + sig.length && sig.every((b, i) => bytes[at + i] === b)
+  if (type === 'png') return starts([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  if (type === 'jpeg') return starts([0xff, 0xd8, 0xff])
+  if (type === 'webp') return starts([0x52, 0x49, 0x46, 0x46]) && starts([0x57, 0x45, 0x42, 0x50], 8)
+  let text: string
+  try {
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    return false
+  }
+  // 先頭の BOM・XML 宣言・コメント・空白を飛ばして <svg で始まること（DOCTYPE は実体の定義を持ち込めるので受けない）
+  let rest = text.replace(/^﻿/, '')
+  for (;;) {
+    const next = rest.replace(/^\s+/, '').replace(/^<\?xml[^>]*\?>/i, '').replace(/^<!--[\s\S]*?-->/, '')
+    if (next === rest) break
+    rest = next
+  }
+  if (!/^<svg[\s>/]/i.test(rest)) return false
+  return !/<script|<foreignObject|javascript:|\bon\w+\s*=|<!ENTITY/i.test(text)
+}
+
+const typeOfContent = (raw: string | null): CloudImageType | null => {
+  const mime = (raw ?? '').split(';')[0]!.trim().toLowerCase()
+  const found = (Object.keys(CLOUD_IMAGE_TYPES) as CloudImageType[]).find((k) => CLOUD_IMAGE_TYPES[k] === mime)
+  return found ?? null
+}
+
+async function sha256Bytes(bytes: Uint8Array): Promise<string> {
+  return toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>)))
+}
+
+async function missingImages(ctx: Ctx): Promise<Response> {
+  const s = await authenticate(ctx)
+  const body = await readJson(ctx.request, 32 * 1024)
+  const hashes = body.hashes
+  if (!Array.isArray(hashes) || hashes.length > CLOUD_LIMITS.imageCheckHashes) throw new Rejection('bad_request')
+  if (!hashes.every((h) => typeof h === 'string' && IMAGE_HASH_PATTERN.test(h))) throw new Rejection('bad_request')
+  await admit(ctx, [{ kind: 'cloud-image-check-user', value: s.userId, windows: IMAGE_CHECK_PER_USER }])
+  const unique = [...new Set(hashes as string[])]
+  if (!unique.length) return json({ ok: true, missing: [] })
+  // hash は JSON の配列で1つの値として渡す（D1 の1つの文に入れられる値の数の上限を避ける）
+  const owned = await ctx.env.DB.prepare(
+    'SELECT o.hash FROM image_owners o WHERE o.user_id = ? AND o.hash IN (SELECT value FROM json_each(?))'
+  ).bind(s.userId, JSON.stringify(unique)).all<{ hash: string }>()
+  const have = new Set(owned.results.map((r) => r.hash))
+  return json({ ok: true, missing: unique.filter((h) => !have.has(h)) })
+}
+
+async function putImage(ctx: Ctx, hash: string): Promise<Response> {
+  const { env, now } = ctx
+  const s = await authenticate(ctx)
+  if (!IMAGE_HASH_PATTERN.test(hash)) throw new Rejection('not_found')
+  const type = typeOfContent(ctx.request.headers.get('content-type'))
+  if (!type) throw new Rejection('bad_request')
+  const owned = await env.DB.prepare('SELECT 1 AS x FROM image_owners WHERE hash = ? AND user_id = ?').bind(hash, s.userId).first()
+  if (owned) return json({ ok: true, stored: false })
+  await admit(ctx, [{ kind: 'cloud-image-put-user', value: s.userId, windows: IMAGE_PUT_PER_USER }])
+  const bytes = await readCapped(ctx.request, CLOUD_LIMITS.imageBytes)
+  if (!bytes) throw new Rejection('too_large')
+  if (!bytes.byteLength || (await sha256Bytes(bytes)) !== hash || !sniffImage(type, bytes)) throw new Rejection('bad_request')
+  const used = await env.DB.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM image_owners WHERE user_id = ?').bind(s.userId).first<{ n: number }>()
+  if (Number(used?.n ?? 0) + bytes.byteLength > CLOUD_LIMITS.imageQuotaBytes) throw new Rejection('limit')
+  // 中身で鍵を決めているので、もうあれば置き直さない（持ち主の行だけ足す）
+  if (!(await env.MEDIA.head(imageKey(hash)))) await env.MEDIA.put(imageKey(hash), bytes, { httpMetadata: { contentType: CLOUD_IMAGE_TYPES[type] } })
+  await env.DB.prepare('INSERT INTO image_owners (hash, user_id, type, bytes, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(hash, user_id) DO NOTHING')
+    .bind(hash, s.userId, type, bytes.byteLength, now).run()
+  return json({ ok: true, stored: true })
+}
+
+async function getImage(ctx: Ctx, hash: string): Promise<Response> {
+  const { env } = ctx
+  const s = await authenticate(ctx)
+  if (!IMAGE_HASH_PATTERN.test(hash)) throw new Rejection('not_found')
+  // 自分が上げたか、同じチームの人が上げた画像だけ。それ以外は無いのと同じに答える
+  const row = await env.DB.prepare(
+    'SELECT o.type FROM image_owners o WHERE o.hash = ?1 AND (o.user_id = ?2 OR o.user_id IN ' +
+    '(SELECT b.user_id FROM team_members a JOIN team_members b ON b.team_id = a.team_id WHERE a.user_id = ?2)) LIMIT 1'
+  ).bind(hash, s.userId).first<{ type: CloudImageType }>()
+  if (!row || !Object.hasOwn(CLOUD_IMAGE_TYPES, row.type)) throw new Rejection('not_found')
+  const object = await env.MEDIA.get(imageKey(hash))
+  if (!object?.body) throw new Rejection('not_found')
+  return new Response(object.body, {
+    headers: {
+      'content-type': CLOUD_IMAGE_TYPES[row.type],
+      'content-length': String(object.size),
+      'cache-control': 'private, max-age=31536000, immutable',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      'content-disposition': 'inline',
+      'cross-origin-resource-policy': 'same-origin',
+      ...SECURITY_HEADERS
+    }
+  })
+}
+
+/**
+ * 画像の掃除（毎日の cron）。どの指摘からも指されなくなって IMAGE_GRACE_MS より古い持ち主の行を消し、
+ * 持ち主のいなくなった画像を R2 から消す。1回に CLEANUP_BATCH 行を CLEANUP_ROUNDS 回まで（残りは次の日）。
+ * 消している間に同じ画像を上げ直した人がいれば、その持ち主の行も消す（missing で「無い」と出るので、アプリが上げ直す）。
+ */
+export async function cleanupImages(env: Env, now: number): Promise<{ owners: number; objects: number }> {
+  let owners = 0
+  let objects = 0
+  for (let round = 0; round < CLEANUP_ROUNDS; round++) {
+    const removed = await env.DB.prepare(
+      'DELETE FROM image_owners WHERE rowid IN (SELECT o.rowid FROM image_owners o WHERE o.created_at < ? AND NOT EXISTS ' +
+      '(SELECT 1 FROM entry_images r WHERE r.user_id = o.user_id AND r.hash = o.hash) LIMIT ?) RETURNING hash'
+    ).bind(now - IMAGE_GRACE_MS, CLEANUP_BATCH).all<{ hash: string }>()
+    owners += removed.results.length
+    const hashes = [...new Set(removed.results.map((r) => r.hash))]
+    if (hashes.length) {
+      const orphan = await env.DB.prepare(
+        'SELECT j.value AS hash FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM image_owners o WHERE o.hash = j.value)'
+      ).bind(JSON.stringify(hashes)).all<{ hash: string }>()
+      const gone = orphan.results.map((r) => r.hash)
+      if (gone.length) {
+        await env.MEDIA.delete(gone.map(imageKey))
+        objects += gone.length
+        await env.DB.prepare('DELETE FROM image_owners WHERE hash IN (SELECT value FROM json_each(?))').bind(JSON.stringify(gone)).run()
+      }
+    }
+    if (removed.results.length < CLEANUP_BATCH) break
+  }
+  return { owners, objects }
 }
 
 /* ── チーム ───────────────────────────────── */

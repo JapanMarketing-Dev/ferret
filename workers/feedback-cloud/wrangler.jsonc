@@ -21,6 +21,10 @@
     "bindings": [{ "name": "LIMITER", "class_name": "FeedbackLimiter" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FeedbackLimiter"] }],
+  // 指摘の画像（非公開。鍵は img/<中身の SHA-256>。GET /v1/images/<hash> で、上げた本人と同じチームの人にだけ返す）
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "ferret-cloud-media" }],
+  // 毎日、どの指摘からも指されなくなった画像を消す（scheduled）
+  "triggers": { "crons": ["17 3 * * *"] },
   // 要求の記録（URL・ヘッダー・IP・メールアドレスを含みうる）は残さない。残すのは console.error のエラーの種類だけ
   "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
   "logpush": false

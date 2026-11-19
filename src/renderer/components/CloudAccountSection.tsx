@@ -5,8 +5,8 @@ import { useT } from '../lib/i18n'
 import { Button, Field, useToast } from '../ui'
 
 /**
- * 設定の「Ferret アカウント」。メールに届く6桁のコードでログインすると、main（src/main/feedbackCloud/）が指摘を
- * PC とチームで共有し、skill「ferret-feedback」の feedback.md に載せる。チームの管理は Web で行うので、ここは開くボタンだけ。
+ * 設定の「Ferret アカウント」。メールに届く6桁のコードでログインすると、main（src/main/feedbackCloud/）が指摘と
+ * AI の Agent に打った指示（src/main/agentPrompts.ts）を PC とチームで共有し、skill「ferret-feedback」の feedback.md に載せる。チームの管理は Web で行うので、ここは開くボタンだけ。
  * 状態は自分で読む（トークンは画面へ来ない）
  */
 export function CloudAccountSection() {
@@ -44,6 +44,7 @@ export function CloudAccountSection() {
   if (!status.loggedIn) {
     return <div className="st-page__group" data-testid="cloud-account">
       <p className="st-note">{t('cloud.intro')}</p>
+      <p className="st-note">{t('cloud.includesAgents')}</p>
       {sentTo === null
         ? <div className="st-row">
           <Field className="st-row__grow" type="email" inputMode="email" autoComplete="email" aria-label={t('cloud.email')} placeholder={t('cloud.emailPlaceholder')}
@@ -71,6 +72,7 @@ export function CloudAccountSection() {
       {' · '}
       {status.lastSyncAt ? t('cloud.lastSync', { time: new Date(status.lastSyncAt).toLocaleString() }) : t('cloud.neverSynced')}
     </p>
+    <p className="st-note">{t('cloud.includesAgents')}</p>
     {!status.persisted && <p className="st-note st-note--warn">{t('cloud.notPersisted')}</p>}
     <div className="st-row st-row--buttons">
       <Button variant="primary" onClick={() => void window.ade.invoke('cloud:openWeb').catch(() => undefined)} data-testid="cloud-manage">{t('cloud.manageTeams')}</Button>

@@ -14,19 +14,22 @@
 - トークン（256 bit）は SHA-256 だけを置きます。アプリは 1 年、Web は 30 日。cookie は HttpOnly・Secure・SameSite=Lax です。
 - Origin が `PUBLIC_BASE` 以外の要求は断ります。Bearer に Origin が付いていれば断り、cookie で状態を変える要求は自分の Origin を求めます（CSRF）。
 - コードの送信はメールアドレスごと・IP ごと、確認は IP ごと・メールアドレスごと、招待と送信は人ごとに上限があります（`FeedbackLimiter`。鍵は `RATE_LIMIT_SALT` の HMAC）。
-- 送る指摘は許可した項目だけ（プロジェクト名・どこで・題・日時・文）。手元のファイルのパスは受けません。
+- 送る指摘は許可した項目だけ（プロジェクト名・どこで・題・日時・文・画像の hash と囲んだ場所）。手元のファイルのパスは受けません。どこでの1つ `agent-prompt` は、人が Claude Code などに打った指示です（題にエージェントの名前）。
+- 画像は R2 の `ferret-cloud-media`（非公開）に `img/<中身の SHA-256>` で置きます。中身を上げた人だけが持ち主になり（hash を知っているだけでは読めない）、読めるのは持ち主と同じチームの人だけです。形式は先頭のバイトで確かめ、SVG はスクリプトらしいものを断り、返すときは sandbox の CSP と nosniff を付けます。1枚 5MB、1人 1GB まで。
+- 毎日 03:17（UTC）の cron で、どの指摘からも指されなくなって1日たった持ち主の行を消し、持ち主のいなくなった画像を R2 から消します。
 - 画面は厳しい CSP（自分のスクリプトだけ）・noindex・Referrer なしで配り、文字は `textContent` で出します。
 - 失敗は短い code だけを返し、メールアドレス・IP・本文・トークン・コードはログに出しません。
 
 ## 公開の手順
 
 1. D1 を作る: `node scripts/release-tools.mjs wrangler d1 create ferret-account` → 出た `database_id` を `wrangler.jsonc` の `"TODO"` に入れる
-2. 表を作る: `node scripts/release-tools.mjs wrangler d1 migrations apply ferret-account --remote --config workers/feedback-cloud/wrangler.jsonc`
+2. 表を作る: `node scripts/release-tools.mjs wrangler d1 migrations apply ferret-account --remote --config workers/feedback-cloud/wrangler.jsonc`（まだ流していない `migrations/` の分だけが流れる。画像は `0002_images.sql`）
+   - 画像の置き場（作成済み）: `node scripts/release-tools.mjs wrangler r2 bucket create ferret-cloud-media`（公開のアクセスは付けない）
 3. メールの送信を有効にする: `node scripts/release-tools.mjs wrangler email sending enable ferretade.dev`（送り元は `noreply@ferretade.dev`）
 4. 秘密を入れる（どちらも十分に長い乱数。ほかの Worker とは別の値）:
    - `node scripts/release-tools.mjs wrangler secret put AUTH_SECRET --config workers/feedback-cloud/wrangler.jsonc`
    - `node scripts/release-tools.mjs wrangler secret put RATE_LIMIT_SALT --config workers/feedback-cloud/wrangler.jsonc`
-5. デプロイ: `node scripts/release-tools.mjs wrangler deploy --config workers/feedback-cloud/wrangler.jsonc`（`account.ferretade.dev` の custom domain も作られます）
+5. デプロイ: `node scripts/release-tools.mjs wrangler deploy --config workers/feedback-cloud/wrangler.jsonc`（`account.ferretade.dev` の custom domain と、画像の掃除の cron も作られます）
 6. 確かめる: `https://account.ferretade.dev/` でコードが届いてログインできること、`GET /v1/me` に `Origin: https://example.com` を付けると 403 になること
 
 表を変えるときは `migrations/0002_*.sql` を足して、2 と同じコマンドで流します。`AUTH_SECRET` を変えると送ったばかりのコードだけが効かなくなります（セッションは残ります）。

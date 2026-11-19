@@ -6,6 +6,7 @@
  *   Worker の側で台が増え続けないようにする。ログアウトしても消さない
  * - cache.json: 最後に読んだ指摘（ほかの PC とチームの分）と、最後に送った中身の要約。ネットにつながらないときも feedback.md に載せるため。
  *   ログアウトで消す
+ * - images/: ほかの PC・チームの指摘の画像の控え（<hash>.<拡張子>。images.ts の ImageCache）。ログアウトで消す（service.ts）
  *
  * renderer へはトークンを渡さない。
  */
@@ -40,6 +41,9 @@ export class CloudStore {
   private get accountFile(): string { return join(this.dir, 'account.bin') }
   private get deviceFile(): string { return join(this.dir, 'device.json') }
   private get cacheFile(): string { return join(this.dir, 'cache.json') }
+
+  /** 画像の控えの置き場 */
+  imagesDir(): string { return join(this.dir, 'images') }
 
   /** ログインの控え。無ければ null。ファイルが無ければ鍵の仕組みに触れない */
   async load(): Promise<CloudAccount | null> {

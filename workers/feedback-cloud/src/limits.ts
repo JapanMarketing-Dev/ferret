@@ -17,6 +17,15 @@ export const VERIFY_PER_EMAIL: readonly Window[] = [{ windowMs: HOUR, max: 20 },
 export const INVITE_PER_USER: readonly Window[] = [{ windowMs: HOUR, max: 30 }, { windowMs: DAY, max: 100 }]
 /** 指摘を送る数。人ごと（アプリは変わったときにまとめて送る） */
 export const UPLOAD_PER_USER: readonly Window[] = [{ windowMs: HOUR, max: 600 }, { windowMs: DAY, max: 5000 }]
+/** 画像を上げる数・持っているかを確かめる数。人ごと（同じ画像は1回だけ上げる） */
+export const IMAGE_PUT_PER_USER: readonly Window[] = [{ windowMs: HOUR, max: 1000 }, { windowMs: DAY, max: 5000 }]
+export const IMAGE_CHECK_PER_USER: readonly Window[] = [{ windowMs: HOUR, max: 600 }, { windowMs: DAY, max: 5000 }]
+
+/** 画像の掃除（cron）。どの指摘からも指されなくなって、これより古い持ち主の行を消す（上げてから指摘を送るまでの猶予） */
+export const IMAGE_GRACE_MS = DAY
+/** 1回の掃除で消す持ち主の行の数（R2 の delete は1回 1000 個まで）と、回す数 */
+export const CLEANUP_BATCH = 500
+export const CLEANUP_ROUNDS = 10
 
 /** GET /v1/feedback で返す数（自分の分・チームごと） */
 export const READ_LIMIT = 5000

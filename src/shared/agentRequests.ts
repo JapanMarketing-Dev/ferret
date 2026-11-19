@@ -58,6 +58,8 @@ const CLOSING: Record<RequestLanguage, string> = {
   ja: '進め方は任せます。途中で人に質問せず、判断に迷う点は理由を添えて選んでください。最後に、やったこと・確かめたこと・残したことを短く報告してください。',
   en: 'Use your judgment on how to proceed. Do not stop to ask questions; when unsure, choose and note why. End with a short report: what you did, how you checked it, and what is left.'
 }
+/** 依頼の結びの文（Ferret が作った依頼文の印。Agent への指示を集めるとき、Ferret が作った文を除くのに使う。src/main/agentPrompts.ts） */
+export const AGENT_REQUEST_CLOSING: Readonly<Record<RequestLanguage, string>> = CLOSING
 
 export const BUILTIN_REQUESTS: readonly Builtin[] = [
   {

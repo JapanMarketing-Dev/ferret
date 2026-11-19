@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { Env } from '../../workers/feedback-cloud/src/env'
-import { handle, sameText, type Deps } from '../../workers/feedback-cloud/src/index'
+import { createHash } from 'node:crypto'
+import type { Env, MediaBucket } from '../../workers/feedback-cloud/src/env'
+import { cleanupImages, handle, sameText, sniffImage, type Deps } from '../../workers/feedback-cloud/src/index'
 import { APP_HTML, APP_JS } from '../../workers/feedback-cloud/src/page'
 import { FeedbackLimiter } from '../../workers/feedback-relay/src/limiter'
 import type { LimiterStorage } from '../../workers/feedback-relay/src/env'
@@ -15,7 +16,7 @@ import { fakeD1 } from './helpers/fakeD1'
 
 const BASE = 'https://account.ferretade.dev'
 const IP = '203.0.113.9'
-const MIGRATION = join(__dirname, '../../workers/feedback-cloud/migrations/0001_init.sql')
+const MIGRATIONS = ['0001_init.sql', '0002_images.sql'].map((f) => join(__dirname, '../../workers/feedback-cloud/migrations', f))
 const T0 = Date.parse('2026-11-19T00:00:00Z')
 
 class MemoryStorage implements LimiterStorage {
@@ -28,12 +29,29 @@ class MemoryStorage implements LimiterStorage {
 
 type Mail = { to: string; subject: string; text: string }
 
+/** R2 の偽物（feedback-share のテストと同じ考え方。使う分だけ） */
+function fakeBucket() {
+  const objects = new Map<string, { bytes: Uint8Array; type?: string }>()
+  const bucket: MediaBucket = {
+    async put(key, value, options) { objects.set(key, { bytes: new Uint8Array(value as Uint8Array), type: options?.httpMetadata?.contentType }) },
+    async get(key) { const v = objects.get(key); return v ? { body: new Blob([v.bytes as BlobPart]).stream(), size: v.bytes.length } : null },
+    async head(key) { const v = objects.get(key); return v ? { size: v.bytes.length } : null },
+    async delete(keys) {
+      const list = Array.isArray(keys) ? keys : [keys]
+      if (list.length > 1000) throw new Error('too many keys')
+      for (const k of list) objects.delete(k)
+    }
+  }
+  return { bucket, objects }
+}
+
 let counter = 0
 function setup() {
   const mails: Mail[] = []
   const limiters = new Map<string, FeedbackLimiter>()
   let mailError: Error | null = null
-  const db = fakeD1([MIGRATION])
+  const db = fakeD1(MIGRATIONS)
+  const media = fakeBucket()
   const env: Env = {
     AUTH_SECRET: 'test-auth-secret',
     RATE_LIMIT_SALT: 'test-salt',
@@ -46,6 +64,7 @@ function setup() {
         mails.push({ to: m.to, subject: m.subject, text: m.text })
       }
     },
+    MEDIA: media.bucket,
     LIMITER: {
       idFromName: (name) => name,
       get(id) {
@@ -59,7 +78,7 @@ function setup() {
   let t = T0
   const deps: Deps = { now: () => t, random: (bytes) => (++counter).toString(16).padStart(bytes * 2, 'a').slice(-bytes * 2) }
   return {
-    env, db, mails, deps,
+    env, db, mails, deps, objects: media.objects, now: () => t,
     advance(ms: number) { t += ms },
     failMail(e: Error | null) { mailError = e }
   }
@@ -526,5 +545,219 @@ describe('feedback-cloud: 画面', () => {
     expect(sameText('abc', 'abc')).toBe(true)
     expect(sameText('abc', 'abd')).toBe(false)
     expect(sameText('abc', 'ab')).toBe(false)
+  })
+})
+
+/* ── 画像 ─────────────────────────────────── */
+
+const PNG = (seed: string) => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new TextEncoder().encode(seed)])
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])
+const WEBP = new Uint8Array([...new TextEncoder().encode('RIFF'), 0, 0, 0, 0, ...new TextEncoder().encode('WEBPVP8 ')])
+const svg = (text: string) => new TextEncoder().encode(text)
+const hashOf = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
+
+async function putImage(ctx: Ctx, token: string | null, bytes: Uint8Array, init: { hash?: string; type?: string; cookie?: string; origin?: string } = {}) {
+  const headers = new Headers({ 'content-type': init.type ?? 'image/png', 'cf-connecting-ip': IP })
+  if (token) headers.set('authorization', `Bearer ${token}`)
+  if (init.cookie) headers.set('cookie', init.cookie)
+  if (init.origin) headers.set('origin', init.origin)
+  const res = await handle(new Request(`${BASE}/v1/images/${init.hash ?? hashOf(bytes)}`, { method: 'PUT', headers, body: bytes as BodyInit }), ctx.env, ctx.deps)
+  return { status: res.status, data: (await res.json()) as Record<string, unknown> }
+}
+
+async function getImage(ctx: Ctx, hash: string, auth: { token?: string; cookie?: string }) {
+  const headers = new Headers()
+  if (auth.token) headers.set('authorization', `Bearer ${auth.token}`)
+  if (auth.cookie) headers.set('cookie', auth.cookie)
+  const res = await handle(new Request(`${BASE}/v1/images/${hash}`, { headers }), ctx.env, ctx.deps)
+  return { status: res.status, headers: res.headers, bytes: new Uint8Array(await res.arrayBuffer()) }
+}
+
+const missing = async (ctx: Ctx, token: string, hashes: unknown) => call(ctx, '/v1/images/missing', { token, body: { hashes } })
+
+describe('feedback-cloud: 画像', () => {
+  it('上げると R2 の img/<hash> に置かれ、持ち主は読める。同じ画像の2回目は置き直さない', async () => {
+    const ctx = setup()
+    const { token } = await loginApp(ctx, 'alice@example.com')
+    const bytes = PNG('one')
+    const h = hashOf(bytes)
+    expect((await missing(ctx, token, [h, h])).data).toEqual({ ok: true, missing: [h] })
+    expect((await putImage(ctx, token, bytes)).data).toEqual({ ok: true, stored: true })
+    expect(ctx.objects.get(`img/${h}`)).toMatchObject({ type: 'image/png' })
+    expect((await missing(ctx, token, [h])).data).toEqual({ ok: true, missing: [] })
+    expect((await putImage(ctx, token, bytes)).data).toEqual({ ok: true, stored: false })
+
+    const got = await getImage(ctx, h, { token })
+    expect(got.status).toBe(200)
+    expect([...got.bytes]).toEqual([...bytes])
+    expect(got.headers.get('content-type')).toBe('image/png')
+    expect(got.headers.get('cache-control')).toBe('private, max-age=31536000, immutable')
+    expect(got.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(got.headers.get('content-security-policy')).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    expect(got.headers.get('content-disposition')).toBe('inline')
+  })
+
+  it('jpeg・webp・安全な svg は通る。形式・中身の hash・先頭のバイトが合わなければ断る', async () => {
+    const ctx = setup()
+    const { token } = await loginApp(ctx, 'alice@example.com')
+    expect((await putImage(ctx, token, JPEG, { type: 'image/jpeg' })).status).toBe(200)
+    expect((await putImage(ctx, token, WEBP, { type: 'image/webp' })).status).toBe(200)
+    const ok = svg('﻿<?xml version="1.0"?>\n<!-- 枠 -->\n<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4" fill="red"/></svg>')
+    expect((await putImage(ctx, token, ok, { type: 'image/svg+xml; charset=utf-8' })).status).toBe(200)
+
+    // hash が合わない
+    expect((await putImage(ctx, token, PNG('x'), { hash: hashOf(PNG('y')) })).data.code).toBe('bad_request')
+    // 形式と中身が違う・知らない形式・空・hash の形が違う
+    expect((await putImage(ctx, token, new Uint8Array([0xff, 0xd8, 0xff, 9]), { type: 'image/png' })).data.code).toBe('bad_request')
+    expect((await putImage(ctx, token, PNG('g'), { type: 'image/gif' })).data.code).toBe('bad_request')
+    expect((await putImage(ctx, token, new Uint8Array())).data.code).toBe('bad_request')
+    expect((await putImage(ctx, token, PNG('z'), { hash: 'A'.repeat(64) })).status).toBe(404)
+    // 大きすぎる
+    const big = new Uint8Array(CLOUD_LIMITS.imageBytes + 1)
+    big.set(PNG(''))
+    expect((await putImage(ctx, token, big)).data.code).toBe('too_large')
+    // ログインが要る
+    expect((await putImage(ctx, null, PNG('n'), { origin: BASE })).status).toBe(401)
+    expect(ctx.objects.size).toBe(3)
+  })
+
+  it('svg はスクリプト・on 属性・javascript:・foreignObject・DOCTYPE を断り、<svg で始まらなければ断る', () => {
+    const head = '<svg xmlns="http://www.w3.org/2000/svg">'
+    for (const bad of [
+      `${head}<script>alert(1)</script></svg>`,
+      `${head}<rect onload="alert(1)"/></svg>`,
+      `<svg onload = "x()"></svg>`,
+      `${head}<a href="javascript:alert(1)"><rect/></a></svg>`,
+      `${head}<foreignObject><div/></foreignObject></svg>`,
+      `<!DOCTYPE svg [<!ENTITY x "y">]>${head}</svg>`,
+      '<html><svg></svg></html>',
+      'hello'
+    ]) expect(sniffImage('svg', svg(bad)), bad).toBe(false)
+    expect(sniffImage('svg', new Uint8Array([0xff, 0xfe, 0x00]))).toBe(false)
+    expect(sniffImage('svg', svg(`  \n<!-- a --><!-- b -->${head}<path d="M0 0"/></svg>`))).toBe(true)
+    expect(sniffImage('webp', svg('RIFF0000WAVE'))).toBe(false)
+    expect(sniffImage('png', new Uint8Array([0x89, 0x50]))).toBe(false)
+  })
+
+  it('1人の合計が上限を超える画像は limit', async () => {
+    const ctx = setup()
+    const { token, me: m } = await loginApp(ctx, 'alice@example.com')
+    ctx.db.db.prepare('INSERT INTO image_owners (hash, user_id, type, bytes, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('f'.repeat(64), m.id, 'png', CLOUD_LIMITS.imageQuotaBytes - 10, T0)
+    expect((await putImage(ctx, token, PNG('ab'))).status).toBe(200) // 10 バイトでちょうど上限
+    const res = await putImage(ctx, token, PNG('abc'))
+    expect(res.status).toBe(409)
+    expect(res.data.code).toBe('limit')
+  })
+
+  it('missing は hash の形と数を確かめる', async () => {
+    const ctx = setup()
+    const { token } = await loginApp(ctx, 'alice@example.com')
+    expect((await missing(ctx, token, [])).data).toEqual({ ok: true, missing: [] })
+    expect((await missing(ctx, token, ['nope'])).data.code).toBe('bad_request')
+    expect((await missing(ctx, token, 'x')).data.code).toBe('bad_request')
+    const many = Array.from({ length: CLOUD_LIMITS.imageCheckHashes }, (_, i) => i.toString(16).padStart(64, '0'))
+    expect(((await missing(ctx, token, many)).data.missing as string[]).length).toBe(CLOUD_LIMITS.imageCheckHashes)
+    expect((await missing(ctx, token, [...many, 'f'.repeat(64)])).data.code).toBe('bad_request')
+  })
+
+  it('読めるのは持ち主と同じチームの人だけ。ほかの人には無いのと同じ。hash を知っていても上げなければ持ち主にならない', async () => {
+    const ctx = setup()
+    const a = await loginApp(ctx, 'owner@example.com')
+    const b = await loginApp(ctx, 'member@example.com')
+    const c = await loginApp(ctx, 'outsider@example.com')
+    const teamId = ((await call(ctx, '/v1/teams', { token: a.token, body: { name: '開発' } })).data.team as { id: string }).id
+    await call(ctx, `/v1/teams/${teamId}/invites`, { token: a.token, body: { email: 'member@example.com' } })
+    const link = /\/invite\/([0-9a-f]{64})/.exec(ctx.mails.at(-1)!.text)![1]!
+    await call(ctx, `/v1/invites/${link}/accept`, { method: 'POST', token: b.token })
+
+    const bytes = PNG('team')
+    const h = hashOf(bytes)
+    await putImage(ctx, a.token, bytes)
+    expect((await getImage(ctx, h, { token: a.token })).status).toBe(200)
+    expect((await getImage(ctx, h, { token: b.token })).status).toBe(200)
+    expect((await getImage(ctx, h, { token: c.token })).status).toBe(404)
+    expect((await missing(ctx, c.token, [h])).data.missing).toEqual([h])
+    expect((await getImage(ctx, 'e'.repeat(64), { token: a.token })).status).toBe(404)
+    expect((await getImage(ctx, h, {})).status).toBe(401)
+    // Web の <img> は cookie で読める（GET は Origin が無くてよい）
+    const cookie = await loginWeb(ctx, 'member@example.com')
+    expect((await getImage(ctx, h, { cookie })).status).toBe(200)
+    // cookie で上げるには自分の Origin が要る
+    expect((await putImage(ctx, null, PNG('web'), { cookie })).status).toBe(403)
+    expect((await putImage(ctx, null, PNG('web'), { cookie, origin: BASE })).status).toBe(200)
+    // チームから外れたら読めない
+    await call(ctx, `/v1/teams/${teamId}/members/${b.me.id}`, { method: 'DELETE', token: a.token })
+    expect((await getImage(ctx, h, { token: b.token })).status).toBe(404)
+  })
+
+  it('指摘に付けた画像（囲んだ場所つき）を置き、読むと返る。形の合わない画像は落とす。AIへの指示も置ける', async () => {
+    const ctx = setup()
+    const { token } = await loginApp(ctx, 'alice@example.com')
+    const h1 = 'a'.repeat(64)
+    const h2 = 'b'.repeat(64)
+    const box = { x: 10, y: 20, w: 30, h: 40, width: 800, height: 600 }
+    await put(ctx, token, 1, [
+      entry('ボタンが小さい', { images: [{ hash: h1, type: 'png', box }, { hash: h2, type: 'jpeg' }, { hash: 'bad', type: 'png' }, { hash: h1, type: 'png' }, { hash: 'c'.repeat(64), type: 'gif' }] }),
+      entry('ログイン画面を直して', { source: 'agent-prompt', title: 'Claude Code', at: '2026-11-18T11:00:00Z' }),
+      entry('画像なし', { at: '2026-11-18T09:00:00Z' })
+    ])
+    const fb = await feedback(ctx, token)
+    expect(fb.mine.map((e) => e.text)).toEqual(['ログイン画面を直して', 'ボタンが小さい', '画像なし'])
+    expect(fb.mine[0]).toMatchObject({ source: 'agent-prompt', title: 'Claude Code' })
+    expect(fb.mine[0]!.images).toBeUndefined()
+    expect(fb.mine[1]!.images).toEqual([{ hash: h1, type: 'png', box }, { hash: h2, type: 'jpeg' }])
+    expect(fb.mine[2]!.images).toBeUndefined()
+    expect(ctx.db.db.prepare('SELECT hash FROM entry_images ORDER BY hash').all().map((r) => (r as { hash: string }).hash)).toEqual([h1, h2])
+    // 置き換えると、指していた画像の行も置き換わる。PC を消すと消える
+    await put(ctx, token, 1, [entry('別の指摘', { images: [{ hash: h2, type: 'jpeg' }] })])
+    expect(ctx.db.db.prepare('SELECT hash FROM entry_images').all()).toEqual([{ hash: h2 }])
+    await call(ctx, `/v1/devices/${deviceId(1)}`, { method: 'DELETE', token })
+    expect(ctx.db.db.prepare('SELECT COUNT(*) AS n FROM entry_images').get()).toEqual({ n: 0 })
+  })
+
+  it('掃除: 指されていない古い持ち主の行を消し、持ち主のいなくなった画像を R2 から消す', async () => {
+    const ctx = setup()
+    const a = await loginApp(ctx, 'alice@example.com')
+    const b = await loginApp(ctx, 'bob@example.com')
+    const used = PNG('used')
+    const lone = PNG('lone')
+    const shared = PNG('shared')
+    for (const bytes of [used, lone, shared]) await putImage(ctx, a.token, bytes)
+    await putImage(ctx, b.token, shared)
+    await put(ctx, a.token, 1, [entry('使っている', { images: [{ hash: hashOf(used), type: 'png' }] })])
+    await put(ctx, b.token, 2, [entry('b も使っている', { images: [{ hash: hashOf(shared), type: 'png' }] })])
+
+    // 上げたばかりの画像は、まだ指されていなくても消さない（指摘を送るまでの猶予）
+    expect(await cleanupImages(ctx.env, ctx.now())).toEqual({ owners: 0, objects: 0 })
+    ctx.advance(24 * 60 * 60 * 1000 + 1)
+    expect(await cleanupImages(ctx.env, ctx.now())).toEqual({ owners: 2, objects: 1 })
+    expect([...ctx.objects.keys()].sort()).toEqual([`img/${hashOf(used)}`, `img/${hashOf(shared)}`].sort())
+    // a は shared の持ち主ではなくなったが、b が上げたので R2 には残り、b は読める
+    expect((await missing(ctx, a.token, [hashOf(shared), hashOf(used)])).data.missing).toEqual([hashOf(shared)])
+    expect((await getImage(ctx, hashOf(shared), { token: b.token })).status).toBe(200)
+    expect((await getImage(ctx, hashOf(lone), { token: a.token })).status).toBe(404)
+    // もう一度流しても何も消えない
+    expect(await cleanupImages(ctx.env, ctx.now())).toEqual({ owners: 0, objects: 0 })
+  })
+
+  it('掃除は1回に上限の行数ずつ、決まった回数まで（残りは次の回）', async () => {
+    const ctx = setup()
+    const { me: m } = await loginApp(ctx, 'alice@example.com')
+    const insert = ctx.db.db.prepare('INSERT INTO image_owners (hash, user_id, type, bytes, created_at) VALUES (?, ?, ?, ?, ?)')
+    const total = 500 * 10 + 7
+    for (let i = 0; i < total; i++) insert.run(i.toString(16).padStart(64, '0'), m.id, 'png', 1, T0)
+    ctx.advance(2 * 24 * 60 * 60 * 1000)
+    expect(await cleanupImages(ctx.env, ctx.now())).toEqual({ owners: 5000, objects: 5000 })
+    expect(await cleanupImages(ctx.env, ctx.now())).toEqual({ owners: 7, objects: 7 })
+  })
+})
+
+describe('feedback-cloud: 画面の画像と種類', () => {
+  it('画像は /v1/images/<hash> を <img> で出し、囲んだ場所は CSSOM で重ねる。AIへの指示の種類で絞れる', () => {
+    expect(APP_JS).toContain("'/v1/images/' + image.hash")
+    expect(APP_JS).toContain('mark.style.left')
+    expect(APP_JS).toContain("'agent-prompt': 'AIへの指示'")
+    expect(APP_JS).not.toMatch(/setAttribute\('style'|style: '/)
   })
 })

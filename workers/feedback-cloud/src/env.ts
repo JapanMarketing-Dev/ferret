@@ -31,6 +31,20 @@ export interface EmailSender {
   send(message: { from: { email: string; name: string }; to: string; subject: string; text: string; html?: string }): Promise<unknown>
 }
 
+/** R2 のバケット（指摘の画像。鍵は img/<中身の SHA-256>）。使う分だけ */
+export interface MediaBucket {
+  put(key: string, value: ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>
+  get(key: string): Promise<{ body: ReadableStream | null; size: number } | null>
+  head(key: string): Promise<{ size: number } | null>
+  /** 1回に 1000 個まで */
+  delete(keys: string | string[]): Promise<void>
+}
+
+/** scheduled の ctx（終わるまで待たせる） */
+export interface ScheduledContext {
+  waitUntil(promise: Promise<unknown>): void
+}
+
 export interface Env {
   /** ログインのコードの HMAC の秘密。wrangler secret put で入れる */
   AUTH_SECRET: string
@@ -44,4 +58,6 @@ export interface Env {
   EMAIL: EmailSender
   /** 頻度の上限（feedback-relay の FeedbackLimiter） */
   LIMITER: LimiterNamespace
+  /** 指摘の画像（ferret-cloud-media・非公開） */
+  MEDIA: MediaBucket
 }
