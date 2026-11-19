@@ -96,11 +96,11 @@ describe('捨てる指示・伏せる文字列', () => {
 
   it('相づち・続けての合図・パスや URL だけの文を捨てる。意味のある指示は残す', () => {
     for (const t of ['はい', 'OK', 'ok!', '続けて', '進めてください', '今どう？', 'どうですか？', 'stop', '1', 'えっと', '[Pasted text #1 +12 lines]', '[Image #1]',
-      "'/Users/someone/Desktop/a.png'", 'https://github.com/x/y', '/Users/a/b/c.ts', 'git@github.com:x/y.git']) {
+      "'/Users/taro/Desktop/a.png'", 'https://github.com/x/y', '/Users/hanako/b/c.ts', 'git@github.com:x/y.git']) {
       expect(cleanPrompt(t), t).toBeNull()
     }
     expect(cleanPrompt('e2eテストは入れないで')).toBe('e2eテストは入れないで')
-    expect(cleanPrompt("'/Users/someone/Desktop/a.png' この余白を詰めて")).toBe("'~/Desktop/a.png' この余白を詰めて")
+    expect(cleanPrompt("'/Users/taro/Desktop/a.png' この余白を詰めて")).toBe("'~/Desktop/a.png' この余白を詰めて")
     expect(cleanPrompt('[Pasted text #1 +3 lines] これを直して')).toBe('これを直して')
   })
 
