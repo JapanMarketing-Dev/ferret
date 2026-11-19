@@ -13,7 +13,9 @@ import {
   GLOBAL_RULES_FILE,
   globalRulesBody,
   globalRulesTemplate,
+  hasGlobalGuidance,
   isFerretGlobalRules,
+  type GlobalGuidance,
   renderClaudeGlobalRules,
   renderCodexGlobalBlock,
   withCodexGlobalBlock
@@ -82,6 +84,13 @@ export async function readGlobalRules(folder: string): Promise<string> {
   return globalRulesBody(await readText(path))
 }
 
+/** Agent の全体の指示へ写すもの（rules.md と開発方針）。隠した・無いフォルダなら空 */
+export async function readGlobalGuidance(folder: string): Promise<GlobalGuidance> {
+  const { readDevPlaybook, pathsOf } = await import('./devPlaybook')
+  const [rules, playbook] = await Promise.all([readGlobalRules(folder), readDevPlaybook(folder)])
+  return { rules, rulesPath: join(folder, GLOBAL_RULES_FILE), playbook, playbookDir: pathsOf(folder).dir }
+}
+
 /**
  * グローバルのフォルダの rules.md（無いときだけ雛形）と projects.md（今の登録の一覧）を書く。
  * projects.md は Ferret の印のあるもの・無いものだけを書き直す（利用者が同じ名前で置いたものは触らない）。リンクは書かない
@@ -90,6 +99,8 @@ export async function syncGlobalFiles(folder: string, projects: readonly Project
   const { writeAtomic } = await import('./orchestrator')
   const rulesPath = join(folder, GLOBAL_RULES_FILE)
   if (!(await exists(rulesPath))) await writeAtomic(folder, GLOBAL_RULES_FILE, globalRulesTemplate(lang))
+  // 開発方針のフォルダ（playbook.md の雛形・HOW-TO.md。src/main/devPlaybook.ts）
+  await (await import('./devPlaybook')).ensureDevPlaybookFiles(folder, lang)
   const listPath = join(folder, GLOBAL_PROJECTS_FILE)
   if (await isLink(listPath)) return
   const current = await readText(listPath)
@@ -107,18 +118,18 @@ export interface AgentRulesResult {
 }
 
 /**
- * 全体のルールを、使っている Agent（設定のフォルダがあるもの）の全体の指示へ写す。ルールが空なら Ferret が書いたものを外す。
+ * 全体のルールと開発方針を、使っている Agent（設定のフォルダがあるもの）の全体の指示へ写す。どちらも空なら Ferret が書いたものを外す。
  * - Claude Code: <設定のフォルダ>/rules/ferret-global-rules.md（Ferret だけが持つファイル。印の無い同名のもの・リンクは触らない）
  * - Codex: <設定のフォルダ>/AGENTS.md の印で囲んだ欄だけ（印の外の利用者の文はそのまま。リンクなら触らない）
  */
-export async function syncAgentGlobalRules(body: string, rulesPath: string, home: string = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<AgentRulesResult> {
+export async function syncAgentGlobalRules(guidance: GlobalGuidance, home: string = homedir(), env: NodeJS.ProcessEnv = process.env): Promise<AgentRulesResult> {
   const { writeAtomic } = await import('./orchestrator')
   const result: AgentRulesResult = { changed: [], skipped: [] }
   const claudeDir = agentConfigDir('claude', env, home, join)
   if (await exists(claudeDir)) {
     const dir = join(claudeDir, 'rules')
     const path = join(dir, CLAUDE_GLOBAL_RULES_FILE)
-    const want = renderClaudeGlobalRules(body, rulesPath)
+    const want = renderClaudeGlobalRules(guidance)
     if (await isLink(dir) || await isLink(path)) result.skipped.push(path)
     else {
       const current = await readText(path)
@@ -137,7 +148,7 @@ export async function syncAgentGlobalRules(body: string, rulesPath: string, home
     const path = join(codexDir, 'AGENTS.md')
     if (await isLink(path)) result.skipped.push(path)
     else {
-      const next = withCodexGlobalBlock(await readText(path), body.trim() ? renderCodexGlobalBlock(body, rulesPath) : null)
+      const next = withCodexGlobalBlock(await readText(path), hasGlobalGuidance(guidance) ? renderCodexGlobalBlock(guidance) : null)
       if (next !== null) {
         await writeAtomic(codexDir, 'AGENTS.md', next)
         result.changed.push(path)

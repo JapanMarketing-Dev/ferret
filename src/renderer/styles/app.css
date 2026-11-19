@@ -441,6 +441,67 @@ button {
   color: var(--color-warning);
 }
 
+/* 開発方針（グローバルのダッシュボード。DevPlaybookSection） */
+.dev-playbook__add {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.dev-playbook__input {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+.dev-playbook__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dev-playbook__rebuild {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dev-playbook__list {
+  margin-top: var(--space-2);
+}
+
+.dev-playbook__list .row.is-disabled .row__title {
+  color: var(--color-text-muted);
+}
+
+.dev-playbook__list .row__trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dev-playbook__list .row__description {
+  overflow-wrap: anywhere;
+}
+
+.dev-playbook__open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+@media (max-width: 560px) {
+  .dev-playbook__add {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dev-playbook__actions {
+    flex-direction: row;
+  }
+}
+
 .orchestra-composer {
   display: flex;
   align-items: flex-end;

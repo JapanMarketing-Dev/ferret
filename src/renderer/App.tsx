@@ -1281,6 +1281,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
                     projects={projects.projects}
                     orchestraId={workspace.projectId ?? ''}
                     onOpenProject={(id) => void window.ade.invoke('project:switch', id).catch(() => undefined)}
+                    onOpenFile={files.open}
                   />
                 </Suspense></ErrorBoundary>
               ) : centerTab === 'settings' && settingsOpen ? (

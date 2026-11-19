@@ -158,7 +158,14 @@ export interface OrchestraRules {
    * settings には持たない（sanitizeOrchestraRules が外す）。書くときに main が rules.md から読んで足す
    */
   global?: string
+  /**
+   * すべてのプロジェクトの開発方針（グローバルの dev-playbook/playbook.md の中身に、前置きを足したもの。@shared/devPlaybook）。
+   * global と同じく settings には持たない
+   */
+  playbook?: string
 }
+
+const PLAYBOOK_TITLE = 'Development playbook for every project (how to build and ship with AI; from the Global orchestra in Ferret):'
 
 const GLOBAL_TITLE = 'Global rules for every project (from the Global orchestra\'s rules.md in Ferret):'
 
@@ -204,6 +211,7 @@ export function renderSubagent(child: OrchestratorChild, rules?: OrchestraRules)
     '- End with a short report: what you changed (files), how you checked it, and anything left for the orchestrator.',
     ...rulesBlock(ALLOWED_TITLE, rules?.allowed),
     ...rulesBlock(GLOBAL_TITLE, rules?.global),
+    ...rulesBlock(PLAYBOOK_TITLE, rules?.playbook),
     ...rulesBlock('Shared rules for all products (set by the human in Ferret):', rules?.shared),
     ...rulesBlock(`Rules only for ${name} (set by the human in Ferret; infrastructure and other per-product settings):`, child.projectId ? rules?.products?.[child.projectId] : undefined),
     ''
@@ -289,6 +297,7 @@ export function renderOrchestratorGuide(children: readonly OrchestratorChild[], 
     '13. Requests must be specific. When you hand work to a subagent (or a lead to a worker), state the exact target (screen, file, flow), the acceptance criteria and the benchmark to match, not a broad "make it better".',
     ...rulesBlock(`### ${ALLOWED_TITLE}`, rules?.allowed),
     ...rulesBlock(`### ${GLOBAL_TITLE}`, rules?.global),
+    ...rulesBlock(`### ${PLAYBOOK_TITLE}`, rules?.playbook),
     ...rulesBlock('### Shared rules (set by the human in Ferret)', rules?.shared),
     ...children.flatMap((c) => rulesBlock(`### Rules only for ${oneLine(c.name)} (set by the human in Ferret)`, c.projectId ? rules?.products?.[c.projectId] : undefined)),
     GUIDE_END

@@ -215,16 +215,16 @@ describe('全体のルール（rules.md）の中身', () => {
   })
 
   it('Claude Code へのファイルは印と元の場所を持つ。空なら null（消す）', () => {
-    const text = renderClaudeGlobalRules('- rule', '/g/rules.md')!
+    const text = renderClaudeGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' })!
     expect(text).toContain(GLOBAL_RULES_MARKER)
     expect(text).toContain('/g/rules.md')
     expect(text).toContain('- rule')
-    expect(renderClaudeGlobalRules('  \n', '/g/rules.md')).toBeNull()
+    expect(renderClaudeGlobalRules({ rules: '  \n', rulesPath: '/g/rules.md' })).toBeNull()
   })
 })
 
 describe('Codex の AGENTS.md の欄', () => {
-  const block = renderCodexGlobalBlock('- rule', '/g/rules.md')
+  const block = renderCodexGlobalBlock({ rules: '- rule', rulesPath: '/g/rules.md' })
 
   it('無いファイルには欄だけで作る。欄が要らなければ作らない', () => {
     expect(withCodexGlobalBlock(null, block)).toBe(`${block}\n`)
@@ -237,7 +237,7 @@ describe('Codex の AGENTS.md の欄', () => {
     expect(first.startsWith('# 自分のルール\n- A\n\n')).toBe(true)
     expect(first).toContain(CODEX_BLOCK_START)
     expect(withCodexGlobalBlock(first, block)).toBeNull()
-    const next = withCodexGlobalBlock(`${first}\n# 後ろの文\n`, renderCodexGlobalBlock('- new', '/g/rules.md'))!
+    const next = withCodexGlobalBlock(`${first}\n# 後ろの文\n`, renderCodexGlobalBlock({ rules: '- new', rulesPath: '/g/rules.md' }))!
     expect(next).toContain('- new')
     expect(next).not.toContain('- rule')
     expect(next.startsWith('# 自分のルール\n- A\n')).toBe(true)
@@ -324,9 +324,9 @@ describe('ファイルの書き込み', () => {
     const claudeFile = () => join(dir, '.claude', 'rules', CLAUDE_GLOBAL_RULES_FILE)
 
     it('設定のフォルダがある Agent にだけ書く', async () => {
-      expect(await syncAgentGlobalRules('- rule', '/g/rules.md', dir, env)).toEqual({ changed: [], skipped: [] })
+      expect(await syncAgentGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' }, dir, env)).toEqual({ changed: [], skipped: [] })
       await mkdir(join(dir, '.claude'))
-      const result = await syncAgentGlobalRules('- rule', '/g/rules.md', dir, env)
+      const result = await syncAgentGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' }, dir, env)
       expect(result.changed).toEqual([claudeFile()])
       expect(await readFile(claudeFile(), 'utf8')).toContain('- rule')
     })
@@ -336,13 +336,13 @@ describe('ファイルの書き込み', () => {
       await mkdir(join(dir, '.codex'))
       await writeFile(join(dir, '.codex', 'AGENTS.md'), '# 自分の指示\n')
       await writeFile(join(dir, '.claude', 'CLAUDE.md'), '# 自分の指示\n')
-      const first = await syncAgentGlobalRules('- rule', '/g/rules.md', dir, env)
+      const first = await syncAgentGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' }, dir, env)
       expect(first.changed).toHaveLength(2)
       const codex = await readFile(join(dir, '.codex', 'AGENTS.md'), 'utf8')
       expect(codex.startsWith('# 自分の指示\n')).toBe(true)
       expect(codex).toContain('- rule')
-      expect((await syncAgentGlobalRules('- rule', '/g/rules.md', dir, env)).changed).toEqual([])
-      const cleared = await syncAgentGlobalRules('', '/g/rules.md', dir, env)
+      expect((await syncAgentGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' }, dir, env)).changed).toEqual([])
+      const cleared = await syncAgentGlobalRules({ rules: '', rulesPath: '/g/rules.md' }, dir, env)
       expect(cleared.changed).toHaveLength(2)
       await expect(stat(claudeFile())).rejects.toThrow()
       expect(await readFile(join(dir, '.codex', 'AGENTS.md'), 'utf8')).toBe('# 自分の指示\n')
@@ -356,7 +356,7 @@ describe('ファイルの書き込み', () => {
       await mkdir(join(dir, '.codex'))
       await writeFile(join(dir, 'other.md'), 'x')
       await symlink(join(dir, 'other.md'), join(dir, '.codex', 'AGENTS.md'))
-      const result = await syncAgentGlobalRules('- rule', '/g/rules.md', dir, env)
+      const result = await syncAgentGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' }, dir, env)
       expect(result.changed).toEqual([])
       expect(result.skipped).toHaveLength(2)
       expect(await readFile(claudeFile(), 'utf8')).toBe('mine')
@@ -368,7 +368,7 @@ describe('ファイルの書き込み', () => {
       const codex = join(dir, 'x')
       await mkdir(claude)
       await mkdir(codex)
-      await syncAgentGlobalRules('- rule', '/g/rules.md', dir, { CLAUDE_CONFIG_DIR: claude, CODEX_HOME: codex })
+      await syncAgentGlobalRules({ rules: '- rule', rulesPath: '/g/rules.md' }, dir, { CLAUDE_CONFIG_DIR: claude, CODEX_HOME: codex })
       expect(await readFile(join(claude, 'rules', CLAUDE_GLOBAL_RULES_FILE), 'utf8')).toContain('- rule')
       expect(await readFile(join(codex, 'AGENTS.md'), 'utf8')).toContain('- rule')
     })

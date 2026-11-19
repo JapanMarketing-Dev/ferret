@@ -233,6 +233,19 @@ export interface IpcRequests {
   'settings:agentRequests': (prefs: import('./agentRequests').AgentRequestPrefs) => void
   /** 選んだ依頼文を、開いているプロジェクトの Agent へ送る（複数ならまとめて1つの依頼） */
   'agentRequests:send': (ids: string[]) => { ok: boolean; message: string; noAgent?: boolean }
+  /** 開発方針（グローバルの dev-playbook/。@shared/devPlaybook）の今の状態。Agent が書いたものを見て状態を進める */
+  'devPlaybook:state': () => import('./devPlaybook').DevPlaybookState
+  /** URL（http・https）か貼り付けた文を足し、グローバルの Agent に取り込みを渡す。Agent が居なければ send.noAgent */
+  'devPlaybook:add': (value: string) => DevPlaybookAddResult
+  /** main がファイルを選ばせ、写して足し、取り込みを渡す。選ばなければ null */
+  'devPlaybook:addFile': () => DevPlaybookAddResult | null
+  /** 取り込みを（もう一度）渡す */
+  'devPlaybook:digest': (id: string) => { ok: boolean; message: string; noAgent?: boolean }
+  /** 入れる・外す・消したあとに方針をまとめ直すよう渡す */
+  'devPlaybook:rebuild': () => { ok: boolean; message: string; noAgent?: boolean }
+  'devPlaybook:setEnabled': (id: string, enabled: boolean) => import('./devPlaybook').DevPlaybookState
+  /** 一覧から外し、要約と写しも消す */
+  'devPlaybook:remove': (id: string) => import('./devPlaybook').DevPlaybookState
   /** 全体（すべてのプロダクト）の共通のルールとプロダクトごとのルール */
   'settings:orchestra': (rules: import('./orchestrator').OrchestraRules) => void
 
@@ -633,6 +646,16 @@ export interface IpcRequests {
   'feedback:captureWindow': () => { type: 'image/png' | 'image/jpeg'; base64: string; width: number; height: number }
 }
 
+/** 開発方針に足した結果 */
+export interface DevPlaybookAddResult {
+  state: import('./devPlaybook').DevPlaybookState
+  sourceId: string
+  /** 同じ URL がもうあった（足さず、渡しもしない） */
+  duplicate: boolean
+  /** 取り込みを Agent に渡した結果（duplicate なら無い） */
+  send?: { ok: boolean; message: string; noAgent?: boolean }
+}
+
 export interface IpcEvents {
   'browser:stateChanged': (state: BrowserState) => void
   /** 内蔵ブラウザから利用者へ短く知らせる（タブの上限など） */
@@ -651,6 +674,8 @@ export interface IpcEvents {
   'menu:command': (command: MenuCommand) => void
   'workspace:changed': (state: WorkspaceState) => void
   'projects:changed': (state: ProjectsState) => void
+  /** 開発方針の状態が変わった（取り込みが済んだ・方針が書き直された） */
+  'devPlaybook:changed': (state: import('./devPlaybook').DevPlaybookState) => void
   'project:cloneProgress': (progress: CloneProgress) => void
   /** エージェントの設定が変わった（settings:agents の保存後） */
   'agents:changed': (options: AgentOption[]) => void
@@ -803,6 +828,7 @@ export const IPC_REQUEST_CHANNELS = [
   'settings:agentPrompt',
   'settings:agentRequests',
   'agentRequests:send',
+  'devPlaybook:state', 'devPlaybook:add', 'devPlaybook:addFile', 'devPlaybook:digest', 'devPlaybook:rebuild', 'devPlaybook:setEnabled', 'devPlaybook:remove',
   'settings:orchestra',
   'accounts:list',
   'accounts:add',
@@ -877,6 +903,7 @@ export const IPC_EVENT_CHANNELS = [
   'menu:command',
   'workspace:changed',
   'projects:changed',
+  'devPlaybook:changed',
   'project:cloneProgress',
   'agents:changed',
   'recording:status',

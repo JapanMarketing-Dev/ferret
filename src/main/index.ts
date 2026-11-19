@@ -13,7 +13,7 @@ import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
 import { droppedFolder, inspectDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
-import { existsSync, realpathSync, watch } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { availableParallelism, homedir, hostname, totalmem } from 'node:os'
 import type { SessionPaths } from './sessions/paths'
@@ -50,10 +50,11 @@ import { normalizeAnnotationColor } from '@shared/annotation'
 import { extensionPopupGetsReviewPreload, shouldCloseExtensionPopup, type AnnotationActivity, type PopupDismissCause } from '@shared/popupAnnotation'
 import { findProjectByFolder, markProjectOpened, newProject, reorderProjects, upsertProjectFolder } from './projects'
 import { ensureWorkFolder, withWorkProject, workFolderPath } from './workProject'
-import { ensureGlobalFolder, globalFolderPath, readGlobalRules, syncAgentGlobalRules, syncGlobalFiles, withGlobalOrchestra } from './globalOrchestra'
+import { ensureGlobalFolder, globalFolderPath, readGlobalGuidance, readGlobalRules, syncAgentGlobalRules, syncGlobalFiles, withGlobalOrchestra } from './globalOrchestra'
 import { syncVisualReviewSkill } from './visualReviewSkill'
 import { CallLog, setApiCallSink } from './decision/callLog'
 import { GLOBAL_PROJECTS_FILE, GLOBAL_RULES_FILE } from '@shared/globalOrchestra'
+import { DEV_PLAYBOOK_DIGESTS_DIR, DEV_PLAYBOOK_DIR, DEV_PLAYBOOK_FILE, DEV_PLAYBOOK_SOURCES_FILE } from '@shared/devPlaybook'
 import { archiveFallback, canArchive, isArchived } from '@shared/projectArchive'
 import { currentOrchestra, isGlobalOrchestra, moveInTree, orchestraList, orchestraMembers, removeOrchestra } from '@shared/orchestras'
 import { checkSshTarget, isValidSshHost, remoteWorkspaceDirName, sshDefaultName, type SshTarget } from '@shared/sshCommand'
@@ -975,14 +976,22 @@ async function orchestraRulesWithGlobal(): Promise<import('@shared/orchestrator'
   const rules = currentSettings().orchestra
   const global = currentSettings().projects.find(isGlobalOrchestra)
   if (!global || global.archived) return rules
-  const body = await readGlobalRules(global.folderPath).catch(() => '')
-  return body ? { ...rules, global: body } : rules
+  const [body, playbook] = await Promise.all([
+    readGlobalRules(global.folderPath).catch(() => ''),
+    // 開発方針（dev-playbook/playbook.md。@shared/devPlaybook）も、すべてのオーケストラの欄と subagent に写す
+    import('./devPlaybook').then(async (m) => {
+      const { orchestraPlaybookText } = await import('@shared/devPlaybook')
+      return orchestraPlaybookText(await m.readDevPlaybook(global.folderPath), m.pathsOf(global.folderPath).dir)
+    }).catch(() => '')
+  ])
+  if (!body && !playbook) return rules
+  return { ...rules, ...(body ? { global: body } : {}), ...(playbook ? { playbook } : {}) }
 }
 
 /** グローバルのフォルダの rules.md（無ければ雛形）と projects.md を書き、欄に書く場所を返す */
 async function prepareGlobalFolder(project: Project): Promise<import('@shared/globalOrchestra').GlobalGuide> {
   await syncGlobalFiles(project.folderPath, currentSettings().projects, guideLanguage())
-  return { rulesPath: join(project.folderPath, GLOBAL_RULES_FILE), projectsPath: join(project.folderPath, GLOBAL_PROJECTS_FILE) }
+  return { rulesPath: join(project.folderPath, GLOBAL_RULES_FILE), projectsPath: join(project.folderPath, GLOBAL_PROJECTS_FILE), playbookDir: join(project.folderPath, DEV_PLAYBOOK_DIR) }
 }
 
 /** オーケストレーターの子にするプロジェクト。オーケストラはそこに属するプロジェクト（SSH・外したものを除く。@shared/orchestras） */
@@ -1070,7 +1079,7 @@ let globalRulesTimer: NodeJS.Timeout | null = null
 let globalRulesWatcher: { folder: string; close(): void } | null = null
 
 /**
- * 全体のルール（グローバルの rules.md）を写す。続けて変わったときは1回にまとめる。
+ * 全体のルール（グローバルの rules.md）と開発方針（dev-playbook/playbook.md）を写す。続けて変わったときは1回にまとめる。
  * - すべてのオーケストラの欄・subagent（syncEditorWorkspace が rules.md を読み直す）
  * - Claude Code・Codex の全体の指示（配布版だけ。開発版・E2E は、ふだん使う Agent の設定に触らない）
  */
@@ -1083,15 +1092,18 @@ function scheduleGlobalRulesSync(delayMs = 1000): void {
     const global = currentSettings().projects.find(isGlobalOrchestra)
     void (async () => {
       // 隠した・消したときは空として、Ferret が写したものを外す
-      const body = global && !global.archived ? await readGlobalRules(global.folderPath) : ''
-      return syncAgentGlobalRules(body, global ? join(global.folderPath, GLOBAL_RULES_FILE) : GLOBAL_RULES_FILE)
+      const guidance = global && !global.archived ? await readGlobalGuidance(global.folderPath) : { rules: '', rulesPath: global ? join(global.folderPath, GLOBAL_RULES_FILE) : GLOBAL_RULES_FILE }
+      return syncAgentGlobalRules(guidance)
     })()
       .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'sync global rules' }))
   }, delayMs)
   globalRulesTimer.unref?.()
 }
 
-/** グローバルのフォルダの rules.md の変更を見張る（Agent・人が書き換えたらすぐ写す）。フォルダが変わった・隠したら付け直す */
+/**
+ * グローバルのフォルダの rules.md と、開発方針のフォルダ（dev-playbook/ の playbook.md・sources.json・sources/ の要約）の変更を見張る
+ * （Agent・人が書き換えたらすぐ写し、取り込みの状態を画面へ知らせる）。フォルダが変わった・隠したら付け直す
+ */
 function watchGlobalRules(): void {
   const global = currentSettings().projects.find(isGlobalOrchestra)
   const folder = global && !global.archived ? global.folderPath : null
@@ -1100,16 +1112,94 @@ function watchGlobalRules(): void {
   globalRulesWatcher = null
   // 隠した・戻した・置き場が変わったら、Agent の全体の指示も合わせる（隠したら外す）
   scheduleGlobalRulesSync()
+  scheduleDevPlaybookRefresh()
   if (!folder) return
-  try {
-    const watcher = watch(folder, { persistent: false }, (_event, file) => {
-      if (!file || String(file) === GLOBAL_RULES_FILE) scheduleGlobalRulesSync()
-    })
-    watcher.on('error', () => { watcher.close(); if (globalRulesWatcher?.folder === folder) globalRulesWatcher = null })
-    globalRulesWatcher = { folder, close: () => watcher.close() }
-  } catch {
-    // 見張れない（フォルダが無い・上限）ときは、起動・プロジェクトの変更・開いたときの同期だけで写す
+  const watchers: FSWatcher[] = []
+  const add = (dir: string, onChange: (file: string | null) => void) => {
+    try {
+      const watcher = watch(dir, { persistent: false }, (_event, file) => onChange(file ? String(file) : null))
+      watcher.on('error', () => { watcher.close() })
+      watchers.push(watcher)
+    } catch {
+      // 見張れない（フォルダが無い・上限）ときは、起動・プロジェクトの変更・開いたときの同期だけで写す
+    }
   }
+  add(folder, (file) => { if (!file || file === GLOBAL_RULES_FILE) scheduleGlobalRulesSync() })
+  const playbookDir = join(folder, DEV_PLAYBOOK_DIR)
+  try { mkdirSync(join(playbookDir, DEV_PLAYBOOK_DIGESTS_DIR), { recursive: true }) } catch { /* 作れなければ見張らない（想定内） */ }
+  add(playbookDir, (file) => {
+    if (!file || file === DEV_PLAYBOOK_FILE) { scheduleGlobalRulesSync(); scheduleDevPlaybookRefresh() }
+    else if (file === DEV_PLAYBOOK_SOURCES_FILE) scheduleDevPlaybookRefresh()
+  })
+  add(join(playbookDir, DEV_PLAYBOOK_DIGESTS_DIR), (file) => { if (!file || file.endsWith('.md')) scheduleDevPlaybookRefresh() })
+  if (watchers.length) globalRulesWatcher = { folder, close: () => { for (const w of watchers) w.close() } }
+}
+
+let devPlaybookTimer: NodeJS.Timeout | null = null
+
+/** 開発方針の取り込みの状態を進め（Agent が要約と方針を書いたら反映済み）、画面へ知らせる。続けて変わったときは1回にまとめる */
+function scheduleDevPlaybookRefresh(delayMs = 500): void {
+  if (devPlaybookTimer) clearTimeout(devPlaybookTimer)
+  devPlaybookTimer = setTimeout(() => {
+    devPlaybookTimer = null
+    void devPlaybookState()
+      .then((state) => send('devPlaybook:changed', state))
+      .catch((err: unknown) => reportHandled(err, { area: 'agent-launch', op: 'refresh dev playbook' }))
+  }, delayMs)
+  devPlaybookTimer.unref?.()
+}
+
+/** グローバルのオーケストラのフォルダ（隠した・無いなら null） */
+function globalOrchestraFolder(): string | null {
+  const global = currentSettings().projects.find(isGlobalOrchestra)
+  return global && !global.archived ? global.folderPath : null
+}
+
+const NO_DEV_PLAYBOOK: import('@shared/devPlaybook').DevPlaybookState = { available: false, sources: [], playbookPath: null, hasPlaybook: false, rebuild: 'none' }
+
+async function devPlaybookState(): Promise<import('@shared/devPlaybook').DevPlaybookState> {
+  const folder = globalOrchestraFolder()
+  if (!folder) return NO_DEV_PLAYBOOK
+  return (await import('./devPlaybook')).refreshDevPlaybook(folder)
+}
+
+function requireGlobalOrchestraFolder(): string {
+  const folder = globalOrchestraFolder()
+  if (!folder) throw new UserFacingError(t('devPlaybook.errors.noGlobal'))
+  return folder
+}
+
+/** 開発方針の入力の誤りを画面の言葉にする */
+function devPlaybookError(err: unknown): never {
+  if ((err as Error)?.name === 'DevPlaybookInputError') {
+    const reason = (err as import('./devPlaybook').DevPlaybookInputError).reason
+    throw new UserFacingError(t(`devPlaybook.errors.${reason}`))
+  }
+  throw err
+}
+
+/**
+ * 1つの取り込みを、グローバルのオーケストラの Agent へ渡す（@shared/devPlaybook の renderDigestPrompt）。
+ * 宛先はグローバルのフォルダで動いている Agent。居なければ noAgent を返し、画面がグローバルを開いていれば Agent を起動して送り直す
+ */
+async function sendDevPlaybookDigest(id: unknown): Promise<{ ok: boolean; message: string; noAgent?: boolean }> {
+  const folder = requireGlobalOrchestraFolder()
+  const m = await import('./devPlaybook')
+  const { renderDigestPrompt } = await import('@shared/devPlaybook')
+  const source = (await m.readDevPlaybookFile(folder)).sources.find((s) => s.id === id)
+  if (!source) throw new UserFacingError(t('devPlaybook.errors.notFound'))
+  const paths = await m.ensureDevPlaybookFiles(folder, guideLanguage())
+  const result = await sendToGlobalAgent(folder, renderDigestPrompt(source, paths))
+  if (result.ok) await m.markDevPlaybookRequested(folder, source.id)
+  scheduleDevPlaybookRefresh(0)
+  return result
+}
+
+async function sendToGlobalAgent(folder: string, text: string): Promise<{ ok: boolean; message: string; noAgent?: boolean }> {
+  const target = terminals ? await terminals.resolveSendTarget(null, folder) : null
+  if (!target) return { ok: false, message: t('devPlaybook.noAgent'), noAgent: true }
+  const { ok, message } = await terminals!.sendReview(target, text)
+  return { ok, message }
 }
 
 /** オーケストラの中身（リンク・subagent）を、今の登録に合わせる（プロジェクトを足した・消した・移した・開いたとき）。アーカイブしたものを除く全部のオーケストラ */
@@ -1677,7 +1767,7 @@ async function ensureRecording(): Promise<RecordingController> {
 /** Agent に入れる設定の skill に書く、この Ferret の設定ファイルの場所 */
 function agentSkillContext(): SkillContext {
   const dir = configDir()
-  return { settingsPath: join(dir, 'settings.json'), schemaPath: join(dir, 'settings.schema.json'), version: app.getVersion(), editorWorkspacePath: openOrchestra()?.folderPath ?? join(app.getPath('userData'), 'editor-workspace') }
+  return { settingsPath: join(dir, 'settings.json'), schemaPath: join(dir, 'settings.schema.json'), version: app.getVersion(), editorWorkspacePath: openOrchestra()?.folderPath ?? join(app.getPath('userData'), 'editor-workspace'), globalFolderPath: globalOrchestraFolder() ?? undefined }
 }
 
 /**
@@ -2836,6 +2926,44 @@ function registerIpc(): void {
       updateSettings({ agentRequests: sanitizeAgentRequestPrefs(prefs) })
     },
     'agentRequests:send': (ids) => sendAgentRequests(ids),
+    'devPlaybook:state': () => devPlaybookState(),
+    'devPlaybook:add': async (value) => {
+      const folder = requireGlobalOrchestraFolder()
+      const added = await (await import('./devPlaybook')).addDevPlaybookInput(folder, value, { lang: guideLanguage() }).catch(devPlaybookError)
+      const send = added.duplicate ? undefined : await sendDevPlaybookDigest(added.source.id)
+      return { state: await devPlaybookState(), sourceId: added.source.id, duplicate: added.duplicate, ...(send ? { send } : {}) }
+    },
+    'devPlaybook:addFile': async () => {
+      const folder = requireGlobalOrchestraFolder()
+      const { SOURCE_FILE_EXTENSIONS } = await import('@shared/devPlaybook')
+      const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+      // 読むファイルは、ここで人が選んだものだけ（renderer からパスは受けない）
+      const options: Electron.OpenDialogOptions = { title: t('devPlaybook.pickFile'), properties: ['openFile'], filters: [{ name: t('devPlaybook.fileFilter'), extensions: [...SOURCE_FILE_EXTENSIONS] }] }
+      const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+      const path = picked.canceled ? undefined : picked.filePaths[0]
+      if (!path) return null
+      const added = await (await import('./devPlaybook')).addDevPlaybookFile(folder, path, { lang: guideLanguage() }).catch(devPlaybookError)
+      const send = await sendDevPlaybookDigest(added.source.id)
+      return { state: await devPlaybookState(), sourceId: added.source.id, duplicate: false, send }
+    },
+    'devPlaybook:digest': (id) => sendDevPlaybookDigest(id),
+    'devPlaybook:rebuild': async () => {
+      const folder = requireGlobalOrchestraFolder()
+      const m = await import('./devPlaybook')
+      const { renderRebuildPrompt } = await import('@shared/devPlaybook')
+      const result = await sendToGlobalAgent(folder, renderRebuildPrompt(await m.ensureDevPlaybookFiles(folder, guideLanguage())))
+      if (result.ok) await m.markDevPlaybookRebuildRequested(folder)
+      scheduleDevPlaybookRefresh(0)
+      return result
+    },
+    'devPlaybook:setEnabled': async (id, enabled) => {
+      await (await import('./devPlaybook')).setDevPlaybookEnabled(requireGlobalOrchestraFolder(), id, enabled === true).catch(devPlaybookError)
+      return devPlaybookState()
+    },
+    'devPlaybook:remove': async (id) => {
+      await (await import('./devPlaybook')).removeDevPlaybookSource(requireGlobalOrchestraFolder(), id).catch(devPlaybookError)
+      return devPlaybookState()
+    },
     'settings:orchestra': async (rules) => {
       const { sanitizeOrchestraRules } = await import('@shared/orchestrator')
       updateSettings({ orchestra: sanitizeOrchestraRules(rules) })

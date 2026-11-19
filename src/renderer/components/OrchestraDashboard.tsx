@@ -1,10 +1,11 @@
 import type { Project } from '@shared/types'
-import { orchestraMembers } from '@shared/orchestras'
+import { isGlobalOrchestra, orchestraMembers } from '@shared/orchestras'
 import { errorMessage } from '../lib/errors'
 import { useT } from '../lib/i18n'
 import { useProjectActivity } from '../terminal/agentActivity'
 import { useToast } from '../ui'
 import { AgentRequestsSection } from './AgentRequestsSection'
+import { DevPlaybookSection } from './DevPlaybookSection'
 import { OrchestraComposer } from './OrchestraComposer'
 
 /**
@@ -12,18 +13,22 @@ import { OrchestraComposer } from './OrchestraComposer'
  * - 全体への指示の欄（開いているオーケストラの Agent へ文を送る）
  * - Agent への依頼（雛形を選んで送る・まとめて送る・1回きりのものは隠す）
  * - プロダクトの表：オーケストラの対象・対象外、Agent の動き、開く・アーカイブ
+ * - グローバルのオーケストラだけ、開発方針（動画・記事などから、すべてのプロジェクトの Agent が従う方針を作る。DevPlaybookSection）
  * 未対応の指摘・確認リスト（human.md）・インフラのコスト・今月／今年の集計は、使われていなかったので出さない（2026-11-13 本人指示）
  */
-export function OrchestraDashboard({ projects, orchestraId, onOpenProject }: {
+export function OrchestraDashboard({ projects, orchestraId, onOpenProject, onOpenFile }: {
   projects: readonly Project[]
   /** 開いているオーケストラの id */
   orchestraId: string
   onOpenProject: (projectId: string) => void
+  /** ファイルをエディタで開く（開発方針の playbook.md） */
+  onOpenFile?: (path: string) => void
 }) {
   const t = useT()
   const toast = useToast()
   const activity = useProjectActivity()
   const rows = orchestraMembers(projects, orchestraId, { includeExcluded: true })
+  const global = projects.some((p) => p.id === orchestraId && isGlobalOrchestra(p))
 
   const toggleIncluded = (id: string, included: boolean) => {
     void window.ade.invoke('project:update', { id, orchestraExcluded: !included })
@@ -42,6 +47,7 @@ export function OrchestraDashboard({ projects, orchestraId, onOpenProject }: {
       <h2 className="orchestra__title">{t('orchestra.dashboardTitle')}</h2>
     </header>
     <OrchestraComposer />
+    {global && <DevPlaybookSection onOpenFile={onOpenFile} />}
     <section className="orchestra__section" data-testid="orchestra-requests">
       <h3>{t('orchestra.requestsTitle')}</h3>
       <AgentRequestsSection />

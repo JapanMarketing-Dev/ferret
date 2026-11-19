@@ -9,6 +9,9 @@
  * へ写す。プロジェクトのフォルダには書かない（各プロジェクトの git を汚さない）
  */
 
+import { markdownBody } from './markdownBody'
+import { DEV_PLAYBOOK_DIR, DEV_PLAYBOOK_FILE, DEV_PLAYBOOK_HEADING, DEV_PLAYBOOK_HOWTO_FILE, devPlaybookPreamble, nestHeadings } from './devPlaybook'
+
 export const GLOBAL_FOLDER_NAME = 'global'
 export const GLOBAL_RULES_FILE = 'rules.md'
 export const GLOBAL_PROJECTS_FILE = 'projects.md'
@@ -25,28 +28,9 @@ export function isFerretGlobalRules(text: string): boolean {
   return text.includes(GLOBAL_RULES_MARKER)
 }
 
-/**
- * rules.md から写す中身。コメント（<!-- -->）・先頭の見出し（# …）・中身の無い箇条（- だけ）を外し、前後の空行を詰める。
- * 雛形のままなら空文字
- */
+/** rules.md から写す中身。雛形のままなら空文字 */
 export function globalRulesBody(text: string | null | undefined): string {
-  if (!text) return ''
-  // 外したあとにまたコメントができることがあるので、変わらなくなるまで繰り返す
-  let plain = text.replace(/\r\n?/g, '\n')
-  let before: string
-  do {
-    before = plain
-    plain = plain.replace(/<!--[\s\S]*?-->/g, '')
-  } while (plain !== before)
-  const lines = plain.split('\n')
-  const firstContent = lines.findIndex((l) => l.trim() !== '')
-  if (firstContent >= 0 && /^#\s/.test(lines[firstContent]!.trim())) lines.splice(firstContent, 1)
-  const body = lines
-    .filter((l) => !/^\s*[-*]\s*$/.test(l))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-  return body.length > MAX_GLOBAL_RULES_CHARS ? body.slice(0, MAX_GLOBAL_RULES_CHARS).trimEnd() : body
+  return markdownBody(text, MAX_GLOBAL_RULES_CHARS)
 }
 
 /** rules.md の雛形（無いときだけ作る。あとは人と Agent が書く） */
@@ -56,30 +40,55 @@ export function globalRulesTemplate(lang: 'ja' | 'en'): string {
     : ['# Global rules (all projects)', '', '<!-- Rules every project registered in Ferret must follow, one per line. Ferret copies them into every orchestra and into Claude Code\'s and Codex\'s global instructions. Text inside these comment markers is not copied. -->', '- ', ''].join('\n')
 }
 
-/** Claude Code の <設定のフォルダ>/rules/ferret-global-rules.md の中身。ルールが空なら null（ファイルを消す） */
-export function renderClaudeGlobalRules(body: string, rulesPath: string): string | null {
-  if (!body.trim()) return null
+/** Agent の全体の指示へ写すもの：全体のルール（rules.md）と開発方針（dev-playbook/playbook.md。@shared/devPlaybook） */
+export interface GlobalGuidance {
+  /** rules.md から写す中身（globalRulesBody） */
+  rules: string
+  /** rules.md の絶対パス */
+  rulesPath: string
+  /** 開発方針から写す中身（devPlaybookBody）。空・省略なら書かない */
+  playbook?: string
+  /** 開発方針のフォルダ（dev-playbook）の絶対パス */
+  playbookDir?: string
+}
+
+export function hasGlobalGuidance(g: GlobalGuidance): boolean {
+  return !!(g.rules.trim() || g.playbook?.trim())
+}
+
+/** 開発方針の欄（見出しの深さは写す先に合わせる）。中身が無ければ空の配列 */
+function playbookSection(g: GlobalGuidance, heading: string): string[] {
+  const body = g.playbook?.trim()
+  if (!body) return []
+  return ['', `${heading} ${DEV_PLAYBOOK_HEADING}`, '', devPlaybookPreamble(g.playbookDir ?? DEV_PLAYBOOK_DIR), '', nestHeadings(body, heading.length + 1)]
+}
+
+/** Claude Code の <設定のフォルダ>/rules/ferret-global-rules.md の中身。ルールも開発方針も空なら null（ファイルを消す） */
+export function renderClaudeGlobalRules(g: GlobalGuidance): string | null {
+  if (!hasGlobalGuidance(g)) return null
+  const rules = g.rules.trim()
   return [
     GLOBAL_RULES_MARKER,
     '',
     '# Global rules (from Ferret)',
     '',
-    `These rules apply to every project. They come from \`${rulesPath}\` (Ferret's Global orchestra); to change them, edit that file, not this one. A project's own CLAUDE.md / AGENTS.md wins where it is more specific.`,
-    '',
-    body.trim(),
+    `These rules apply to every project. They come from \`${g.rulesPath}\` (Ferret's Global orchestra); to change them, edit that file, not this one. A project's own CLAUDE.md / AGENTS.md wins where it is more specific.`,
+    ...(rules ? ['', rules] : []),
+    ...playbookSection(g, '##'),
     ''
   ].join('\n')
 }
 
 /** Codex の全体の AGENTS.md に入れる欄（印で囲む） */
-export function renderCodexGlobalBlock(body: string, rulesPath: string): string {
+export function renderCodexGlobalBlock(g: GlobalGuidance): string {
+  const rules = g.rules.trim()
   return [
     CODEX_BLOCK_START,
     '## Global rules (from Ferret)',
     '',
-    `These rules apply to every project. They come from \`${rulesPath}\` (Ferret's Global orchestra); to change them, edit that file. A project's own AGENTS.md wins where it is more specific.`,
-    '',
-    body.trim(),
+    `These rules apply to every project. They come from \`${g.rulesPath}\` (Ferret's Global orchestra); to change them, edit that file. A project's own AGENTS.md wins where it is more specific.`,
+    ...(rules ? ['', rules] : []),
+    ...playbookSection(g, '###'),
     CODEX_BLOCK_END
   ].join('\n')
 }
@@ -112,6 +121,8 @@ export interface GlobalGuide {
   rulesPath: string
   /** projects.md の絶対パス */
   projectsPath: string
+  /** 開発方針のフォルダ（dev-playbook）の絶対パス（@shared/devPlaybook） */
+  playbookDir?: string
 }
 
 export function renderGlobalGuideSection(guide: GlobalGuide): string[] {
@@ -125,6 +136,7 @@ export function renderGlobalGuideSection(guide: GlobalGuide): string[] {
     `- **A rule that should hold everywhere from now on** (a convention, a policy, "always / never do X"): write it in \`${guide.rulesPath}\` (the global rules; plain Markdown, one rule per line, keep it short and remove rules the person withdraws). Ferret copies that file within seconds into every orchestra's CLAUDE.md / AGENTS.md and subagents, into Claude Code's user rules (\`rules/ferret-global-rules.md\` in ~/.claude or CLAUDE_CONFIG_DIR) and into a marked block of Codex's global AGENTS.md (~/.codex or CODEX_HOME), so agents started in any project follow it. Do not also copy the rule into each project's files unless the person asks for that. Never edit the person's own ~/.claude/CLAUDE.md or ~/.codex/AGENTS.md outside Ferret's block.`,
     '- **A change to make in every project now** (update a dependency, add or fix a file, change each project\'s CLAUDE.md, run a check everywhere): do it per project with the steps below, one subagent per project, all in parallel. In each project: read its own CLAUDE.md / AGENTS.md first and follow them (where they conflict with the request, the project\'s rules win; report the conflict); skip projects where the change does not apply and say why; check it the way that project checks changes (its fast tests, typecheck, lint); commit only if that project\'s rules allow it, in its style and on the branch its rules say (never push, deploy, publish or merge unless the person asked); never share infrastructure, secrets or data across projects.',
     '- End with one table, one row per project: project | done / skipped / failed | what changed (files) | how it was checked | commit. A project you did not check is not done.',
+    ...(guide.playbookDir ? [`- **The development playbook** (\`${guide.playbookDir}/${DEV_PLAYBOOK_FILE}\`): the person's practices for building and shipping with AI, distilled from videos, articles and notes they add in Ferret. Ferret sends you a "[Ferret: development playbook]" request for each new source; follow it. When the person asks you directly to add something to the playbook (開発方針に入れて), follow \`${guide.playbookDir}/${DEV_PLAYBOOK_HOWTO_FILE}\`. Ferret copies the playbook with the global rules into every project's instructions, so do not copy it into projects yourself.`] : []),
     ''
   ]
 }
@@ -145,6 +157,6 @@ export function globalAgentsTemplate(lang: 'ja' | 'en'): string {
 export function globalReadmeTemplate(name: string, lang: 'ja' | 'en'): string {
   const title = name.replace(/[\r\n]+/g, ' ').trim()
   return lang === 'ja'
-    ? [`# ${title}`, '', 'Ferret に登録したすべてのプロジェクトが対象のオーケストラ（グローバル）です。', '', '- 「全部に〜を適用して」のように、全体に効かせたいことはこのフォルダの Agent に頼みます。', '- これからずっと守るルールは **rules.md** に書きます。Ferret がすべてのオーケストラと、Claude Code・Codex の全体の指示へ写します。', '- 今すぐ全部のプロジェクトを直す依頼は、プロジェクトごとの subagent が並行して、それぞれのプロジェクトのルールに従って進めます。', '- **projects.md** はプロジェクトの一覧です（Ferret が書き直します）。'].join('\n')
-    : [`# ${title}`, '', 'The orchestra over every project registered in Ferret (Global).', '', '- Ask the agent in this folder for anything that should apply to everything, such as "apply X to all projects".', '- Rules that should hold from now on go in **rules.md**. Ferret copies them into every orchestra and into Claude Code\'s and Codex\'s global instructions.', '- Changes to make in every project now run in parallel, one subagent per project, each following that project\'s own rules.', '- **projects.md** lists the projects (Ferret rewrites it).'].join('\n')
+    ? [`# ${title}`, '', 'Ferret に登録したすべてのプロジェクトが対象のオーケストラ（グローバル）です。', '', '- 「全部に〜を適用して」のように、全体に効かせたいことはこのフォルダの Agent に頼みます。', '- これからずっと守るルールは **rules.md** に書きます。Ferret がすべてのオーケストラと、Claude Code・Codex の全体の指示へ写します。', '- 今すぐ全部のプロジェクトを直す依頼は、プロジェクトごとの subagent が並行して、それぞれのプロジェクトのルールに従って進めます。', '- **dev-playbook/playbook.md** は開発方針（AI で作る・出す方針）です。ダッシュボードの「開発方針」で動画・記事などを取り込むと Agent がまとめ、rules.md と一緒に写ります。', '- **projects.md** はプロジェクトの一覧です（Ferret が書き直します）。'].join('\n')
+    : [`# ${title}`, '', 'The orchestra over every project registered in Ferret (Global).', '', '- Ask the agent in this folder for anything that should apply to everything, such as "apply X to all projects".', '- Rules that should hold from now on go in **rules.md**. Ferret copies them into every orchestra and into Claude Code\'s and Codex\'s global instructions.', '- Changes to make in every project now run in parallel, one subagent per project, each following that project\'s own rules.', '- **dev-playbook/playbook.md** is the development playbook (how to build and ship with AI). Add videos, articles and notes under "Development playbook" on the dashboard; the agent consolidates them and Ferret copies the playbook together with rules.md.', '- **projects.md** lists the projects (Ferret rewrites it).'].join('\n')
 }
