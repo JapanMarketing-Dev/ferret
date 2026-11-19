@@ -14,7 +14,7 @@ import { acquireTerminal, getTerminal, holdPtyResize, releaseTerminal } from '..
 import { hasBusyAgent, publishAgentActivity } from '../terminal/agentActivity'
 import { AttentionThrottle, INITIAL_TRACK, advancePaneState, attentionEvents, type AttentionPane, type PaneTrack } from '../terminal/agentAttention'
 import { onAccountLoginRequest } from '../lib/accountLogin'
-import { SpawnQueue, partitionSpawns, type SpawnCandidate } from '../terminal/spawnQueue'
+import { SpawnQueue, isDormantRestore, partitionSpawns, type SpawnCandidate } from '../terminal/spawnQueue'
 import { SLEEP_TERMINAL_EVENT, publishPaneDirectory, resumableKeys, type SleepTerminalDetail } from '../terminal/sleepPolicy'
 import { panesDueForPoll } from '../terminal/pollSchedule'
 import { onTerminalCommandRequest } from '../lib/terminalCommand'
@@ -983,8 +983,8 @@ function TerminalPaneImpl({
       const paneProject = tabsRef.current.find((tab) => hasLeaf(tab.layout, pane.key))?.projectId ?? null
       // メモリの知らせで休ませたペインは、ペインの「続きから再開」を押すまで作らない
       if (pane.held && !getTerminal(pane.key)) continue
-      const dormant = Boolean(pane.restoreText) && !pane.continueWork
-      // 裏のプロジェクトの戻したタブ・休ませたタブは xterm も作らずに置き、そのプロジェクトを開いたときに作る（terminal/sleepPolicy.ts）
+      const dormant = isDormantRestore(pane)
+      // 裏のプロジェクトの戻した素のシェルは xterm も作らずに置き、そのプロジェクトを開いたときに作る。Agent は裏でも起動し直す（terminal/spawnQueue.ts）
       if (dormant && !getTerminal(pane.key) && (paneProject ?? '') !== (projectId ?? '')) continue
       const handle = acquireTerminal(pane.key)
       handle.open(node)

@@ -132,23 +132,39 @@ export function detectGenericTitleState(title: string | undefined): AgentState {
  * 本文に同じ語が出ても取り違えないよう、画面の下の 10 行だけ、各 CLI の状態行の形に絞る。
  * いずれも実際に pty で起動して採取した表示（2026-11-07）:
  * - Devin: `⡆⠀ Typing · 3s (esc twice to interrupt)`
- * - Antigravity (agy): `⣽  Generating...` / `⣟  Working...`
+ * - Antigravity (agy): `⣽  Generating...` / `⣟  Working...`。点は 0〜3 個で動き、語は1字ずつ現れる（`⣯ Ge`）。
+ *   作業中はずっと下の状態行に `esc to cancel auto · <モデル>` が出て、待機中は `? for shortcuts` に戻る（1.5.12、2026-11-19 採取）
+ * - Qwen Code: `⠋ Engaging the improbability drive... (0s · esc to cancel)`（v0.21.13、2026-11-19 採取）
  * - DeepSeek Harness (dsh tui): 入力欄の枠の下辺が `╰─ interrupt: ctrl+c ──`（待機中はモデル名）
  * - OpenCode: `⬝⬝■■■■■■ esc interrupt`（待機中は出ない）
  * - OpenClaw: `⠇ running • 9s | local ready`（待機中は `local ready | idle`）
- * 待機中は決めない（unknown のまま。送信側は出力が落ち着いたかで判断する）
+ * 待機中は、形がはっきり分かるものだけ決める（下の GENERIC_SCREEN_IDLE。ほかは unknown。送信側は出力が落ち着いたかで判断する）
  */
 const GENERIC_SCREEN_WORKING: RegExp[] = [
   /\besc twice to interrupt\b/i,
-  /^\s*[⠀-⣿]+\s*(?:Generating|Working|Thinking)(?:\.\.\.|…)/im,
+  // 1秒に1回しか画面を見ないので、点の数（0〜3）にも、語が出きる前の途中（`⣯ Gen`）にも当たるようにする
+  /^\s*[⠁-⣿]+\s*(?:Generating|Working|Thinking)(?:\.{1,3}|…|\s*$)/im,
+  /^\s*[⠁-⣿]+\s*G(?:e(?:n(?:e(?:r(?:a(?:t(?:i(?:n)?)?)?)?)?)?)?)?\s*$/m,
+  /\besc to cancel\b/i,
   /\binterrupt: ctrl\+c\b/i,
   /\besc interrupt\b/i,
   /^\s*[⠁-⣿]\s+[^\n|•]{1,40}•\s*\d+[smh]\b[^\n]*\|/m
 ]
 
+/**
+ * 作業中のしるしが無く、入力を待っている形がはっきり見えるときだけ待機にする（作業中→待機で、サイドバーに「終わった」が出る）。
+ * - Antigravity: 下の状態行が `? for shortcuts`（作業中は `esc to cancel`）
+ * - Qwen Code: 入力欄の `> Type your message or @path/to/file`（作業中もこの欄は出るが、上の作業中の判定が先に当たる）
+ */
+const GENERIC_SCREEN_IDLE: RegExp[] = [
+  /^\s*\? for shortcuts\b/m,
+  /^\s*>\s*Type your message or @path\/to\/file\s*$/m
+]
+
 export function detectGenericScreenState(tail: string): AgentState {
   const bottom = tail.split('\n').slice(-10).join('\n')
-  return GENERIC_SCREEN_WORKING.some((re) => re.test(bottom)) ? 'working' : 'unknown'
+  if (GENERIC_SCREEN_WORKING.some((re) => re.test(bottom))) return 'working'
+  return GENERIC_SCREEN_IDLE.some((re) => re.test(bottom)) ? 'idle' : 'unknown'
 }
 
 /** 画面に待機中のしるしが見えているか（確定遅延を飛ばしてよい条件） */

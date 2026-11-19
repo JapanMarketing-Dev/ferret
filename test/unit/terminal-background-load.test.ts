@@ -5,7 +5,7 @@
  * - git の色分けを読み直すまでの待ち（src/renderer/lib/useGitDecorations.ts）
  */
 import { describe, expect, it } from 'vitest'
-import { SPAWN_CONCURRENCY, SPAWN_GAP_MS, SpawnQueue, partitionSpawns, type SpawnQueueClock } from '../../src/renderer/terminal/spawnQueue'
+import { SPAWN_CONCURRENCY, SPAWN_GAP_MS, SpawnQueue, isDormantRestore, partitionSpawns, type SpawnQueueClock } from '../../src/renderer/terminal/spawnQueue'
 import { HIDDEN_PROJECT_POLL_MS, panesDueForPoll } from '../../src/renderer/terminal/pollSchedule'
 import { GIT_REFRESH_DEBOUNCE_MS, GIT_REFRESH_MIN_GAP_MS, gitRefreshDelay } from '../../src/renderer/lib/useGitDecorations'
 
@@ -160,5 +160,32 @@ describe('gitRefreshDelay（git の色分けを読み直すまでの待ち）', 
     expect(gitRefreshDelay(1000, 0)).toBe(GIT_REFRESH_MIN_GAP_MS - 1000)
     expect(gitRefreshDelay(GIT_REFRESH_MIN_GAP_MS * 3, 0)).toBe(GIT_REFRESH_DEBOUNCE_MS)
     expect(GIT_REFRESH_MIN_GAP_MS).toBeGreaterThan(GIT_REFRESH_DEBOUNCE_MS)
+  })
+})
+
+describe('isDormantRestore（人が閉じない限り Agent は動かし続ける）', () => {
+  it('戻した Agent のペインは、入力待ちでも置かずに起動し直す（裏のプロジェクトでも）', () => {
+    expect(isDormantRestore({ restoreText: 'prev', launch: 'claude' })).toBe(false)
+    expect(isDormantRestore({ restoreText: 'prev', launch: 'antigravity' })).toBe(false)
+    expect(isDormantRestore({ restoreText: 'prev', launch: 'codex', continueWork: true })).toBe(false)
+  })
+
+  it('戻した素のシェルは、そのプロジェクトを開くまで置く', () => {
+    expect(isDormantRestore({ restoreText: 'prev', launch: null })).toBe(true)
+    expect(isDormantRestore({ restoreText: 'prev' })).toBe(true)
+  })
+
+  it('作業の途中だったシェル・戻したのではないペインは置かない', () => {
+    expect(isDormantRestore({ restoreText: 'prev', launch: null, continueWork: true })).toBe(false)
+    expect(isDormantRestore({ restoreText: null, launch: null })).toBe(false)
+    expect(isDormantRestore({})).toBe(false)
+  })
+
+  it('裏のプロジェクトの戻した Agent は順に作る側に入る（作らずに置く側に入らない）', () => {
+    const panes = [
+      { key: 'b1', projectId: 'B', dormant: isDormantRestore({ restoreText: 'x', launch: 'claude' }) },
+      { key: 'b2', projectId: 'B', dormant: isDormantRestore({ restoreText: 'x', launch: null }) }
+    ]
+    expect(partitionSpawns(panes, 'A')).toEqual({ now: [], queued: ['b1'], deferred: ['b2'] })
   })
 })

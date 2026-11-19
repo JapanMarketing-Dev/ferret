@@ -105,6 +105,27 @@ describe('タイトル・画面からの汎用エージェントの状態（実�
     expect(detectGenericScreenState(screen(' ⠦ hobnobbing… • 3s | local ready'))).toBe('working')
   })
 
+  it('Antigravity: 点が 0〜2 個のとき・語が出きる前・状態行の esc to cancel でも作業中（1秒ごとの見え方。1.5.12 の実際の表示）', () => {
+    expect(detectGenericScreenState(screen('⣷  Generating', '>'))).toBe('working')
+    expect(detectGenericScreenState(screen('⣯ Generating.', '>'))).toBe('working')
+    expect(detectGenericScreenState(screen('⣟ Generating..', '>'))).toBe('working')
+    expect(detectGenericScreenState(screen('⣯ Gen', '>'))).toBe('working')
+    expect(detectGenericScreenState(screen('⢿', '> ', 'esc to cancel auto · Gemini 4 Neon · high'))).toBe('working')
+    expect(detectState('generic', { tail: screen('> What is 1+1?', '⣻', '──', '>', '──', 'esc to cancel auto · Gemini 4 Neon · high') })).toBe('working')
+  })
+
+  it('Antigravity: 待機中（? for shortcuts）とサインイン中ではない本文は作業中にしない', () => {
+    expect(detectGenericScreenState(screen('2', '──', '> ', '──', '? for shortcuts auto · Gemini 4 Neon · high'))).toBe('idle')
+    expect(detectGenericScreenState(screen('⠋ Get the list of files', '>'))).toBe('unknown')
+    expect(detectGenericScreenState(screen('Generating reports is done', '>'))).toBe('unknown')
+  })
+
+  it('Qwen Code: 状態行の esc to cancel で作業中', () => {
+    expect(detectGenericScreenState(screen('> What is 1+1?', '⠙ Engaging the improbability drive... (0s · esc to cancel)', '──', '> Type your message or @path/to/file'))).toBe('working')
+    expect(detectGenericTitleState('◐︎ Qwen - ferret')).toBe('working')
+    expect(detectGenericScreenState(screen('2', '──', '> Type your message or @path/to/file', '──', '➜ ferret · git:(main) · qwen3.6-plus'))).toBe('idle')
+  })
+
   it('待機中の表示は作業中にしない', () => {
     expect(detectGenericScreenState(screen('❭ Ask Devin to build features, fix bugs, or work on your code', 'SWE-2 Flash Medium'))).toBe('unknown')
     expect(detectGenericScreenState(screen(' ╰─ deepseek-official · deepseek-flash ───╯', ' ·  deepseek-flash   ctx 10K/1M 1%'))).toBe('unknown')

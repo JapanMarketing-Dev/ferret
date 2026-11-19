@@ -5,9 +5,19 @@
  * 作り始めの間を SPAWN_GAP_MS 空けて順に作る。全部を一度に起動すると、シェルの rc と Agent の起動が重なって
  * CPU とメモリが跳ね、見ているプロジェクトのターミナルまで遅くなる。
  * 待っている間にそのプロジェクトへ切り替えたら、待たずにすぐ作る（promote）。
- * 裏のプロジェクトの、戻したタブ・休ませたタブ（dormant）は作らずに置いておき、そのプロジェクトを開いたときに作る
- * （起動のたびに全プロジェクトの Agent が立ち上がってメモリを埋めないように。MemoryAlert で利用者が止められる）
+ * 裏のプロジェクトの、戻した素のシェル（dormant）は作らずに置いておき、そのプロジェクトを開いたときに作る。
+ * Agent のペインは裏のプロジェクトでも必ず起動し直す（2026-11-19 本人「人間が閉じない限り動く形にしておいて」。
+ * 前は入力待ちの Agent も開くまで止めていたため、更新・再起動のたびに裏のプロジェクトの AI が勝手に閉じたように見えた）。
+ * メモリが足りなければ MemoryAlert で利用者が止める（勝手には止めない）
  */
+
+/**
+ * 戻したペインを、そのプロジェクトを開くまで作らずに置くか。置くのは素のシェルだけ。
+ * Agent（launch あり）と、作業の途中だったものは置かない（人が閉じない限り動かし続ける）
+ */
+export function isDormantRestore(pane: { restoreText?: string | null; continueWork?: boolean; launch?: string | null }): boolean {
+  return Boolean(pane.restoreText) && !pane.continueWork && !pane.launch
+}
 
 export const SPAWN_CONCURRENCY = 2
 export const SPAWN_GAP_MS = 400
@@ -15,7 +25,7 @@ export const SPAWN_GAP_MS = 400
 export interface SpawnCandidate {
   key: string
   projectId: string | null
-  /** 戻したタブ・休ませたタブで、作業の途中ではなかったもの。裏のプロジェクトにあれば作らずに置く */
+  /** 戻した素のシェル（isDormantRestore）。裏のプロジェクトにあれば作らずに置く */
   dormant?: boolean
 }
 
