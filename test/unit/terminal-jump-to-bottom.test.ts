@@ -4,7 +4,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { isScrolledUp } from '../../src/renderer/terminal/jumpToBottom'
+import { isScrolledUp, viewportResyncSteps } from '../../src/renderer/terminal/jumpToBottom'
 
 describe('一番下へのボタン', () => {
   it('上へスクロールして下に行があるときだけ出す', () => {
@@ -19,5 +19,15 @@ describe('一番下へのボタン', () => {
     expect(src).toMatch(/jumpButton\.addEventListener\('mousedown', \(event\) => event\.preventDefault\(\)\)/)
     expect(src).toContain("this.host.addEventListener('scroll', onViewportScroll, true)")
     expect(src).toContain('this.term.onWriteParsed(onViewportScroll)')
+  })
+
+  it('隠れていたターミナルを再表示したら、スクロール領域を測り直させる（下まで送れずに止まらない）', () => {
+    expect(viewportResyncSteps({ viewportY: 2971, baseY: 2971 })).toEqual([-1, 1])
+    expect(viewportResyncSteps({ viewportY: 100, baseY: 2971 })).toEqual([-1, 1])
+    expect(viewportResyncSteps({ viewportY: 0, baseY: 2971 })).toEqual([1, -1])
+    expect(viewportResyncSteps({ viewportY: 0, baseY: 0 })).toBeNull()
+    const src = readFileSync('src/renderer/terminal/terminalClient.ts', 'utf8')
+    expect(src).toMatch(/this\.term\.refresh\(0, this\.term\.rows - 1\)\s*this\.resyncViewport\(\)/)
+    expect(src).toContain('for (const step of steps) this.term.scrollLines(step)')
   })
 })

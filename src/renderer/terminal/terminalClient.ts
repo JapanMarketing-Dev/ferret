@@ -13,7 +13,7 @@ import { ImeInputGuard } from './imeInputGuard'
 import { isWebglUnavailable } from './rendererFallback'
 import { RESTORE_LINE_LIMIT, capScrollback, joinWrappedRows } from '@shared/terminalRestore'
 import { selectionTextForCopy } from './wrappedCopy'
-import { isScrolledUp } from './jumpToBottom'
+import { isScrolledUp, viewportResyncSteps } from './jumpToBottom'
 import { shellPathsText, shellQuotingFor } from '@shared/externalDrop'
 import { hasClipboardFiles } from './clipboardPaste'
 
@@ -378,6 +378,14 @@ export class TerminalHandle {
     }
   }
 
+  /** 隠れている間に1画面分短くなったスクロール領域を測り直させる（jumpToBottom.ts の viewportResyncSteps） */
+  private resyncViewport(): void {
+    const steps = viewportResyncSteps(this.term.buffer.active)
+    if (!steps) return
+    for (const step of steps) this.term.scrollLines(step)
+    this.updateJumpButton()
+  }
+
   private updateJumpButton(): void {
     const show = isScrolledUp(this.term.buffer.active)
     if (this.jumpButton.hidden === show) this.jumpButton.hidden = !show
@@ -399,6 +407,7 @@ export class TerminalHandle {
         this.revealPending = false
         this.term.clearTextureAtlas()
         this.term.refresh(0, this.term.rows - 1)
+        this.resyncViewport()
       }
       // 区切り線をドラッグしている間は表示だけ合わせ、PTY へは離したときに1回だけ伝える。
       // 毎フレーム伝えるとシェルや TUI が描き直し続け、プロンプトが崩れる（Orca #2910）
