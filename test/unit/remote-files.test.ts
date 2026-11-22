@@ -26,6 +26,7 @@ import {
   sshShellSpec,
   tmuxHasSessionCommand,
   tmuxKillSessionCommand,
+  tmuxLeaveCopyModeCommand,
   tmuxSessionName
 } from '../../src/shared/sshCommand'
 import {
@@ -34,6 +35,8 @@ import {
   createRemoteFolder,
   writeRemoteFile,
   killTmuxSession,
+  leaveTmuxCopyMode,
+  TMUX_LEAVE_COPY_MODE_TIMEOUT_MS,
   listRemoteDirectory,
   readRemoteFile,
   searchRemoteNames,
@@ -209,10 +212,18 @@ describe('tmux のセッション（SSH のタブの常駐）', () => {
 
   it('tmux があればそのセッションにつなぐ（無ければ作る）。無ければ知らせてログインシェル', () => {
     const line = remoteShellCommand('~/app', { session: 'ferret-app-1-t', notice: "no tmux; it's\nfine" })
-    expect(line).toContain(`exec tmux new-session -A -s 'ferret-app-1-t'`)
+    expect(line).toContain(`exec tmux new-session -A -s 'ferret-app-1-t' ';' `)
     expect(line).toContain(`printf '%s\\r\\n' 'no tmux; it'\\''s fine'`)
     expect(line).toContain('exec "$SHELL" -l; fi')
     expect(() => remoteShellCommand('~/app', { session: 'bad name', notice: '' })).toThrow()
+  })
+
+  it('つないだらそのセッションだけマウスを有効にする（ホイールで tmux のコピーモード。-g は使わない）', () => {
+    const line = remoteShellCommand('~/app', { session: 'ferret-app-1-t', notice: 'n' })
+    // ; は引用して tmux に1語で渡す（コマンドの区切り）。set-option の -t はペインの形（= 名前 :）でないと見つからない
+    expect(line).toContain(`exec tmux new-session -A -s 'ferret-app-1-t' ';' set-option -q -t '=ferret-app-1-t:' mouse on; else`)
+    expect(line).not.toMatch(/set-option[^;]*-g/)
+    expect(line).not.toMatch(/bind-key|unbind|-L |-S /)
   })
 
   it('sshShellSpec は -t -- host <1行>', () => {
@@ -226,6 +237,30 @@ describe('tmux のセッション（SSH のタブの常駐）', () => {
     expect(tmuxHasSessionCommand('ferret-a-1-t')).toBe(`tmux has-session -t '=ferret-a-1-t'`)
     expect(tmuxKillSessionCommand('ferret-a-1-t')).toBe(`tmux kill-session -t '=ferret-a-1-t'`)
     expect(() => tmuxKillSessionCommand('a;b')).toThrow()
+  })
+
+  it('コピーモードを抜ける1行: 入っていれば cancel して 1、いなければ 0（中のコマンドにも -t を書く）', () => {
+    expect(tmuxLeaveCopyModeCommand('ferret-a-1-t')).toBe(
+      `tmux display-message -p -t '=ferret-a-1-t:' '#{pane_in_mode}' ';' if-shell -F -t '=ferret-a-1-t:' '#{pane_in_mode}' 'send-keys -X -t =ferret-a-1-t: cancel'`
+    )
+    for (const bad of ["a'b", 'a;b', 'a b', 'a:b', '$(x)', '']) expect(() => tmuxLeaveCopyModeCommand(bad), bad).toThrow()
+  })
+
+  it('leaveTmuxCopyMode: 1 なら抜けた・0 なら入っていない・それ以外（失敗・接続できない・分からない出力）は null。待つのは短く', async () => {
+    const calls: Array<{ command: string; timeoutMs?: number }> = []
+    const reply = (code: number, stdout: string): SshRunner => async (_h, command, options) => {
+      calls.push({ command, timeoutMs: options?.timeoutMs })
+      return { code, stdout: Buffer.from(stdout), stderr: '' }
+    }
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '1\n'))).toBe(true)
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '0\n'))).toBe(false)
+    // 無いセッションは何も出さずに 0 で終わる（tmux 3.5a で確かめた）。ツリーのモードは cancel が効かず 1
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, ''))).toBeNull()
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(1, '1\n'))).toBeNull()
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(255, ''))).toBeNull()
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', () => Promise.reject(new Error('x')))).toBeNull()
+    expect(calls[0]).toEqual({ command: tmuxLeaveCopyModeCommand('ferret-a-1-t'), timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS })
+    expect(TMUX_LEAVE_COPY_MODE_TIMEOUT_MS).toBeLessThanOrEqual(5000)
   })
 
   it.runIf(posix)('tmux が無いリモートでは知らせを出してシェルになる（手元の sh で確かめる）', async () => {

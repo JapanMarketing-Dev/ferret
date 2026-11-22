@@ -24,11 +24,11 @@ import {
   REMOTE_NOT_FOLDER_EXIT,
   type FolderListing
 } from '@shared/remoteFiles'
-import { isValidSshHost, tmuxHasSessionCommand, tmuxKillSessionCommand, type SshTarget } from '@shared/sshCommand'
+import { isValidSshHost, tmuxHasSessionCommand, tmuxKillSessionCommand, tmuxLeaveCopyModeCommand, type SshTarget } from '@shared/sshCommand'
 import { toolEnv } from './github/gh'
 
 /**
- * SSH のプロジェクトのファイルツリー（読む・新しいファイル・フォルダを作る）とエディタの保存・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末。
+ * SSH のプロジェクトのファイルツリー（読む・新しいファイル・フォルダを作る）とエディタの保存・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末・コピーモードを抜ける。
  * リモートで動かす1行は src/shared/remoteFiles.ts / sshCommand.ts の純粋な関数で組み立て、ここは ssh を動かすだけ。
  *
  * - 対話なし（BatchMode）で動かす。鍵やパスワードは扱わず、~/.ssh/config と ssh-agent に任せる
@@ -174,4 +174,18 @@ export async function tmuxSessionExists(host: string, session: string, run: SshR
 /** tmux のセッションを終わらせる（タブを Ferret で閉じたとき。待たない・失敗しても知らせない） */
 export function killTmuxSession(host: string, session: string, run: SshRunner = runSsh): void {
   void run(host, tmuxKillSessionCommand(session), { timeoutMs: 15_000 }).catch(() => undefined)
+}
+
+/** コピーモードを抜けるのを待つ上限。接続を使い回していれば 1 往復で済む（使い回しが切れていてもつなぎ直せる長さ） */
+export const TMUX_LEAVE_COPY_MODE_TIMEOUT_MS = 3000
+
+/**
+ * tmux のコピーモードを抜ける（Ferret が Agent へ打ち込む前。ホイールで上へ戻したままだと、貼り付けと Enter を tmux が受け取る）。
+ * 抜けたら true、入っていなければ false、つながらない・遅い・分からないときは null。失敗しても投げない（送信を止めない）
+ */
+export async function leaveTmuxCopyMode(host: string, session: string, run: SshRunner = runSsh): Promise<boolean | null> {
+  const result = await run(host, tmuxLeaveCopyModeCommand(session), { timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS }).catch(() => null)
+  if (!result || result.code !== 0) return null
+  const out = result.stdout.toString('utf8').trim()
+  return out === '1' ? true : out === '0' ? false : null
 }

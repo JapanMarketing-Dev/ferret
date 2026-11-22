@@ -35,7 +35,18 @@ class FakeTerminals implements RemoteTerminalSource {
     if (this.sendError) throw this.sendError
     return this.sendResult
   }
-  write(id: string, data: string) { this.written.push([id, data]) }
+  /** キーの前のコピーモードの抜け（SSH のタブの tmux）と write の順番 */
+  events: string[] = []
+  leaveError: Error | null = null
+  write(id: string, data: string) {
+    this.written.push([id, data])
+    this.events.push(`write:${id}`)
+  }
+  async leaveCopyMode(id: string) {
+    this.events.push(`leave:${id}`)
+    if (this.leaveError) throw this.leaveError
+    return true
+  }
 }
 
 interface Reply { status: number; headers: IncomingHttpHeaders; body: string; json: () => any }
@@ -255,6 +266,15 @@ describe('MobileRemoteServer', () => {
     const bad = await send(port, { method: 'POST', path: '/api/terminals/t2/key', token: TOKEN, ...json({ key: '\x04' }) })
     expect(bad.status).toBe(400)
     expect(fake.written).toHaveLength(4)
+  })
+
+  it('キーの前に SSH のタブの tmux のコピーモードを抜ける（ホイールで上へ戻したままでも Agent に届く。抜けられなくても送る）', async () => {
+    expect((await send(port, { method: 'POST', path: '/api/terminals/t1/key', token: TOKEN, ...json({ key: 'enter' }) })).status).toBe(200)
+    expect(fake.events).toEqual(['leave:t1', 'write:t1'])
+    fake.leaveError = new Error('ssh down')
+    expect((await send(port, { method: 'POST', path: '/api/terminals/t1/key', token: TOKEN, ...json({ key: 'y' }) })).status).toBe(200)
+    expect(fake.events).toEqual(['leave:t1', 'write:t1', 'leave:t1', 'write:t1'])
+    expect(fake.written).toEqual([['t1', '\r'], ['t1', 'y']])
   })
 
   it('知らないターミナルは 404（画面・送信・キー）', async () => {

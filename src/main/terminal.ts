@@ -32,6 +32,7 @@ import { ComposerReadiness } from './agent/readiness'
 import { nextLaunchAgentPhase, type LaunchAgentPhase } from './agent/launchPhase'
 import { sendToAgent } from './agent/send'
 import { chooseSendTarget } from './agent/sendTarget'
+import { dropRightButtonReports, hasMouseReport, waitForRedraw } from './tmuxInput'
 import { agentSubmitsPaste } from '@shared/sendTarget'
 import { agentInProcessTree, hasForegroundChild, isShellProcess, parseProcessRows, parseWindowsProcessRows, type ProcessRow } from './agent/processTree'
 import { t } from '@shared/i18n'
@@ -71,6 +72,11 @@ export const FLOW_LOW_WATER = 256 * 1024
 const STARTUP_WRITE_QUIET_MS = 300
 /** 出力が止まらなくても、ここまで待ったら書き込む */
 const STARTUP_WRITE_TIMEOUT_MS = 5000
+/**
+ * SSH のタブで tmux のコピーモードを抜けたあと、描き直しを renderer が知らせ直すまで待つ上限。
+ * 裏のタブは出力のまとめ（HIDDEN_FLUSH_INTERVAL_MS）と画面の知らせ（renderer の HIDDEN_SCREEN_REPORT_MS = 1 秒）の分だけ遅い
+ */
+const TMUX_REDRAW_WAIT_MS = 2000
 
 export interface ShellSpec {
   file: string
@@ -251,6 +257,10 @@ interface Session {
   history: TerminalHistory
   /** SSH のタブ: リモートの tmux のセッション（利用者がタブを閉じたときに終わらせる） */
   tmux?: { host: string; session: string }
+  /** SSH のタブ: 最後に PTY の出力が届いた時刻（コピーモードを抜けたあと、描き直しを待つ。tmuxInput.ts の waitForRedraw） */
+  outputAt?: number
+  /** SSH のタブ: 利用者がマウスを使った（tmux のコピーモードに入っているかもしれない。起動の打ち込みの前に抜ける） */
+  pointerUsed?: boolean
   /** 起動時の Agent の推定の段階（agent/launchPhase.ts） */
   launchAgent?: LaunchAgentPhase
   /**
@@ -720,7 +730,12 @@ export class TerminalManager {
       done = true
       if (quietTimer) clearTimeout(quietTimer)
       clearTimeout(deadline)
-      if (this.sessions.get(session.id) === session) session.pty.write(`${command}\r`)
+      const type = (): void => {
+        if (this.sessions.get(session.id) === session) session.pty.write(`${command}\r`)
+      }
+      // SSH のタブで、打ち込む前に利用者がマウスを使っていた: tmux のコピーモードを先に抜ける（入ったままだと起動の行を tmux が受け取る）
+      if (session.tmux && session.pointerUsed) void this.leaveTmuxCopyMode(session).catch(() => false).then(type)
+      else type()
     }
     const deadline = setTimeout(fire, STARTUP_WRITE_TIMEOUT_MS)
     return {
@@ -738,6 +753,7 @@ export class TerminalManager {
   }
 
   private enqueue(session: Session, data: string): void {
+    if (session.tmux) session.outputAt = Date.now()
     session.history.push(data)
     // 色などの制御を外すのは1回だけ（どのターミナルの出力も main で毎回通る）
     const plain = stripAnsi(data)
@@ -843,8 +859,31 @@ export class TerminalManager {
   write(id: string, data: string): void {
     const session = this.sessions.get(id)
     if (!session) return
+    // SSH のタブ（リモートの tmux）: 右ボタンの報告は渡さない（tmux のメニューで Agent のペインを終わらせない。tmuxInput.ts）。
+    // マウスを使ったことは覚えておく（コピーモードに入っているかもしれない。起動の打ち込みの前に抜ける）
+    if (session.tmux && hasMouseReport(data)) {
+      session.pointerUsed = true
+      data = dropRightButtonReports(data)
+      if (!data) return
+    }
     this.failover?.input(id, data)
     session.pty.write(data)
+  }
+
+  /**
+   * SSH のタブの tmux のコピーモード（ホイールで上へ戻したとき）を抜ける。入ったまま Ferret が打ち込むと、tmux が受け取って
+   * Agent に届かない。抜けたら true。SSH のタブでない・入っていない・つながらないときは false（打ち込みは止めない）
+   */
+  async leaveCopyMode(id: string): Promise<boolean> {
+    const session = this.sessions.get(id)
+    return session ? this.leaveTmuxCopyMode(session) : false
+  }
+
+  private async leaveTmuxCopyMode(session: Session): Promise<boolean> {
+    if (!session.tmux) return false
+    const { host, session: name } = session.tmux
+    const { leaveTmuxCopyMode } = await import('./remoteFiles')
+    return (await leaveTmuxCopyMode(host, name)) === true
   }
 
   /** 画面の末尾のテキスト（renderer が送った表示、無ければ出力の末尾）。上限の確かめと引き継ぎの指示文に使う */
@@ -933,6 +972,15 @@ export class TerminalManager {
     if (session.sending) return { ok: false, message: t('terminal.send.busy') }
     const { kind, agent } = await this.agentState(id)
     if (kind === 'unknown') return { ok: false, message: t('terminal.send.noAgent') }
+    // SSH のタブ: tmux のコピーモード（ホイールで上へ戻したとき）を先に抜ける。入ったままだと貼り付けと Enter を tmux が受け取る。
+    // 抜けたら、描き直しを renderer が知らせ直すまで待ってから状態を見る（上へ戻した位置の古い画面で判定しない）
+    if (session.tmux) {
+      const since = Date.now()
+      if (await this.leaveTmuxCopyMode(session)) {
+        await waitForRedraw({ since, outputAt: () => session.outputAt, screenAt: () => session.screen?.at,
+          alive: () => this.sessions.get(id) === session, limitMs: TMUX_REDRAW_WAIT_MS })
+      }
+    }
     // Enter で送信されると確かめていない Agent は、貼り付けるだけにする（@shared/sendTarget）
     const submit = agentSubmitsPaste(agent)
     // Claude Code / Codex 以外は待機中の見え方を知らないので、確認待ちでなく、出力が落ち着いていれば送る
