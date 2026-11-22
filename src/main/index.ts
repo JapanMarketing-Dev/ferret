@@ -936,7 +936,7 @@ function remoteFilesTarget(): SshTarget | null {
   return project?.source === 'ssh' && project.ssh ? project.ssh : null
 }
 
-/** SSH のプロジェクトでは、ファイルツリーは読むだけ（書き換え・作成・削除は断る） */
+/** SSH のプロジェクトでは、ファイルツリーは読むのと作るだけ（書き換え・名前の変更・削除は断る） */
 function assertLocalFiles(): void {
   if (remoteFilesTarget()) throw new UserFacingError(t('remoteFiles.errors.readOnly'))
 }
@@ -2894,6 +2894,8 @@ function registerIpc(): void {
     },
     'orchestra:create': (name) => createOrchestra(name),
     'project:move': (id, toOrchestraId, beforeId) => moveProjectInTree(id, toOrchestraId, beforeId),
+    'project:aiApps': async () => (await import('./aiDesktopApps')).installedAiApps(),
+    'project:openInAiApp': async (id, appId) => (await import('./aiDesktopApps')).openProjectInAiApp(currentSettings().projects, id, appId),
     'project:reorder': (ids) => {
       updateSettings({ projects: reorderProjects(currentSettings().projects, ids) })
       send('projects:changed', projectsState())
@@ -3883,7 +3885,11 @@ function registerIpc(): void {
       const { readGitDecorations } = await import('./gitDecorations')
       return readGitDecorations(root)
     },
-    'fs:create': (parentRel, name, kind) => { assertLocalFiles(); return createEntry(projectRoot(), parentRel, name, kind) },
+    // SSH のプロジェクトでも、新しいファイル・フォルダは作れる（リモートに ssh で作る）
+    'fs:create': async (parentRel, name, kind) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).createRemoteEntry(remote, parentRel, name, kind) : createEntry(projectRoot(), parentRel, name, kind)
+    },
     'fs:copy': (relPaths, destRel) => { assertLocalFiles(); return copyEntries(projectRoot(), relPaths, destRel) },
     'fs:move': (relPaths, destRel) => { assertLocalFiles(); return moveEntries(projectRoot(), relPaths, destRel) },
     'fs:import': (absolutePaths, destRel) => { assertLocalFiles(); return importEntries(projectRoot(), absolutePaths, destRel) },

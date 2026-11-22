@@ -1,4 +1,4 @@
-import { isCollapsedByDefault, type FsEntry } from './files'
+import { isCollapsedByDefault, isInsideGitDir, nestedNameParts, nestedNameProblem, type FsEntry } from './files'
 import { remotePathExpr, shellQuote } from './sshCommand'
 
 /**
@@ -138,4 +138,41 @@ export function remoteMkdirCommand(parent: string, name: string): string {
   if (!isValidNewFolderName(name)) throw new Error('invalid folder name')
   const quoted = shellQuote(name.trim())
   return `cd -- ${shellQuote(parent)} && { test -e ${quoted} && exit ${REMOTE_EXISTS_EXIT}; mkdir -- ${quoted}; } && cd -- ${quoted} && pwd`
+}
+
+/** リモートにファイル・フォルダを作る終了コード（途中にファイルがあってフォルダを作れない） */
+export const REMOTE_NOT_FOLDER_EXIT = 20
+/** リモートにファイル・フォルダを作る終了コード（親フォルダが無い） */
+export const REMOTE_NO_PARENT_EXIT = 21
+
+/**
+ * SSH のプロジェクトで、parentRel のフォルダに空のファイルか空のフォルダを作る1行（ファイルツリーの「新しいファイル」「新しいフォルダ」）。
+ * 名前に「a/b/c.ts」のように / を含めれば、途中の無いフォルダも作る（ローカルの createEntry と同じ）。
+ * 最後のものが既にあれば終了コード 17（上書きしない。ファイルは set -C の > で作るので、あいだに作られても上書きしない）。
+ * 新しく作った途中のフォルダのうち、いちばん上の番号（0 から）を `top <番号>` として出す（元に戻す用。無ければ出さない）
+ */
+export function remoteCreateCommand(root: string, parentRel: string, name: string, kind: FsEntry['kind']): string {
+  const parent = checkRel(parentRel)
+  if (kind !== 'file' && kind !== 'directory') throw new Error('invalid kind')
+  if (nestedNameProblem(name)) throw new Error('invalid name')
+  const parts = nestedNameParts(name)
+  if (isInsideGitDir(parent ? `${parent}/${name}` : name)) throw new Error('invalid name')
+  const steps = ['ferret_top=', cdRoot(root), `{ cd -- ${shellQuote(parent || '.')} || exit ${REMOTE_NO_PARENT_EXIT}; }`]
+  parts.slice(0, -1).forEach((part, index) => {
+    const q = shellQuote(part)
+    steps.push(`{ if [ -e ${q} ]; then [ -d ${q} ] || exit ${REMOTE_NOT_FOLDER_EXIT}; else mkdir -- ${q} || exit 1; [ -n "$ferret_top" ] || { ferret_top=1; echo 'top ${index}'; }; fi; }`, `cd -- ${q}`)
+  })
+  const last = shellQuote(parts.at(-1)!)
+  steps.push(`{ if [ -e ${last} ] || [ -L ${last} ]; then exit ${REMOTE_EXISTS_EXIT}; fi; }`)
+  steps.push(kind === 'file' ? `( set -C; : > ${last} ) 2>/dev/null || { [ -e ${last} ] && exit ${REMOTE_EXISTS_EXIT}; exit 1; }` : `mkdir -- ${last}`)
+  return steps.join(' && ')
+}
+
+/** remoteCreateCommand の出力から、作ったものと新しくできたいちばん上の相対パス */
+export function remoteCreated(stdout: string, parentRel: string, name: string): { path: string; top: string } {
+  const parts = nestedNameParts(name)
+  const join = (count: number) => [parentRel, ...parts.slice(0, count)].filter(Boolean).join('/')
+  const match = /^top (\d+)$/m.exec(stdout)
+  const topIndex = match ? Number(match[1]) : -1
+  return { path: join(parts.length), top: topIndex >= 0 && topIndex < parts.length ? join(topIndex + 1) : join(parts.length) }
 }

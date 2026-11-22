@@ -46,6 +46,12 @@ import { isGlobalOrchestra, isOrchestra, orchestraIdOf, treeDrop, treeRows } fro
 import { PROJECT_DRAG_TYPE } from '../lib/projectDrag'
 import { activeProjects, canArchive } from '@shared/projectArchive'
 import { ArchivedProjects } from './ArchivedProjects'
+import { AgentIcon } from './AgentIcon'
+import { aiDesktopApp, canOpenInAiApp, type AiDesktopAppId } from '@shared/aiDesktopApps'
+import type { TuiAgent } from '@shared/types'
+
+/** メニューの「〜で開く」に出す印（同じ会社の Agent の印を使う。ChatGPT のアプリは Codex と同じ OpenAI） */
+const AI_APP_ICON: Record<AiDesktopAppId, TuiAgent> = { chatgpt: 'codex', claude: 'claude', gemini: 'gemini' }
 
 export { toReviewSession, type ReviewSession }
 
@@ -136,6 +142,16 @@ function SidebarImpl({
   /** 並び順・「☆ のみ」のパネル */
   const [viewOpen, setViewOpen] = useState(false)
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** 入っている AI のデスクトップアプリ（「ChatGPT で開く」など。macOS だけ。@shared/aiDesktopApps） */
+  const [aiApps, setAiApps] = useState<AiDesktopAppId[]>([])
+  // メニューを開くたびに調べ直す（Ferret を開いたあとにアプリを入れても出る）
+  const menuOpen = menu !== null
+  useEffect(() => {
+    if (!menuOpen) return
+    let alive = true
+    void window.ade.invoke('project:aiApps').then((ids) => { if (alive) setAiApps(ids) }).catch(() => undefined /* 調べられなければ出さない */)
+    return () => { alive = false }
+  }, [menuOpen])
   const [renaming, setRenamingState] = useState<{ id: string; name: string } | null>(null)
   const renamingRef = useRef<{ id: string; name: string } | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
@@ -197,7 +213,7 @@ function SidebarImpl({
     if (!menu || !el || !box) return
     const top = clampMenuTop(menu.y, el.offsetHeight, box.height)
     if (top !== menu.y) setMenu({ ...menu, y: top })
-  }, [menu])
+  }, [menu, aiApps])
 
   /** 並び順と「☆ のみ」。☆ はどの並び順でも上にまとめる */
   const [view, setViewState] = useState<ProjectListView>(loadView)
@@ -608,6 +624,16 @@ function SidebarImpl({
           <button type="button" role="menuitem" disabled={!stepOf(menuProject.id, 1)} onClick={() => { setMenu(null); moveProject(menuProject.id, 1) }} data-testid="sidebar-project-move-down">
             <ArrowDown size={13} strokeWidth={1.75} />{t('sidebar.moveDown')}
           </button>
+          {/* プロジェクトのフォルダを AI のデスクトップアプリで開く（手元にフォルダがあるものだけ） */}
+          {canOpenInAiApp(menuProject) && aiApps.length > 0 && <>
+            <div className="sb-menu__sep" role="separator" />
+            {aiApps.map((id) => {
+              const entry = aiDesktopApp(id)
+              return <button key={id} type="button" role="menuitem" onClick={() => { setMenu(null); run(() => window.ade.invoke('project:openInAiApp', menuProject.id, id)) }} data-testid={`sidebar-project-open-${id}`}>
+                <AgentIcon agent={AI_APP_ICON[id]} size={13} />{t('sidebar.openInAiApp', { app: entry.label })}
+              </button>
+            })}
+          </>}
           {/* SSH のプロジェクトは手元のフォルダがレビューの置き場なので出さない */}
           {menuProject.source !== 'ssh' && <>
             <div className="sb-menu__sep" role="separator" />

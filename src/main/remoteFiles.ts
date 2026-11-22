@@ -2,25 +2,29 @@ import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { posix } from 'node:path'
 import { UserFacingError } from '@shared/errors'
-import { hasBinaryExtension, isBinaryBuffer, MAX_TEXT_FILE_SIZE, type FsEntry, type FsReadResult, type FsSearchResult } from '@shared/files'
+import { ENTRY_NAME_PROBLEM_KEYS, hasBinaryExtension, isBinaryBuffer, isInsideGitDir, MAX_TEXT_FILE_SIZE, nestedNameParts, nestedNameProblem, type FsCreated, type FsEntry, type FsReadResult, type FsSearchResult } from '@shared/files'
 import { t } from '@shared/i18n'
 import {
   parseRemoteBrowse,
   parseRemoteListing,
   parseRemoteSearch,
   remoteBrowseCommand,
+  remoteCreateCommand,
+  remoteCreated,
   remoteListCommand,
   remoteMkdirCommand,
   remoteReadCommand,
   remoteSearchCommand,
   REMOTE_EXISTS_EXIT,
+  REMOTE_NO_PARENT_EXIT,
+  REMOTE_NOT_FOLDER_EXIT,
   type FolderListing
 } from '@shared/remoteFiles'
 import { isValidSshHost, tmuxHasSessionCommand, tmuxKillSessionCommand, type SshTarget } from '@shared/sshCommand'
 import { toolEnv } from './github/gh'
 
 /**
- * SSH のプロジェクトのファイルツリー（読むだけ）・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末。
+ * SSH のプロジェクトのファイルツリー（読むのと、新しいファイル・フォルダを作るだけ）・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末。
  * リモートで動かす1行は src/shared/remoteFiles.ts / sshCommand.ts の純粋な関数で組み立て、ここは ssh を動かすだけ。
  *
  * - 対話なし（BatchMode）で動かす。鍵やパスワードは扱わず、~/.ssh/config と ssh-agent に任せる
@@ -90,6 +94,27 @@ export async function searchRemoteNames(target: SshTarget, query: string, run: S
   const result = await run(target.host, remoteSearchCommand(target.path, query.trim()), { timeoutMs: 30_000 })
   if (result.code === 255) throw sshFailure(result, target.host)
   return { mode: 'names', ...parseRemoteSearch(result.stdout.toString('utf8')) }
+}
+
+/** SSH のプロジェクトで、空のファイルか空のフォルダを作る（ファイルツリーの「新しいファイル」「新しいフォルダ」） */
+export async function createRemoteEntry(target: SshTarget, parentRel: string, name: string, kind: FsEntry['kind'], run: SshRunner = runSsh): Promise<FsCreated> {
+  if (kind !== 'file' && kind !== 'directory') throw new UserFacingError(t('files.errors.badContent'))
+  if (typeof name !== 'string' || typeof parentRel !== 'string') throw new UserFacingError(t('files.errors.notFound'))
+  const problem = nestedNameProblem(name)
+  if (problem) throw new UserFacingError(t(ENTRY_NAME_PROBLEM_KEYS[problem]))
+  if (isInsideGitDir(parentRel ? `${parentRel}/${name}` : name)) throw new UserFacingError(t('files.errors.gitDir'))
+  let command: string
+  try {
+    command = remoteCreateCommand(target.path, parentRel, name, kind)
+  } catch {
+    throw new UserFacingError(t('files.errors.notFound'))
+  }
+  const result = await run(target.host, command)
+  if (result.code === REMOTE_EXISTS_EXIT) throw new UserFacingError(t('files.errors.exists', { name: nestedNameParts(name).at(-1)! }))
+  if (result.code === REMOTE_NOT_FOLDER_EXIT) throw new UserFacingError(t('files.errors.notFolder'))
+  if (result.code === REMOTE_NO_PARENT_EXIT) throw new UserFacingError(t('files.errors.notFound'))
+  if (result.code !== 0) throw sshFailure(result, target.host)
+  return remoteCreated(result.stdout.toString('utf8'), parentRel, name)
 }
 
 /** 「新しいプロジェクト」の場所選び（リモート）。path が null ならホーム */

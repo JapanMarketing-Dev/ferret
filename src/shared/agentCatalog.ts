@@ -43,6 +43,11 @@ interface AgentCatalogEntry {
    * 設定の skipPermissions が入で登録したプロジェクトのフォルダのときだけ付ける
    */
   trustArgs?: string
+  /**
+   * Ferret のターミナルで見やすく動かすために、対話の画面を開くときいつも足す引数（Codex の --no-alt-screen）。
+   * 利用者が引数に同じものを書いていれば足さない。対話の画面でないサブコマンド（codex exec など）にも足さない（agentPolicy.ts）
+   */
+  terminalArgs?: string
   /** 権限確認を省く引数（Orca の YOLO_TUI_AGENT_ARGS を公式の資料で確かめ直したもの）。無い・確かめられないものは空 */
   yoloArgs: string
   /** 公式の入れ方（1つ）。公式が手順を出していないものは空 */
@@ -130,6 +135,10 @@ export const AGENT_CATALOG: Record<BuiltinAgent, AgentCatalogEntry> = {
     label: 'Codex',
     detectCmd: 'codex',
     yoloArgs: '--dangerously-bypass-approvals-and-sandbox',
+    // 代替画面のままだと、ホイールを Codex が受けて自分の画面を動かし、上端で前の会話を読み込んで表示が跳ねる（2026-11-22 本人
+    // 「codexの場合スクロールしたら勝手に前のチャットが出たりしてスクロールしにくい」）。
+    // --no-alt-screen なら会話はターミナルの履歴に流れ、ほかのターミナルと同じようにスクロールできる（Codex 0.171.0 の --help で確認）
+    terminalArgs: '--no-alt-screen',
     install: 'npm install -g @openai/codex',
     homepageUrl: 'https://github.com/openai/codex',
     verified: true,

@@ -167,7 +167,7 @@ describe('security-5 [2] 権限確認を省く引数・フォルダの信頼は�
   it('同じ意味の書き方（--config・-sVALUE・TOML の空白）も見分け、入でも省く引数を重ねない', () => {
     for (const args of ['--config approval_policy=never', '-sdanger-full-access', '-c approval_policy=never', '--sandbox=danger-full-access', '-anever']) {
       const result = policy('codex', { args })
-      expect(result.ok && result.argv.join(' '), args).toBe(`codex ${args}`)
+      expect(result.ok && result.argv.join(' '), args).toBe(`codex --no-alt-screen ${args}`)
       expect(bypassArgUnits('codex').length).toBeGreaterThan(0)
     }
     // `--` の後はプロンプトなので、フラグとして読まない

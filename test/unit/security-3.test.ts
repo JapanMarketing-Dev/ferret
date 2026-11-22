@@ -107,7 +107,7 @@ describe('security-3 [1] Agent の権限確認は設定の skipPermissions で�
   it('security-3 [1] main の起動の決まり: 入なら Claude Code / Codex に省く引数を前に足し、登録したプロジェクトのフォルダだけ信頼を書く', () => {
     const on = { skipPermissions: true, projectId: 'p1' }
     expect(policy({ ...on, agent: 'claude', args: '--chrome' })).toEqual({ ok: true, argv: ['claude', '--dangerously-skip-permissions', '--chrome'], trustFolder: true })
-    expect(policy({ ...on, agent: 'codex', args: '' })).toEqual({ ok: true, argv: ['codex', '--dangerously-bypass-approvals-and-sandbox'], trustFolder: true })
+    expect(policy({ ...on, agent: 'codex', args: '' })).toEqual({ ok: true, argv: ['codex', '--dangerously-bypass-approvals-and-sandbox', '--no-alt-screen'], trustFolder: true })
     // サブフォルダ・ホーム（登録したプロジェクトのフォルダそのものでない）では引数だけ足し、信頼は書かない
     expect(policy({ ...on, projectId: null, agent: 'claude', args: '' })).toEqual({ ok: true, argv: ['claude', '--dangerously-skip-permissions'], trustFolder: false })
     // 確かめていない Agent には足さない
@@ -117,7 +117,7 @@ describe('security-3 [1] Agent の権限確認は設定の skipPermissions で�
   it('security-3 [1] 切なら何も足さず信頼も書かない。利用者が書いた引数はどちらでもそのまま', () => {
     const off = { skipPermissions: false, projectId: 'p1' }
     expect(policy({ ...off, agent: 'claude', args: '--chrome' })).toEqual({ ok: true, argv: ['claude', '--chrome'], trustFolder: false })
-    expect(policy({ ...off, agent: 'codex', args: '' })).toEqual({ ok: true, argv: ['codex'], trustFolder: false })
+    expect(policy({ ...off, agent: 'codex', args: '' })).toEqual({ ok: true, argv: ['codex', '--no-alt-screen'], trustFolder: false })
     const typed = policy({ ...off, agent: 'claude', args: '--dangerously-skip-permissions --add-dir "a  b"' })
     expect(typed.ok && typed.argv).toEqual(['claude', '--dangerously-skip-permissions', '--add-dir', 'a  b'])
   })
@@ -147,10 +147,10 @@ describe('security-3 [1] Agent の権限確認は設定の skipPermissions で�
       expect(argv({ ...on, agent: 'claude', args }), args).toBe(args)
     }
     for (const args of ['--yolo --model o4', '-s workspace-write', '--sandbox=read-only', '-a on-request', '--full-auto', '-c approval_policy=never']) {
-      expect(argv({ ...on, agent: 'codex', args }), args).toBe(args)
+      expect(argv({ ...on, agent: 'codex', args }), args).toBe(`--no-alt-screen ${args}`)
     }
     // 似ているが別の引数には足す
-    expect(argv({ ...on, agent: 'codex', args: '--search' })).toBe('--dangerously-bypass-approvals-and-sandbox --search')
+    expect(argv({ ...on, agent: 'codex', args: '--search' })).toBe('--dangerously-bypass-approvals-and-sandbox --no-alt-screen --search')
   })
 
   it('security-3 [1] プロジェクトの id はフォルダそのものでだけ決まる（サブフォルダ・ほかのプロジェクトに許可を引き継がない）', () => {

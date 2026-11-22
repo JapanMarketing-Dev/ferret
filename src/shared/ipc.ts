@@ -1,3 +1,4 @@
+import type { AiDesktopAppId } from './aiDesktopApps'
 import type { BrowserExtensionInfo, InstalledBrowserExtension } from './browserExtensions'
 import type { GithubPreferences, RepoCreateInfo, RepoCreateRequest, RepoCreateResult } from './repoCreate'
 import type { BrowserImportStatus, HistorySourceInfo, PageLogins } from './browserImport'
@@ -208,6 +209,10 @@ export interface IpcRequests {
   'project:sshCreateFolder': (host: string, parent: string, name: string) => ProjectsState
   /** 外から落としたフォルダ（drop:inspect で確かめたもの）をプロジェクトとして登録して開く。登録済みならそれに切り替える */
   'project:addDropped': (path: string) => ProjectsState
+  /** 入っている AI のデスクトップアプリ（ChatGPT・Claude・Gemini。macOS だけ。@shared/aiDesktopApps） */
+  'project:aiApps': () => AiDesktopAppId[]
+  /** プロジェクトのフォルダを AI のデスクトップアプリで開く */
+  'project:openInAiApp': (id: string, app: AiDesktopAppId) => void
   /** 一覧の並べ替え。ids は新しい並び（知らない ID は捨て、無いプロジェクトはその位置のまま） */
   'project:reorder': (ids: string[]) => ProjectsState
   /** プロジェクトを別のオーケストラへ移す・並べ替える（before の前。null ならそのオーケストラの最後）。オーケストラ同士の並べ替えにも使う */
@@ -819,6 +824,8 @@ export const IPC_REQUEST_CHANNELS = [
   'project:sshCreateFolder',
   'project:addDropped',
   'project:reorder',
+  'project:aiApps',
+  'project:openInAiApp',
   'project:move',
   'orchestra:create',
   'settings:agents',

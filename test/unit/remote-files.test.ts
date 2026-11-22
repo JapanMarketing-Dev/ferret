@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -11,6 +11,8 @@ import {
   parseRemoteSearch,
   posixParent,
   remoteBrowseCommand,
+  remoteCreateCommand,
+  remoteCreated,
   remoteListCommand,
   remoteMkdirCommand,
   remoteReadCommand,
@@ -27,6 +29,7 @@ import {
 } from '../../src/shared/sshCommand'
 import {
   browseRemoteFolders,
+  createRemoteEntry,
   createRemoteFolder,
   killTmuxSession,
   listRemoteDirectory,
@@ -115,6 +118,28 @@ describe('リモートで動かす1行の組み立て（注入対策）', () => 
     expect(() => remoteMkdirCommand('relative', 'x')).toThrow()
     expect(() => remoteMkdirCommand('/srv', '../x')).toThrow()
     expect(remoteMkdirCommand('/srv', "it's")).toContain(`mkdir -- 'it'\\''s'`)
+  })
+})
+
+describe('リモートに作る1行', () => {
+  it('名前は単一引用符で囲み、- で始まる名前もオプションにしない', () => {
+    const cmd = remoteCreateCommand('~/proj', 'src', '-rf', 'file')
+    expect(cmd).toContain("( set -C; : > '-rf' )")
+    expect(remoteCreateCommand('~/proj', '', 'a/b', 'directory')).toContain("mkdir -- 'a'")
+    expect(remoteCreateCommand('~/proj', '', 'a/b', 'directory')).toContain("mkdir -- 'b'")
+  })
+
+  it('使えない相対パス・名前・種類は組み立てない', () => {
+    expect(() => remoteCreateCommand('~/proj', '/etc', 'x', 'file')).toThrow()
+    expect(() => remoteCreateCommand('~/proj', '', 'a\\b', 'file')).toThrow()
+    expect(() => remoteCreateCommand('~/proj', '', 'x', 'link' as never)).toThrow()
+    expect(() => remoteCreateCommand('~/proj', '.git', 'x', 'file')).toThrow()
+  })
+
+  it('出力から作ったものと新しくできたいちばん上を読む', () => {
+    expect(remoteCreated('', '', 'a.ts')).toEqual({ path: 'a.ts', top: 'a.ts' })
+    expect(remoteCreated('top 1\n', 'src', 'a/b/c.ts')).toEqual({ path: 'src/a/b/c.ts', top: 'src/a/b' })
+    expect(remoteCreated('top 9\n', '', 'a/b')).toEqual({ path: 'a/b', top: 'a/b' })
   })
 })
 
@@ -303,6 +328,41 @@ describe.runIf(posix)('リモートのファイルツリー（手元の sh で�
     const down: SshRunner = async () => ({ code: 255, stdout: Buffer.alloc(0), stderr: 'ssh: connect to host dev-box port 22: Connection refused\n' })
     await expect(listRemoteDirectory(target(), '', down)).rejects.toThrow(/dev-box/)
   })
+
+  it('ツリーから空のファイル・フォルダを作る（根・子のフォルダ・引用符を含む名前）', async () => {
+    expect(await createRemoteEntry(target(), '', 'notes.md', 'file', run)).toEqual({ path: 'notes.md', top: 'notes.md' })
+    expect(readFileSync(join(home, 'proj', 'notes.md'), 'utf8')).toBe('')
+    expect(await createRemoteEntry(target(), 'src', 'lib', 'directory', run)).toEqual({ path: 'src/lib', top: 'src/lib' })
+    expect(statSync(join(home, 'proj', 'src', 'lib')).isDirectory()).toBe(true)
+    expect(await createRemoteEntry(target(), "we'ird dir", "it's $(x).ts", 'file', run)).toEqual({ path: "we'ird dir/it's $(x).ts", top: "we'ird dir/it's $(x).ts" })
+    expect(existsSync(join(home, 'proj', "we'ird dir", "it's $(x).ts"))).toBe(true)
+  })
+
+  it('a/b/c.ts のように途中のフォルダも作り、新しくできたいちばん上を返す（あるフォルダはそのまま使う）', async () => {
+    expect(await createRemoteEntry(target(), '', 'src/x/y/z.ts', 'file', run)).toEqual({ path: 'src/x/y/z.ts', top: 'src/x' })
+    expect(existsSync(join(home, 'proj', 'src', 'x', 'y', 'z.ts'))).toBe(true)
+    expect(await createRemoteEntry(target(), 'src', 'x/w', 'directory', run)).toEqual({ path: 'src/x/w', top: 'src/x/w' })
+  })
+
+  it('既にあれば上書きせずに知らせる（ファイル・フォルダ・リンク切れ）', async () => {
+    await expect(createRemoteEntry(target(), '', 'README.md', 'file', run)).rejects.toThrow(/README\.md/)
+    expect(readFileSync(join(home, 'proj', 'README.md'), 'utf8')).toBe('# hi\n')
+    await expect(createRemoteEntry(target(), '', 'src', 'directory', run)).rejects.toThrow(/src/)
+    await expect(createRemoteEntry(target(), '', 'broken', 'file', run)).rejects.toThrow(/broken/)
+    expect(existsSync(join(home, 'proj', 'missing'))).toBe(false)
+  })
+
+  it('途中にファイルがある・親が無い・使えない名前・.git の中は作らない', async () => {
+    await expect(createRemoteEntry(target(), '', 'README.md/x.ts', 'file', run)).rejects.toThrow()
+    await expect(createRemoteEntry(target(), 'nope', 'x.ts', 'file', run)).rejects.toThrow()
+    for (const bad of ['', '..', 'a:b', 'a\nb', 'x/../y', '.git', 'sub/.git/hooks']) {
+      await expect(createRemoteEntry(target(), '', bad, 'file', run)).rejects.toThrow()
+    }
+    await expect(createRemoteEntry(target(), '../out', 'x.ts', 'file', run)).rejects.toThrow()
+    await expect(createRemoteEntry(target(), '.git', 'x.ts', 'file', run)).rejects.toThrow()
+    expect(run.calls.length).toBe(2)
+    expect(existsSync(join(home, 'out'))).toBe(false)
+  })
 })
 
 describe('この PC の場所選び', () => {
@@ -372,5 +432,16 @@ describe('新しいプロジェクトの画面の部品', () => {
       p({ name: 'work', source: 'ssh', ssh: { host: 'gpu', path: '~/work' } })
     ])
     expect(list).toEqual([{ host: 'dev', path: '~/app', name: 'app' }, { host: 'gpu', path: '~/work', name: 'work' }])
+  })
+})
+
+describe('SSH のファイルツリーのつなぎ込み（作成だけできる）', () => {
+  it('main の fs:create は SSH ならリモートに作り、ツリーは作成だけの右クリックのメニューを出す', () => {
+    const main = readFileSync('src/main/index.ts', 'utf8')
+    expect(main).toContain("createRemoteEntry(remote, parentRel, name, kind)")
+    expect(readFileSync('src/renderer/App.tsx', 'utf8')).toContain('createOnly={remoteWorkspace}')
+    const explorer = readFileSync('src/renderer/components/FileExplorer.tsx', 'utf8')
+    expect(explorer).toContain('createOnly ? ops.openMenu(e, entry) : e.preventDefault()')
+    expect(explorer).toContain('createOnly={readOnly && createOnly}')
   })
 })

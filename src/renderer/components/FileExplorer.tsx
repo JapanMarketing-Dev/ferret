@@ -144,10 +144,13 @@ function FileExplorerImpl({
   onQuickOpen,
   onRenamed,
   onDeleted,
-  readOnly = false
+  readOnly = false,
+  createOnly = false
 }: {
   /** SSH のプロジェクト: ツリーはリモートを読むだけ（作成・名前の変更・削除・貼り付け・ドラッグ・右クリックのメニュー・git の色・⌘P を出さない） */
   readOnly?: boolean
+  /** readOnly でも、新しいファイル・フォルダだけは作れる（SSH のプロジェクト。右クリックのメニューは作成だけ。main の fs:create が ssh で作る） */
+  createOnly?: boolean
   /** 開いているプロジェクトのフォルダ。null なら案内だけ */
   root: string | null
   /** 開いているプロジェクト。開いたフォルダをプロジェクトごとに覚える（更新・再起動のあとも閉じない） */
@@ -224,11 +227,11 @@ function FileExplorerImpl({
       <header className="explorer__head">
         <span className="explorer__title">{t('fileExplorer.title')}</span>
         <span className="editor-head__spacer" />
-        {!readOnly && <>
+        {(!readOnly || createOnly) && <>
         <IconButton size="sm" label={t('fileExplorer.newFile')} icon={<FilePlus size={14} />} disabled={!root} onClick={() => ops.startCreate('file', ops.targetDir(null))} data-testid="explorer-new-file" />
         <IconButton size="sm" label={t('fileExplorer.newFolder')} icon={<FolderPlus size={14} />} disabled={!root} onClick={() => ops.startCreate('directory', ops.targetDir(null))} data-testid="explorer-new-folder" />
-        <IconButton size="sm" label={t('fileExplorer.quickOpen', { shortcut: SHORTCUTS.quickOpen() })} icon={<FileSearch size={14} />} onClick={onQuickOpen} disabled={!root} />
         </>}
+        {!readOnly && <IconButton size="sm" label={t('fileExplorer.quickOpen', { shortcut: SHORTCUTS.quickOpen() })} icon={<FileSearch size={14} />} onClick={onQuickOpen} disabled={!root} />}
         <IconButton size="sm" label={t('fileExplorer.refresh')} icon={<RefreshCw size={13} />} disabled={!root} onClick={tree.refresh} />
         <IconButton size="sm" label={t('fileExplorer.collapseAll')} icon={<ListCollapse size={14} />} disabled={!root} onClick={tree.collapseAll} />
       </header>
@@ -265,6 +268,8 @@ function FileExplorerImpl({
           onDragOver: (e: DragEvent) => ops.onDragOver(e, null),
           onDragLeave: ops.onDragLeave,
           onDrop: (e: DragEvent) => ops.onDrop(e, null)
+        } : treeMode && createOnly ? {
+          onContextMenu: (e: MouseEvent) => ops.openMenu(e, null)
         } : {})}
       >
         {!root ? (
@@ -316,7 +321,7 @@ function FileExplorerImpl({
                     className={`explorer__row${entry.path === activePath ? ' is-active' : ''}${selected ? ' is-selected' : ''}${entry.collapsed ? ' is-heavy' : ''}${cut ? ' is-cut' : ''}${dropping ? ' is-drop' : ''}${gitClass(gitState)}`}
                     style={{ '--depth': depth } as React.CSSProperties}
                     onClick={(e) => ops.onRowClick(e, entry, () => (isDir ? toggleDir(entry) : onOpen(entry.path)))}
-                    {...(readOnly ? { onContextMenu: (e: MouseEvent) => e.preventDefault() } : {
+                    {...(readOnly ? { onContextMenu: (e: MouseEvent) => (createOnly ? ops.openMenu(e, entry) : e.preventDefault()) } : {
                       onContextMenu: (e: MouseEvent) => ops.openMenu(e, entry),
                       draggable: true,
                       onDragStart: (e: DragEvent) => ops.onDragStart(e, entry),
@@ -350,7 +355,7 @@ function FileExplorerImpl({
             <div className="explorer__empty" data-testid="explorer-empty">
               <p className="explorer__empty-title">{t('fileExplorer.emptyFolder')}</p>
               <p className="explorer__empty-hint">{t('fileExplorer.emptyHint')}</p>
-              {!readOnly && <div className="explorer__empty-actions">
+              {(!readOnly || createOnly) && <div className="explorer__empty-actions">
                 <Button icon={<FilePlus size={13} />} onClick={() => ops.startCreate('file', '')} data-testid="explorer-empty-new-file">{t('fileExplorer.newFile')}</Button>
                 <Button icon={<FolderPlus size={13} />} onClick={() => ops.startCreate('directory', '')} data-testid="explorer-empty-new-folder">{t('fileExplorer.newFolder')}</Button>
               </div>}
@@ -363,7 +368,7 @@ function FileExplorerImpl({
         {!searchingMode && ops.notice && <p className="explorer__note explorer__note--sticky" role="status" data-testid="explorer-notice">{ops.notice}</p>}
       </div>
 
-      {ops.menu && <TreeMenu ops={ops} showHidden={showHidden} onToggleHidden={toggleHidden} />}
+      {ops.menu && <TreeMenu ops={ops} createOnly={readOnly && createOnly} showHidden={showHidden} onToggleHidden={toggleHidden} />}
       {ops.confirmDelete && <DeleteDialog paths={ops.confirmDelete.paths} dirty={[...dirtyPaths].filter((p) => ops.confirmDelete!.paths.some((d) => isSameOrUnder(p, d)))} onCancel={() => ops.setConfirmDelete(null)} onConfirm={() => ops.trash(ops.confirmDelete!.paths, ops.confirmDelete!.record)} />}
     </aside>
   )
@@ -1020,7 +1025,7 @@ function MenuItem({ icon, label, shortcut, onClick, disabled, danger, testId }: 
 }
 
 /** 右クリックのメニュー。行の上ならその項目（選択中なら選択全部）、空いた所ならプロジェクト直下が対象 */
-function TreeMenu({ ops, showHidden, onToggleHidden }: { ops: TreeOps; showHidden: boolean; onToggleHidden: () => void }) {
+function TreeMenu({ ops, createOnly = false, showHidden, onToggleHidden }: { ops: TreeOps; createOnly?: boolean; showHidden: boolean; onToggleHidden: () => void }) {
   const t = useT()
   const menu = ops.menu!
   const entry = menu.entry
@@ -1066,13 +1071,15 @@ function TreeMenu({ ops, showHidden, onToggleHidden }: { ops: TreeOps; showHidde
           {ops.onOpenSource && isHtmlPath(entry.path) && (
             <MenuItem icon={<FileCode size={13} strokeWidth={1.75} />} label={t('editor.openHtmlSource')} onClick={() => { ops.closeMenu(); ops.onOpenSource?.(entry.path) }} testId="explorer-menu-open-source" />
           )}
-          <MenuItem icon={<ExternalLink size={13} strokeWidth={1.75} />} label={t('viewer.openExternal')} onClick={() => void ops.openExternally(entry.path)} testId="explorer-menu-open-external" />
+          {!createOnly && <MenuItem icon={<ExternalLink size={13} strokeWidth={1.75} />} label={t('viewer.openExternal')} onClick={() => void ops.openExternally(entry.path)} testId="explorer-menu-open-external" />}
           {sep}
         </>
       )}
       <MenuItem icon={<FilePlus size={13} strokeWidth={1.75} />} label={t('fileExplorer.newFile')} onClick={() => ops.startCreate('file', ops.targetDir(entry))} testId="explorer-menu-new-file" />
       <MenuItem icon={<FolderPlus size={13} strokeWidth={1.75} />} label={t('fileExplorer.newFolder')} onClick={() => ops.startCreate('directory', ops.targetDir(entry))} testId="explorer-menu-new-folder" />
       {sep}
+      {/* SSH のプロジェクトは作成だけ（コピー・移動・名前の変更・削除・Finder で表示はローカルのファイルを扱うので出さない） */}
+      {!createOnly && <>
       {entry && (
         <>
           <MenuItem icon={<Scissors size={13} strokeWidth={1.75} />} label={t('fileExplorer.cut')} shortcut={KEYS.cut()} onClick={() => ops.cut(targets)} testId="explorer-menu-cut" />
@@ -1097,6 +1104,7 @@ function TreeMenu({ ops, showHidden, onToggleHidden }: { ops: TreeOps; showHidde
       {sep}
       <MenuItem icon={<Undo2 size={13} strokeWidth={1.75} />} label={t('fileExplorer.undo')} shortcut={KEYS.undo()} disabled={ops.history.length === 0} onClick={ops.undo} testId="explorer-menu-undo" />
       {sep}
+      </>}
       <MenuItem
         icon={showHidden ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
         label={showHidden ? t('fileExplorer.hideHidden') : t('fileExplorer.showHidden')}

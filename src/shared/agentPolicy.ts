@@ -22,6 +22,7 @@ import { resumeArgs } from './terminalRestore'
  *   - フォルダの信頼（Claude Code / Codex の設定ファイル、Muse・Command Code の引数）は、skipPermissions が入で、
  *     登録したプロジェクトのフォルダそのもので開くときだけ
  *   - 利用者が引数の欄にそのまま書いた引数は、書いたとおりに使う（SECURITY.md の Agent permissions）
+ *   - Ferret のターミナルで見やすくする引数（Codex の --no-alt-screen。AGENT_CATALOG の terminalArgs）は、対話の画面を開くときに足す
  *   - 権限確認を省く引数・フォルダの信頼の引数を、コマンドの欄に書いたもの、引用符やバックスラッシュで書き換えたもの
  *     （`"--dangerously-skip-permissions"`、`--permission-mode "bypassPermissions"` など）は起動しない
  */
@@ -112,6 +113,20 @@ export function findPermissionFlags(agent: BuiltinAgent, words: readonly string[
 
 const words = (args: string): string[] => args.trim().split(/\s+/).filter(Boolean)
 
+/** 対話の画面を開かない Codex のサブコマンド（terminalArgs を足さない。codex --help、0.171.0） */
+const CODEX_NON_TUI_COMMANDS = ['exec', 'e', 'review', 'login', 'logout', 'mcp', 'mcp-server', 'app-server', 'completion', 'sandbox', 'debug', 'apply', 'a', 'cloud', 'doctor', 'update', 'features', 'help']
+
+/** Ferret のターミナル向けにいつも足す引数（AGENT_CATALOG の terminalArgs）。足さないときは空 */
+export function terminalArgsFor(agent: BuiltinAgent, commandTail: readonly string[], args: readonly string[]): string[] {
+  const extra = words(AGENT_CATALOG[agent].terminalArgs ?? '')
+  if (extra.length === 0) return []
+  const before = [...commandTail, ...args]
+  const end = before.indexOf('--')
+  const flagsPart = end < 0 ? before : before.slice(0, end)
+  if (agent === 'codex' && flagsPart.some((word) => CODEX_NON_TUI_COMMANDS.includes(word))) return []
+  return extra.filter((flag) => !flagsPart.some((word) => word === flag || word.startsWith(`${flag}=`)))
+}
+
 function refuse(reason: AgentLaunchRefusal, error: string): AgentLaunchPolicy {
   return { ok: false, reason, error }
 }
@@ -173,7 +188,8 @@ export function resolveAgentLaunchPolicy(input: {
   const yolo = skip && !choosesMode ? words(AGENT_CATALOG[agent].yoloArgs) : []
   const inProject = input.skipPermissions && input.projectId !== null
   const trust = inProject && !matches.some((match) => match.kind === 'trust') ? words(AGENT_CATALOG[agent].trustArgs ?? '') : []
-  const rest = [...trust, ...yolo, ...args.map((word) => word.value)]
+  const display = terminalArgsFor(agent, tail.map((word) => word.value), args.map((word) => word.value))
+  const rest = [...trust, ...yolo, ...display, ...args.map((word) => word.value)]
   const resume = input.resume ? resumeArgs(agent, tail.map((word) => word.value), rest) : null
   const argv = [head!.value, ...(resume?.lead ?? []), ...tail.map((word) => word.value), ...rest, ...(resume?.trail ?? [])]
   return { ok: true, argv, trustFolder: skip && input.projectId !== null, ...(resume ? { resumed: true as const } : {}) }

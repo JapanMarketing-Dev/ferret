@@ -229,10 +229,10 @@ describe('会話を続ける引数', () => {
     expect(resolveAgentLaunchPolicy({ ...base, agent: 'claude', args: '--chrome', resume: true }))
       .toEqual({ ok: true, argv: ['claude', '--dangerously-skip-permissions', '--chrome', '--continue'], trustFolder: false, resumed: true })
     expect(resolveAgentLaunchPolicy({ ...base, agent: 'codex', args: '', resume: true }))
-      .toEqual({ ok: true, argv: ['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox'], trustFolder: false, resumed: true })
+      .toEqual({ ok: true, argv: ['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '--no-alt-screen'], trustFolder: false, resumed: true })
     // 頼まなければ今までどおり（resumed は付かない）
     expect(resolveAgentLaunchPolicy({ ...base, agent: 'codex', args: '' }))
-      .toEqual({ ok: true, argv: ['codex', '--dangerously-bypass-approvals-and-sandbox'], trustFolder: false })
+      .toEqual({ ok: true, argv: ['codex', '--dangerously-bypass-approvals-and-sandbox', '--no-alt-screen'], trustFolder: false })
     // 続けられなければ普通に起動する
     expect(resolveAgentLaunchPolicy({ ...base, agent: 'claude', args: '--resume abc', resume: true }))
       .toEqual({ ok: true, argv: ['claude', '--dangerously-skip-permissions', '--resume', 'abc'], trustFolder: false })

@@ -1391,9 +1391,10 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           {/* 右のファイルツリー。閉じたら列の幅を 0 にして隠す（.sidebar-slot と同じ） */}
           <div className="explorer-slot" aria-hidden={!explorerOpen} style={{ gridArea: 'files' }}>
             <ErrorBoundary name="file-tree">
-            {/* SSH のプロジェクトは、リモートのフォルダを読むだけのツリーにする（main の fs:list / fs:read が ssh で読む） */}
+            {/* SSH のプロジェクトは、リモートのフォルダを読むツリーにする（main の fs:list / fs:read が ssh で読む）。新しいファイル・フォルダだけ作れる（fs:create） */}
             <FileExplorer
               readOnly={remoteWorkspace}
+              createOnly={remoteWorkspace}
               root={workspace.folderPath}
               projectId={workspace.projectId ?? null}
               activePath={files.activeFile?.path ?? null}
