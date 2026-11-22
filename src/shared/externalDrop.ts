@@ -1,3 +1,5 @@
+import { trimTrailingSlashes } from './remoteFiles'
+
 /**
  * 外（Finder・デスクトップ・エクスプローラー）からウインドウへ落としたファイル・フォルダの扱い。
  * パスの受け取りは preload（webUtils.getPathForFile）→ main（drop:inspect。src/main/droppedPaths.ts）で確かめる。
@@ -78,4 +80,20 @@ export function treePathsForTerminal(relPaths: readonly string[], options: { roo
     if (atRoot) return native || '.'
     return native ? `${root}${sep}${native}` : root
   })
+}
+
+/**
+ * SSH のプロジェクトで、ファイルツリーから落とした相対パスをターミナルに入れる文字にする。
+ * リモートのシェルの作業フォルダは分からないので、いつも登録したリモートのフォルダからのパスにする（区切りは /。手元のレビューの置き場のパスではない）。
+ * フォルダが ~ で始まるときは ~/ を引用の外に出す（引用すると ~ が展開されない）。制御文字を含むパスは入れない
+ */
+export function remoteTreePathsText(relPaths: readonly string[], remoteRoot: string): string {
+  const root = trimTrailingSlashes(remoteRoot) || '/'
+  const words = relPaths.filter((rel) => !/[\u0000-\u001f\u007f]/.test(rel)).map((rel) => {
+    const path = rel ? (root === '/' ? `/${rel}` : `${root}/${rel}`) : root
+    if (path === '~') return '~'
+    if (path.startsWith('~/')) return `~/${quoteShellPath(path.slice(2), 'posix')}`
+    return quoteShellPath(path, 'posix')
+  })
+  return words.length > 0 ? `${words.join(' ')} ` : ''
 }

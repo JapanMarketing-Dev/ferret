@@ -51,13 +51,18 @@ export function remotePathExpr(path: string): string {
  *   - tmux を渡さないとき: cd してからログインシェルに置き換わる
  *   - tmux を渡したとき: リモートに tmux があれば、その名前のセッションにつなぐ（無ければ作る）。
  *     Ferret や PC を閉じても、回線が切れても、リモートのシェルと Agent は tmux の中で動き続ける。
+ *     つないだら（作ったときも、前からあったときも）そのセッションだけマウスを有効にする。
+ *     tmux は xterm.js を別の画面（alternate screen）にするので、マウスが無効（tmux の既定）だと xterm.js がホイールを
+ *     ↑↓ のキーに変えて送り、Agent の入力の履歴が出てしまう。有効ならホイールで tmux のコピーモードに入り、上の出力を読める。
+ *     セッションのオプションなので、利用者のほかのセッションと全体の設定・キーの割り当ては変えない。
  *     tmux が無ければ notice を1行出して、今まで通りログインシェルで動かす
  */
 export function remoteShellCommand(path: string, tmux?: { session: string; notice: string }): string {
   const cd = `cd ${remotePathExpression(path)}`
   if (!tmux) return `${cd} && exec "$SHELL" -l`
   const session = checkTmuxSessionName(tmux.session)
-  return `${cd} && if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s ${shellQuote(session)}; ` +
+  return `${cd} && if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s ${shellQuote(session)} ` +
+    `';' set-option -q -t ${tmuxPaneTarget(session)} mouse on; ` +
     `else printf '%s\\r\\n' ${shellQuote(tmux.notice.replace(/[\0-\x1f\x7f]/g, ' '))}; exec "$SHELL" -l; fi`
 }
 
@@ -69,6 +74,11 @@ export function isValidTmuxSessionName(name: string): boolean {
 function checkTmuxSessionName(name: string): string {
   if (!isValidTmuxSessionName(name)) throw new Error('invalid tmux session name')
   return name
+}
+
+/** ペインを取るコマンド（set-option・send-keys など）の -t。'=名前' だけだとセッションが見つからないので : を付ける（そのセッションの今のペイン） */
+function tmuxPaneTarget(session: string): string {
+  return shellQuote(`=${checkTmuxSessionName(session)}:`)
 }
 
 /**
@@ -89,6 +99,25 @@ export function tmuxHasSessionCommand(session: string): string {
 /** tmux のセッションを終わらせる1行（タブを Ferret で閉じたとき） */
 export function tmuxKillSessionCommand(session: string): string {
   return `tmux kill-session -t ${shellQuote(`=${checkTmuxSessionName(session)}`)}`
+}
+
+/**
+ * tmux のコピーモード（ホイールで上へ戻したとき）を抜ける1行。コピーモードの間は、Ferret が送る貼り付けと Enter を
+ * tmux が受け取ってしまい Agent に届かない。1行目に入っていたか（1 / 0）を出し、入っていれば抜ける。
+ * 続けて今の画面（capture-pane。コピーモードの間も上へ戻した位置ではなく、今の画面）を出す。
+ * 抜けるコマンドにも -t を書き、if-shell の -t の引き継ぎに頼らない（tmux 2.6〜3.5a で、ほかのセッションのコピーモードは残ることを確かめた）
+ */
+export function tmuxLeaveCopyModeCommand(session: string): string {
+  const name = checkTmuxSessionName(session)
+  const target = tmuxPaneTarget(name)
+  return `tmux display-message -p -t ${target} '#{pane_in_mode}' ';' ` +
+    `if-shell -F -t ${target} '#{pane_in_mode}' ${shellQuote(`send-keys -X -t =${name}: cancel`)} ';' ` +
+    `capture-pane -p -t ${target}`
+}
+
+/** tmux の今の画面を出す1行（コピーモードは抜けない。上へ戻した位置ではなく、今の画面） */
+export function tmuxCapturePaneCommand(session: string): string {
+  return `tmux capture-pane -p -t ${tmuxPaneTarget(session)}`
 }
 
 type SshTargetCheck = { ok: true; target: SshTarget } | { ok: false; reason: 'host' | 'path' }

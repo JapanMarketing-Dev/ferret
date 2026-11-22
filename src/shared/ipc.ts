@@ -592,7 +592,7 @@ export interface IpcRequests {
   'fs:terminalDir': (relPath: string) => string
   /** 同じフォルダの中で名前を変える。新しい相対パスを返す（既にある名前には上書きしない） */
   'fs:rename': (relPath: string, newName: string) => string
-  /** ゴミ箱へ送る（shell.trashItem）。送った相対パスを返す */
+  /** ゴミ箱へ送る（shell.trashItem。SSH のプロジェクトはリモートのゴミ箱 ~/.local/share/Trash へ。src/main/remoteFiles.ts）。送った相対パスを返す */
   'fs:trash': (relPaths: string[]) => string[]
   /** Finder（エクスプローラ）でファイルを選んで見せる */
   'fs:reveal': (relPath: string) => void

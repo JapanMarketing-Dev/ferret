@@ -35,7 +35,15 @@ class FakeTerminals implements RemoteTerminalSource {
     if (this.sendError) throw this.sendError
     return this.sendResult
   }
-  write(id: string, data: string) { this.written.push([id, data]) }
+  /** キーを書き終えるまでの待ち（SSH のタブは tmux のコピーモードを抜けてから書く。TerminalManager.writeKey） */
+  keyDelayMs = 0
+  events: string[] = []
+  async writeKey(id: string, data: string) {
+    this.events.push(`start:${id}`)
+    if (this.keyDelayMs) await new Promise((r) => setTimeout(r, this.keyDelayMs))
+    this.written.push([id, data])
+    this.events.push(`end:${id}`)
+  }
 }
 
 interface Reply { status: number; headers: IncomingHttpHeaders; body: string; json: () => any }
@@ -255,6 +263,14 @@ describe('MobileRemoteServer', () => {
     const bad = await send(port, { method: 'POST', path: '/api/terminals/t2/key', token: TOKEN, ...json({ key: '\x04' }) })
     expect(bad.status).toBe(400)
     expect(fake.written).toHaveLength(4)
+  })
+
+  it('キーは writeKey（SSH のタブは tmux のコピーモードを抜けてから順番どおりに書く）を待ってから答える', async () => {
+    fake.keyDelayMs = 30
+    const res = await send(port, { method: 'POST', path: '/api/terminals/t1/key', token: TOKEN, ...json({ key: 'enter' }) })
+    expect(res.status).toBe(200)
+    expect(fake.events).toEqual(['start:t1', 'end:t1'])
+    expect(fake.written).toEqual([['t1', '\r']])
   })
 
   it('知らないターミナルは 404（画面・送信・キー）', async () => {

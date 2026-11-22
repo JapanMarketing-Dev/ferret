@@ -938,9 +938,12 @@ function remoteFilesTarget(): SshTarget | null {
   return project?.source === 'ssh' && project.ssh ? project.ssh : null
 }
 
-/** SSH のプロジェクトでは、ファイルツリーは読むのと作るだけ（書き換え・名前の変更・削除は断る） */
-function assertLocalFiles(): void {
-  if (remoteFilesTarget()) throw new UserFacingError(t('remoteFiles.errors.readOnly'))
+/**
+ * SSH のプロジェクトでは、この PC のファイルを取り込む操作（Finder などから落とす・OS のクリップボードから貼る）は断る。
+ * ツリーの中の作成・名前の変更・削除・移動・コピーは、main が ssh でリモートに行う（src/main/remoteFiles.ts）
+ */
+function assertLocalImport(): void {
+  if (remoteFilesTarget()) throw new UserFacingError(t('remoteFiles.errors.noImport'))
 }
 
 /** 開いているのが SSH のプロジェクトか（Agent はリモートで動くので、feedback.md は中身を貼って送る） */
@@ -3849,7 +3852,8 @@ function registerIpc(): void {
     },
 
     // ファイルエディタ（src/main/files.ts がプロジェクトの外を断る）
-    // SSH のプロジェクトは、ツリーと読み込みをリモートへ（src/main/remoteFiles.ts）。書き換えは断る
+    // SSH のプロジェクトは、ツリー・読み込み・保存・作成・名前の変更・削除・移動・コピーをリモートへ（src/main/remoteFiles.ts）。
+    // この PC のファイルの取り込み（fs:import・fs:pasteClipboard）は断る
     'fs:list': async (relDir) => {
       const remote = remoteFilesTarget()
       return remote ? (await import('./remoteFiles')).listRemoteDirectory(remote, relDir) : listDirectory(projectRoot(), relDir)
@@ -3896,14 +3900,21 @@ function registerIpc(): void {
       const remote = remoteFilesTarget()
       return remote ? (await import('./remoteFiles')).createRemoteEntry(remote, parentRel, name, kind) : createEntry(projectRoot(), parentRel, name, kind)
     },
-    'fs:copy': (relPaths, destRel) => { assertLocalFiles(); return copyEntries(projectRoot(), relPaths, destRel) },
-    'fs:move': (relPaths, destRel) => { assertLocalFiles(); return moveEntries(projectRoot(), relPaths, destRel) },
-    'fs:import': (absolutePaths, destRel) => { assertLocalFiles(); return importEntries(projectRoot(), absolutePaths, destRel) },
+    // SSH のプロジェクトでは、コピー（貼り付け・複製）と移動（切り取り・貼り付け、ドラッグ）もリモートの中で ssh で行う
+    'fs:copy': async (relPaths, destRel) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).copyRemoteEntries(remote, relPaths, destRel) : copyEntries(projectRoot(), relPaths, destRel)
+    },
+    'fs:move': async (relPaths, destRel) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).moveRemoteEntries(remote, relPaths, destRel) : moveEntries(projectRoot(), relPaths, destRel)
+    },
+    'fs:import': (absolutePaths, destRel) => { assertLocalImport(); return importEntries(projectRoot(), absolutePaths, destRel) },
     // ファイルツリーの貼り付け（⌘V / Ctrl+V）。OS のクリップボードのファイル・画像を main が読んで取り込み、作ったものの相対パスだけを返す
     // （クリップボードの中身・元のパスは renderer へ返さない。押した直後の1回だけ。security-7 [1]）
     'fs:pasteClipboard': async (destRel) => {
       if (typeof destRel !== 'string' || !gestures.consume('paste')) throw new UserFacingError(t('errors.needsUserAction'))
-      assertLocalFiles()
+      assertLocalImport()
       const root = projectRoot()
       const { readClipboardPaste, writePastedImage } = await import('./clipboardFiles')
       const found = await readClipboardPaste(clipboard)
@@ -3917,13 +3928,23 @@ function registerIpc(): void {
     },
     'fs:importMedia': (markdownRel, absolutePaths) => importMediaForMarkdown(projectRoot(), markdownRel, absolutePaths),
     'fs:copyPath': async (relPaths, kind) => {
-      const text = await pathsForClipboard(projectRoot(), relPaths, kind === 'relative' ? 'relative' : 'absolute')
+      const remote = remoteFilesTarget()
+      const which = kind === 'relative' ? 'relative' : 'absolute'
+      // SSH のプロジェクトはリモートのパス（手元のレビューの置き場のパスではない）
+      const text = remote ? (await import('./remoteFiles')).remotePathsForClipboard(remote, relPaths, which) : await pathsForClipboard(projectRoot(), relPaths, which)
       clipboard.writeText(text)
       return text
     },
     'fs:terminalDir': (relPath) => terminalDirFor(projectRoot(), relPath),
-    'fs:rename': (relPath, newName) => { assertLocalFiles(); return renameEntry(projectRoot(), relPath, newName) },
-    'fs:trash': (relPaths) => { assertLocalFiles(); return trashEntries(projectRoot(), relPaths, (absolute) => shell.trashItem(absolute)) },
+    'fs:rename': async (relPath, newName) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).renameRemoteEntry(remote, relPath, newName) : renameEntry(projectRoot(), relPath, newName)
+    },
+    // SSH のプロジェクトは、リモートのゴミ箱（~/.local/share/Trash）へ移す（Ubuntu などのゴミ箱から戻せる）
+    'fs:trash': async (relPaths) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).trashRemoteEntries(remote, relPaths) : trashEntries(projectRoot(), relPaths, (absolute) => shell.trashItem(absolute))
+    },
     'fs:reveal': async (relPath) => shell.showItemInFolder(await resolveInside(projectRoot(), relPath)),
     'fs:openExternal': async (relPath) => {
       const file = await resolveInside(projectRoot(), relPath)

@@ -54,7 +54,8 @@ export interface RemoteTerminalSource {
   screenText(id: string): string
   agentStates(ids: readonly string[]): Promise<ReadonlyArray<{ kind: string; state: string; agent: TuiAgent | null }>>
   sendReview(id: string, text: string): Promise<{ ok: boolean; message: string; submitted?: boolean }>
-  write(id: string, data: string): void
+  /** キーを書く（SSH のタブは tmux のコピーモードを抜けてから、タブごとに順番どおり。TerminalManager.writeKey） */
+  writeKey(id: string, data: string): Promise<void>
 }
 
 export interface RemoteServerDeps {
@@ -270,7 +271,8 @@ export class MobileRemoteServer {
     }
     const parsed = parseKeyBody(body)
     if ('error' in parsed) return this.json(res, 400, { error: parsed.error })
-    terminals.write(info.id, REMOTE_KEYS[parsed.key])
+    // デスクトップでホイールで上へ戻したままの SSH のタブでも、キーが Agent に届くようにする（抜けられなくても送る）
+    await terminals.writeKey(info.id, REMOTE_KEYS[parsed.key])
     return this.json(res, 200, { ok: true })
   }
 

@@ -378,7 +378,7 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
   }, [liveProblem, live.status.run, live.status.message, toast, showNotice, t])
   const liveAlert = liveProblem && !(targetsOpen && shownSideTab === 'transcript') ? t('liveTranscript.alert') : null
   const fileError = useCallback((message: string) => toast({ tone: 'danger', message }), [toast])
-  // SSH のプロジェクト: ファイルはリモートを読むだけ（ツリーとエディタを読み取り専用にする）
+  // SSH のプロジェクト: ファイルはリモートにある（ツリーの操作・読み込み・保存は main が ssh で行う。ビューア・Office など手元のファイルを前提にするものは使わない）
   const remoteWorkspace = projects.projects.some((p) => p.id === workspace.projectId && p.source === 'ssh')
   const files = useOpenFiles({ root: workspace.folderPath, readOnly: remoteWorkspace, activeTab: centerTab, setActiveTab: setCenterTab, onError: fileError })
   // 外からエディタの領域へ落としたファイルを開く。プロジェクトの外のファイルはプロジェクトの根へコピーしてから開き、フォルダはプロジェクトとして開く。
@@ -414,9 +414,10 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
       rest = media.rest
       await embedMedia(markdownTarget, media.media, point, importMedia)
     }
-    // ファイルツリーの行: ファイルだけを開く（フォルダは fs:inspect が断る）
+    // ファイルツリーの行: ファイルだけを開く（フォルダは fs:inspect が断る。SSH のプロジェクトは手元に実体が無いので、リモートを読めたものだけ開く）
     for (const path of rest) {
-      if (await window.ade.invoke('fs:inspect', path).then(() => true, () => false)) files.open(path)
+      const opens = remoteWorkspace ? window.ade.invoke('fs:read', path) : window.ade.invoke('fs:inspect', path)
+      if (await opens.then(() => true, () => false)) files.open(path)
     }
   })().catch((err) => toast({ tone: 'warning', message: errorMessage(err) })))
   // 内蔵ブラウザで見ているのがプロジェクトの HTML なら、ツールバーに「ソースを開く」を出す
@@ -1391,10 +1392,9 @@ function Workspace({ onOnboardingSettled }: { onOnboardingSettled: () => void })
           {/* 右のファイルツリー。閉じたら列の幅を 0 にして隠す（.sidebar-slot と同じ） */}
           <div className="explorer-slot" aria-hidden={!explorerOpen} style={{ gridArea: 'files' }}>
             <ErrorBoundary name="file-tree">
-            {/* SSH のプロジェクトは、リモートのフォルダを読むツリーにする（main の fs:list / fs:read が ssh で読む）。新しいファイル・フォルダだけ作れる（fs:create） */}
+            {/* SSH のプロジェクトは、リモートのフォルダのツリーにする（main の fs:list / fs:read が ssh で読み、作成・名前の変更・削除（リモートのゴミ箱へ）・移動・コピーも ssh で行う） */}
             <FileExplorer
-              readOnly={remoteWorkspace}
-              createOnly={remoteWorkspace}
+              remote={remoteWorkspace}
               root={workspace.folderPath}
               projectId={workspace.projectId ?? null}
               activePath={files.activeFile?.path ?? null}

@@ -226,7 +226,8 @@ async function onLimitSeen(id: string): Promise<void> {
   if (!agent || state.kind === 'unknown') return
   // ローカルのモデルで動く Agent には提供元の上限が無い。上限らしい行が出ても切り替えない
   if (localAgents().has(agent)) return
-  if (!limitOnScreen(agent, terminals.screenText(id))) return
+  // 今の画面で確かめる（SSH のタブで tmux のコピーモードの間は、上へ戻した位置の昔の知らせで切り替えない。liveScreenText）
+  if (!limitOnScreen(agent, await terminals.liveScreenText(id))) return
   const from: FailoverTarget = isAccountAgentId(agent) ? { agent, accountId: launchedAccount.get(id) ?? activeAccountId(agent) } : { agent }
   flow('failover limit', { agent: isAccountAgentId(agent) ? agent : 'other' })
   await switchFrom(id, info.cwd, from, 'limit')

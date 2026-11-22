@@ -42,6 +42,10 @@ import { useT } from '../lib/i18n'
  *   - パスをコピー・相対パスをコピー・Finder で表示・ターミナルで開く
  *   - 元に戻す（⌘Z / Ctrl+Z）: 直前の作成・名前の変更・移動・貼り付け・複製。削除はゴミ箱から戻せることを知らせる
  * パスと名前の検査は main（src/main/fileOps.ts）が最終的に行う。ここでの検査は打っている間の案内だけ。
+ *
+ * SSH のプロジェクト（remote）: 上の操作は同じ見た目のまま、main が ssh でリモートに行う（src/main/remoteFiles.ts。削除はリモートのゴミ箱へ）。
+ * この PC のファイルを扱うもの（Finder で表示・外部のアプリで開く・ターミナルで開く・Finder などから落とす・OS のクリップボードから貼る）と、
+ * git の色・⌘P は出さない（落としたときは、取り込めないことを知らせる）。
  */
 
 const SEARCH_DEBOUNCE_MS = 250
@@ -144,13 +148,13 @@ function FileExplorerImpl({
   onQuickOpen,
   onRenamed,
   onDeleted,
-  readOnly = false,
-  createOnly = false
+  remote = false
 }: {
-  /** SSH のプロジェクト: ツリーはリモートを読むだけ（作成・名前の変更・削除・貼り付け・ドラッグ・右クリックのメニュー・git の色・⌘P を出さない） */
-  readOnly?: boolean
-  /** readOnly でも、新しいファイル・フォルダだけは作れる（SSH のプロジェクト。右クリックのメニューは作成だけ。main の fs:create が ssh で作る） */
-  createOnly?: boolean
+  /**
+   * SSH のプロジェクト: 作成・名前の変更・削除・移動・コピーは main が ssh でリモートに行う（fs:create・fs:rename・fs:trash・fs:move・fs:copy）。
+   * この PC のファイルを扱うもの（Finder で表示・外部のアプリ・ターミナルで開く・外から落とす・OS のクリップボードから貼る）と git の色・⌘P は出さない
+   */
+  remote?: boolean
   /** 開いているプロジェクトのフォルダ。null なら案内だけ */
   root: string | null
   /** 開いているプロジェクト。開いたフォルダをプロジェクトごとに覚える（更新・再起動のあとも閉じない） */
@@ -170,8 +174,8 @@ function FileExplorerImpl({
   // ツリーの状態（開いたときに読む・外部の変更で読み直す）はフィードバックの右パネルと共用（fileTree.tsx）
   const tree = useFileTree(root, { expandedKey: root ? expandedStorageKey('files', projectId ?? root) : null })
   const { expanded, loading, toggleDir } = tree
-  // git の色分け（変更・追跡外・.gitignore の対象）。git のリポジトリでなければ何も付けない
-  const git = useGitDecorations(readOnly ? null : root)
+  // git の色分け（変更・追跡外・.gitignore の対象）。git のリポジトリでなければ何も付けない（SSH のプロジェクトは手元で git を読めないので付けない）
+  const git = useGitDecorations(remote ? null : root)
   const [showHidden, setShowHidden] = useState(() => readLocal(SHOW_HIDDEN_KEY) === '1')
   const toggleHidden = () => {
     writeLocal(SHOW_HIDDEN_KEY, showHidden ? '0' : '1')
@@ -186,7 +190,7 @@ function FileExplorerImpl({
   const [searching, setSearching] = useState(false)
   const [truncated, setTruncated] = useState(false)
 
-  const ops = useTreeOperations({ root, tree, rows, dirtyPaths, onOpen, onOpenSource, onRenamed, onDeleted })
+  const ops = useTreeOperations({ root, tree, rows, dirtyPaths, onOpen, onOpenSource, onRenamed, onDeleted, remote })
 
   // プロジェクトが変わったら絞り込みも最初から
   useEffect(() => {
@@ -227,11 +231,10 @@ function FileExplorerImpl({
       <header className="explorer__head">
         <span className="explorer__title">{t('fileExplorer.title')}</span>
         <span className="editor-head__spacer" />
-        {(!readOnly || createOnly) && <>
         <IconButton size="sm" label={t('fileExplorer.newFile')} icon={<FilePlus size={14} />} disabled={!root} onClick={() => ops.startCreate('file', ops.targetDir(null))} data-testid="explorer-new-file" />
         <IconButton size="sm" label={t('fileExplorer.newFolder')} icon={<FolderPlus size={14} />} disabled={!root} onClick={() => ops.startCreate('directory', ops.targetDir(null))} data-testid="explorer-new-folder" />
-        </>}
-        {!readOnly && <IconButton size="sm" label={t('fileExplorer.quickOpen', { shortcut: SHORTCUTS.quickOpen() })} icon={<FileSearch size={14} />} onClick={onQuickOpen} disabled={!root} />}
+        {/* ⌘P は手元のファイルの一覧（fs:files）を使うので、SSH のプロジェクトでは出さない */}
+        {!remote && <IconButton size="sm" label={t('fileExplorer.quickOpen', { shortcut: SHORTCUTS.quickOpen() })} icon={<FileSearch size={14} />} onClick={onQuickOpen} disabled={!root} />}
         <IconButton size="sm" label={t('fileExplorer.refresh')} icon={<RefreshCw size={13} />} disabled={!root} onClick={tree.refresh} />
         <IconButton size="sm" label={t('fileExplorer.collapseAll')} icon={<ListCollapse size={14} />} disabled={!root} onClick={tree.collapseAll} />
       </header>
@@ -257,7 +260,7 @@ function FileExplorerImpl({
         className={`explorer__body${ops.dropTarget === '' ? ' is-drop' : ''}`}
         data-testid="explorer-body"
         // 一覧の下の空いた所も含めて、右クリック・貼り付け・ドロップを受ける（プロジェクト直下が対象）
-        {...(treeMode && !readOnly ? {
+        {...(treeMode ? {
           tabIndex: -1,
           onContextMenu: (e: MouseEvent) => ops.openMenu(e, null),
           onKeyDown: ops.onTreeKeyDown,
@@ -268,8 +271,6 @@ function FileExplorerImpl({
           onDragOver: (e: DragEvent) => ops.onDragOver(e, null),
           onDragLeave: ops.onDragLeave,
           onDrop: (e: DragEvent) => ops.onDrop(e, null)
-        } : treeMode && createOnly ? {
-          onContextMenu: (e: MouseEvent) => ops.openMenu(e, null)
         } : {})}
       >
         {!root ? (
@@ -321,14 +322,12 @@ function FileExplorerImpl({
                     className={`explorer__row${entry.path === activePath ? ' is-active' : ''}${selected ? ' is-selected' : ''}${entry.collapsed ? ' is-heavy' : ''}${cut ? ' is-cut' : ''}${dropping ? ' is-drop' : ''}${gitClass(gitState)}`}
                     style={{ '--depth': depth } as React.CSSProperties}
                     onClick={(e) => ops.onRowClick(e, entry, () => (isDir ? toggleDir(entry) : onOpen(entry.path)))}
-                    {...(readOnly ? { onContextMenu: (e: MouseEvent) => (createOnly ? ops.openMenu(e, entry) : e.preventDefault()) } : {
-                      onContextMenu: (e: MouseEvent) => ops.openMenu(e, entry),
-                      draggable: true,
-                      onDragStart: (e: DragEvent) => ops.onDragStart(e, entry),
-                      onDragEnd: ops.onDragEnd,
-                      onDragOver: (e: DragEvent) => ops.onDragOver(e, entry),
-                      onDrop: (e: DragEvent) => ops.onDrop(e, entry)
-                    })}
+                    onContextMenu={(e: MouseEvent) => ops.openMenu(e, entry)}
+                    draggable
+                    onDragStart={(e: DragEvent) => ops.onDragStart(e, entry)}
+                    onDragEnd={ops.onDragEnd}
+                    onDragOver={(e: DragEvent) => ops.onDragOver(e, entry)}
+                    onDrop={(e: DragEvent) => ops.onDrop(e, entry)}
                     title={gitState === 'ignored' ? `${entry.path}\n${t('fileExplorer.gitIgnored')}` : entry.path}
                     data-testid="explorer-row"
                     data-path={entry.path}
@@ -355,10 +354,10 @@ function FileExplorerImpl({
             <div className="explorer__empty" data-testid="explorer-empty">
               <p className="explorer__empty-title">{t('fileExplorer.emptyFolder')}</p>
               <p className="explorer__empty-hint">{t('fileExplorer.emptyHint')}</p>
-              {(!readOnly || createOnly) && <div className="explorer__empty-actions">
+              <div className="explorer__empty-actions">
                 <Button icon={<FilePlus size={13} />} onClick={() => ops.startCreate('file', '')} data-testid="explorer-empty-new-file">{t('fileExplorer.newFile')}</Button>
                 <Button icon={<FolderPlus size={13} />} onClick={() => ops.startCreate('directory', '')} data-testid="explorer-empty-new-folder">{t('fileExplorer.newFolder')}</Button>
-              </div>}
+              </div>
             </div>
           )}
           </>
@@ -368,8 +367,8 @@ function FileExplorerImpl({
         {!searchingMode && ops.notice && <p className="explorer__note explorer__note--sticky" role="status" data-testid="explorer-notice">{ops.notice}</p>}
       </div>
 
-      {ops.menu && <TreeMenu ops={ops} createOnly={readOnly && createOnly} showHidden={showHidden} onToggleHidden={toggleHidden} />}
-      {ops.confirmDelete && <DeleteDialog paths={ops.confirmDelete.paths} dirty={[...dirtyPaths].filter((p) => ops.confirmDelete!.paths.some((d) => isSameOrUnder(p, d)))} onCancel={() => ops.setConfirmDelete(null)} onConfirm={() => ops.trash(ops.confirmDelete!.paths, ops.confirmDelete!.record)} />}
+      {ops.menu && <TreeMenu ops={ops} remote={remote} showHidden={showHidden} onToggleHidden={toggleHidden} />}
+      {ops.confirmDelete && <DeleteDialog paths={ops.confirmDelete.paths} remote={remote} dirty={[...dirtyPaths].filter((p) => ops.confirmDelete!.paths.some((d) => isSameOrUnder(p, d)))} onCancel={() => ops.setConfirmDelete(null)} onConfirm={() => ops.trash(ops.confirmDelete!.paths, ops.confirmDelete!.record)} />}
     </aside>
   )
 }
@@ -385,7 +384,8 @@ function useTreeOperations({
   onOpen,
   onOpenSource,
   onRenamed,
-  onDeleted
+  onDeleted,
+  remote
 }: {
   root: string | null
   tree: ReturnType<typeof useFileTree>
@@ -395,6 +395,8 @@ function useTreeOperations({
   onOpenSource?: (path: string) => void
   onRenamed?: (from: string, to: string) => void
   onDeleted?: (paths: string[]) => void
+  /** SSH のプロジェクト（OS のクリップボード・外から落としたものは取り込まない。削除はリモートのゴミ箱へ） */
+  remote: boolean
 }) {
   const t = useT()
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
@@ -641,12 +643,18 @@ function useTreeOperations({
     pushHistory({ kind: 'copy', created: done.map((d) => d.to) })
   }
 
+  /** 失敗しても途中まで進んだかもしれない（リモートの時間切れなど）。関係するフォルダを読み直してから失敗を出す */
+  const reloadAfterFailure = (paths: string[], dest: string) => {
+    for (const dir of new Set([dest, ...paths.map(parentDir)])) tree.reloadDir(dir)
+  }
+
   const copyTo = (paths: string[], dest: string) => run(async () => {
-    afterCopied(dest, await window.ade.invoke('fs:copy', paths, dest))
+    const done = await window.ade.invoke('fs:copy', paths, dest).catch((err: unknown) => { reloadAfterFailure([], dest); throw err })
+    afterCopied(dest, done)
   })
 
   const moveTo = (paths: string[], dest: string) => run(async () => {
-    const moves = await window.ade.invoke('fs:move', paths, dest)
+    const moves = await window.ade.invoke('fs:move', paths, dest).catch((err: unknown) => { reloadAfterFailure(paths, dest); throw err })
     applyMoves(moves)
     if (dest) tree.expandDir(dest)
     tree.reloadDir(dest)
@@ -665,6 +673,12 @@ function useTreeOperations({
   const paste = (dest: string) => {
     const clip = clipboard
     setMenu(null)
+    // SSH のプロジェクトへは OS のクリップボード（この PC のファイル・画像）を取り込まない。ツリーでコピー・切り取りしたものだけを貼る
+    if (remote) {
+      if (clip) pasteTree(clip, dest)
+      else setNotice(t('fileExplorer.pasteNothingRemote'))
+      return
+    }
     if (!clip || clipboardStale.current) {
       void run(async () => {
         const pasted = await window.ade.invoke('fs:pasteClipboard', dest)
@@ -697,7 +711,7 @@ function useTreeOperations({
     for (const path of paths) byParent.set(parentDir(path), [...(byParent.get(parentDir(path)) ?? []), path])
     const created: FsTransfer[] = []
     for (const [dir, group] of byParent) {
-      const done = await window.ade.invoke('fs:copy', group, dir)
+      const done = await window.ade.invoke('fs:copy', group, dir).catch((err: unknown) => { reloadAfterFailure([], dir); throw err })
       tree.reloadDir(dir)
       created.push(...done)
     }
@@ -717,8 +731,12 @@ function useTreeOperations({
     requestTerminalAt(await window.ade.invoke('fs:terminalDir', path))
   })
 
-  /** 外から落としたもの（Finder・エクスプローラー）をコピーして取り込む */
+  /** 外から落としたもの（Finder・エクスプローラー）をコピーして取り込む。SSH のプロジェクトへは取り込めないことを知らせる（黙って何もしないままにしない） */
   const importDropped = (dataTransfer: DataTransfer, dest: string) => {
+    if (remote) {
+      setActionError(t('remoteFiles.errors.noImport'))
+      return
+    }
     // files はイベントの間しか読めないので、ここで先に読み出す（readDrop は同期の部分で File を取り出す）
     const pending = readDrop(dataTransfer)
     void run(async () => {
@@ -737,7 +755,7 @@ function useTreeOperations({
     setHistory((list) => list.slice(0, -1))
     if (last.kind === 'trash') {
       setActionError(null)
-      setNotice(window.ade?.platform === 'win32' ? t('fileExplorer.undoTrashWin') : t('fileExplorer.undoTrash'))
+      setNotice(remote ? t('fileExplorer.undoTrashRemote') : window.ade?.platform === 'win32' ? t('fileExplorer.undoTrashWin') : t('fileExplorer.undoTrash'))
       return
     }
     if (last.kind === 'create' || last.kind === 'copy') {
@@ -849,7 +867,8 @@ function useTreeOperations({
       void copyPath(targetsFor(focused), relative ? 'relative' : 'absolute')
       return
     }
-    if (code === 'KeyR' && event.altKey && (mac ? event.metaKey : event.shiftKey && !event.ctrlKey)) {
+    // Finder で表示は手元のファイルだけ（SSH のプロジェクトでは何もしない）
+    if (!remote && code === 'KeyR' && event.altKey && (mac ? event.metaKey : event.shiftKey && !event.ctrlKey)) {
       handled()
       void reveal(focused ?? [...selected][0] ?? '')
       return
@@ -1024,8 +1043,11 @@ function MenuItem({ icon, label, shortcut, onClick, disabled, danger, testId }: 
   )
 }
 
-/** 右クリックのメニュー。行の上ならその項目（選択中なら選択全部）、空いた所ならプロジェクト直下が対象 */
-function TreeMenu({ ops, createOnly = false, showHidden, onToggleHidden }: { ops: TreeOps; createOnly?: boolean; showHidden: boolean; onToggleHidden: () => void }) {
+/**
+ * 右クリックのメニュー。行の上ならその項目（選択中なら選択全部）、空いた所ならプロジェクト直下が対象。
+ * remote（SSH のプロジェクト）では、この PC のファイルを扱うもの（外部のアプリで開く・Finder で表示・ターミナルで開く）を出さない
+ */
+function TreeMenu({ ops, remote = false, showHidden, onToggleHidden }: { ops: TreeOps; remote?: boolean; showHidden: boolean; onToggleHidden: () => void }) {
   const t = useT()
   const menu = ops.menu!
   const entry = menu.entry
@@ -1071,15 +1093,13 @@ function TreeMenu({ ops, createOnly = false, showHidden, onToggleHidden }: { ops
           {ops.onOpenSource && isHtmlPath(entry.path) && (
             <MenuItem icon={<FileCode size={13} strokeWidth={1.75} />} label={t('editor.openHtmlSource')} onClick={() => { ops.closeMenu(); ops.onOpenSource?.(entry.path) }} testId="explorer-menu-open-source" />
           )}
-          {!createOnly && <MenuItem icon={<ExternalLink size={13} strokeWidth={1.75} />} label={t('viewer.openExternal')} onClick={() => void ops.openExternally(entry.path)} testId="explorer-menu-open-external" />}
+          {!remote && <MenuItem icon={<ExternalLink size={13} strokeWidth={1.75} />} label={t('viewer.openExternal')} onClick={() => void ops.openExternally(entry.path)} testId="explorer-menu-open-external" />}
           {sep}
         </>
       )}
       <MenuItem icon={<FilePlus size={13} strokeWidth={1.75} />} label={t('fileExplorer.newFile')} onClick={() => ops.startCreate('file', ops.targetDir(entry))} testId="explorer-menu-new-file" />
       <MenuItem icon={<FolderPlus size={13} strokeWidth={1.75} />} label={t('fileExplorer.newFolder')} onClick={() => ops.startCreate('directory', ops.targetDir(entry))} testId="explorer-menu-new-folder" />
       {sep}
-      {/* SSH のプロジェクトは作成だけ（コピー・移動・名前の変更・削除・Finder で表示はローカルのファイルを扱うので出さない） */}
-      {!createOnly && <>
       {entry && (
         <>
           <MenuItem icon={<Scissors size={13} strokeWidth={1.75} />} label={t('fileExplorer.cut')} shortcut={KEYS.cut()} onClick={() => ops.cut(targets)} testId="explorer-menu-cut" />
@@ -1091,9 +1111,12 @@ function TreeMenu({ ops, createOnly = false, showHidden, onToggleHidden }: { ops
       {sep}
       <MenuItem icon={<Link size={13} strokeWidth={1.75} />} label={t('fileExplorer.copyPath')} shortcut={KEYS.copyPath()} onClick={() => void ops.copyPath(entry ? targets : [''], 'absolute')} testId="explorer-menu-copy-path" />
       {entry && <MenuItem icon={<Link size={13} strokeWidth={1.75} />} label={t('fileExplorer.copyRelativePath')} shortcut={KEYS.copyRelativePath()} onClick={() => void ops.copyPath(targets, 'relative')} testId="explorer-menu-copy-relative-path" />}
+      {/* Finder で表示・ターミナルで開くは手元のフォルダを扱うので、SSH のプロジェクトでは出さない */}
+      {!remote && <>
       {sep}
       <MenuItem icon={<FolderOpen size={13} strokeWidth={1.75} />} label={revealLabel} shortcut={KEYS.reveal()} disabled={!single && !!entry} onClick={() => void ops.reveal(here)} testId="explorer-menu-reveal" />
       <MenuItem icon={<SquareTerminal size={13} strokeWidth={1.75} />} label={t('fileExplorer.openInTerminal')} disabled={!single && !!entry} onClick={() => void ops.openInTerminal(here)} testId="explorer-menu-terminal" />
+      </>}
       {entry && (
         <>
           {sep}
@@ -1104,7 +1127,6 @@ function TreeMenu({ ops, createOnly = false, showHidden, onToggleHidden }: { ops
       {sep}
       <MenuItem icon={<Undo2 size={13} strokeWidth={1.75} />} label={t('fileExplorer.undo')} shortcut={KEYS.undo()} disabled={ops.history.length === 0} onClick={ops.undo} testId="explorer-menu-undo" />
       {sep}
-      </>}
       <MenuItem
         icon={showHidden ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
         label={showHidden ? t('fileExplorer.hideHidden') : t('fileExplorer.showHidden')}
@@ -1115,8 +1137,8 @@ function TreeMenu({ ops, createOnly = false, showHidden, onToggleHidden }: { ops
   )
 }
 
-/** 削除の確認（アプリ内のモーダル。ネイティブの確認は出さない） */
-function DeleteDialog({ paths, dirty, onCancel, onConfirm }: { paths: string[]; dirty: string[]; onCancel: () => void; onConfirm: () => void }) {
+/** 削除の確認（アプリ内のモーダル。ネイティブの確認は出さない）。remote（SSH のプロジェクト）はリモートのゴミ箱へ移すと伝える */
+function DeleteDialog({ paths, remote, dirty, onCancel, onConfirm }: { paths: string[]; remote: boolean; dirty: string[]; onCancel: () => void; onConfirm: () => void }) {
   const t = useT()
   const heading = paths.length === 1 ? t('fileExplorer.deleteHeading', { name: baseName(paths[0]!) }) : t('fileExplorer.deleteHeadingMany', { count: paths.length })
   const listed = paths.slice(0, MAX_LISTED_DELETE_NAMES)
@@ -1132,7 +1154,7 @@ function DeleteDialog({ paths, dirty, onCancel, onConfirm }: { paths: string[]; 
             {paths.length > listed.length && <li>…</li>}
           </ul>
         )}
-        <p className="unsaved-dialog__body">{window.ade?.platform === 'win32' ? t('fileExplorer.deleteBodyWin') : t('fileExplorer.deleteBody')}</p>
+        <p className="unsaved-dialog__body">{remote ? t('fileExplorer.deleteBodyRemote') : window.ade?.platform === 'win32' ? t('fileExplorer.deleteBodyWin') : t('fileExplorer.deleteBody')}</p>
         {dirty.length > 0 && (
           <p className="unsaved-dialog__body explorer-delete__warn" data-testid="explorer-delete-unsaved">
             {t('fileExplorer.deleteUnsaved', { names: dirty.map(baseName).join(', ') })}

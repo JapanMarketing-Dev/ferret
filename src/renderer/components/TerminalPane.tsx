@@ -1,7 +1,7 @@
 import { foregroundAgentOf, isReopenTerminalKey } from '../terminal/terminalKeys'
 import { startupLaunches } from '../terminal/startupLaunch'
 import { hasExternalFiles, readDrop } from '../lib/externalDrop'
-import { shellPathsText, shellQuotingFor, treePathsForTerminal } from '@shared/externalDrop'
+import { remoteTreePathsText, shellPathsText, shellQuotingFor, treePathsForTerminal } from '@shared/externalDrop'
 import { hasTreePaths, treeDragPaths } from '../lib/treeDrag'
 import { droppedProjectPath, hasProjectDrag } from '../lib/projectDrag'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -1392,6 +1392,15 @@ function TerminalPaneImpl({
     const pending = tree || projectPath ? null : readDrop(dataTransfer)
     const pane = panesRef.current[paneKey]
     const ptyId = getTerminal(paneKey)?.ptyId ?? null
+    // SSH のプロジェクトのツリーから落としたもの: リモートのフォルダからのパスにする（手元のレビューの置き場のパスではない）
+    const sshProject = projects.find((p) => p.id === projectId && p.source === 'ssh' && p.ssh)
+    if (tree && sshProject?.ssh) {
+      const remoteText = remoteTreePathsText(tree, sshProject.ssh.path)
+      if (!remoteText) return
+      focusPane(tabKey, paneKey)
+      getTerminal(paneKey)?.insertText(remoteText)
+      return
+    }
     const paths = projectPath ? [projectPath] : tree
       ? treePathsForTerminal(tree, { root: cwd ?? '', cwd: ptyId ? await window.ade.invoke('terminal:cwd', ptyId).catch(() => null) : null, platform: window.ade.platform })
       : (await pending!).map((entry) => entry.path)
