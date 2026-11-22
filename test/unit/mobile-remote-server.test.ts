@@ -35,17 +35,14 @@ class FakeTerminals implements RemoteTerminalSource {
     if (this.sendError) throw this.sendError
     return this.sendResult
   }
-  /** キーの前のコピーモードの抜け（SSH のタブの tmux）と write の順番 */
+  /** キーを書き終えるまでの待ち（SSH のタブは tmux のコピーモードを抜けてから書く。TerminalManager.writeKey） */
+  keyDelayMs = 0
   events: string[] = []
-  leaveError: Error | null = null
-  write(id: string, data: string) {
+  async writeKey(id: string, data: string) {
+    this.events.push(`start:${id}`)
+    if (this.keyDelayMs) await new Promise((r) => setTimeout(r, this.keyDelayMs))
     this.written.push([id, data])
-    this.events.push(`write:${id}`)
-  }
-  async leaveCopyMode(id: string) {
-    this.events.push(`leave:${id}`)
-    if (this.leaveError) throw this.leaveError
-    return true
+    this.events.push(`end:${id}`)
   }
 }
 
@@ -268,13 +265,12 @@ describe('MobileRemoteServer', () => {
     expect(fake.written).toHaveLength(4)
   })
 
-  it('キーの前に SSH のタブの tmux のコピーモードを抜ける（ホイールで上へ戻したままでも Agent に届く。抜けられなくても送る）', async () => {
-    expect((await send(port, { method: 'POST', path: '/api/terminals/t1/key', token: TOKEN, ...json({ key: 'enter' }) })).status).toBe(200)
-    expect(fake.events).toEqual(['leave:t1', 'write:t1'])
-    fake.leaveError = new Error('ssh down')
-    expect((await send(port, { method: 'POST', path: '/api/terminals/t1/key', token: TOKEN, ...json({ key: 'y' }) })).status).toBe(200)
-    expect(fake.events).toEqual(['leave:t1', 'write:t1', 'leave:t1', 'write:t1'])
-    expect(fake.written).toEqual([['t1', '\r'], ['t1', 'y']])
+  it('キーは writeKey（SSH のタブは tmux のコピーモードを抜けてから順番どおりに書く）を待ってから答える', async () => {
+    fake.keyDelayMs = 30
+    const res = await send(port, { method: 'POST', path: '/api/terminals/t1/key', token: TOKEN, ...json({ key: 'enter' }) })
+    expect(res.status).toBe(200)
+    expect(fake.events).toEqual(['start:t1', 'end:t1'])
+    expect(fake.written).toEqual([['t1', '\r']])
   })
 
   it('知らないターミナルは 404（画面・送信・キー）', async () => {

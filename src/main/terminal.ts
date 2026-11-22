@@ -32,7 +32,7 @@ import { ComposerReadiness } from './agent/readiness'
 import { nextLaunchAgentPhase, type LaunchAgentPhase } from './agent/launchPhase'
 import { sendToAgent } from './agent/send'
 import { chooseSendTarget } from './agent/sendTarget'
-import { dropRightButtonReports, hasMouseReport, waitForRedraw } from './tmuxInput'
+import { dropRightButtonReports, hasMouseReport } from './tmuxInput'
 import { agentSubmitsPaste } from '@shared/sendTarget'
 import { agentInProcessTree, hasForegroundChild, isShellProcess, parseProcessRows, parseWindowsProcessRows, type ProcessRow } from './agent/processTree'
 import { t } from '@shared/i18n'
@@ -73,10 +73,11 @@ const STARTUP_WRITE_QUIET_MS = 300
 /** 出力が止まらなくても、ここまで待ったら書き込む */
 const STARTUP_WRITE_TIMEOUT_MS = 5000
 /**
- * SSH のタブで tmux のコピーモードを抜けたあと、描き直しを renderer が知らせ直すまで待つ上限。
+ * SSH のタブで tmux のコピーモードを抜けたあと、tmux から取った今の画面を renderer の知らせより優先する間。
+ * 抜ける前に始まった renderer の知らせ（上へ戻した位置の画面）が遅れて届いても上書きさせない。
  * 裏のタブは出力のまとめ（HIDDEN_FLUSH_INTERVAL_MS）と画面の知らせ（renderer の HIDDEN_SCREEN_REPORT_MS = 1 秒）の分だけ遅い
  */
-const TMUX_REDRAW_WAIT_MS = 2000
+const TMUX_SCREEN_HOLD_MS = 1500
 
 export interface ShellSpec {
   file: string
@@ -257,10 +258,16 @@ interface Session {
   history: TerminalHistory
   /** SSH のタブ: リモートの tmux のセッション（利用者がタブを閉じたときに終わらせる） */
   tmux?: { host: string; session: string }
-  /** SSH のタブ: 最後に PTY の出力が届いた時刻（コピーモードを抜けたあと、描き直しを待つ。tmuxInput.ts の waitForRedraw） */
-  outputAt?: number
-  /** SSH のタブ: 利用者がマウスを使った（tmux のコピーモードに入っているかもしれない。起動の打ち込みの前に抜ける） */
-  pointerUsed?: boolean
+  /**
+   * SSH のタブ: マウスの報告を送った回数と、最後にコピーモードを確かめた（抜けた・入っていなかった）ときの回数。
+   * 違えば、ホイールで tmux のコピーモードに入っているかもしれない（mayBeInCopyMode）。戻したタブ（つなぎ直し）は分からないので違う値から
+   */
+  mouseSeq?: number
+  copyModeSeq?: number
+  /** SSH のタブ: この時刻までは tmux から取った今の画面を使い、renderer の画面の知らせで上書きしない（TMUX_SCREEN_HOLD_MS） */
+  screenHeldUntil?: number
+  /** SSH のタブ: スマホのキーを順番どおりに書く（コピーモードを抜けるのを待つ間に、後のキーが先に届かない） */
+  keys?: Promise<void>
   /** 起動時の Agent の推定の段階（agent/launchPhase.ts） */
   launchAgent?: LaunchAgentPhase
   /**
@@ -294,6 +301,11 @@ const SPARE_MAX_AGE_MS = 6 * 60 * 60 * 1000
 const SPARE_REFILL_DELAY_MS = 1500
 
 export type { TerminalSessionInfo } from '@shared/types'
+
+/** SSH のタブが、ホイールで tmux のコピーモードに入っているかもしれないか（最後に確かめてからマウスを使った・戻したタブ） */
+function mayBeInCopyMode(session: Session): boolean {
+  return session.tmux !== undefined && session.mouseSeq !== session.copyModeSeq
+}
 
 /**
  * 次のフラッシュまでの待ち。見えているターミナルは毎フレーム、裏のターミナルは HIDDEN_FLUSH_INTERVAL_MS。
@@ -648,7 +660,7 @@ export class TerminalManager {
     const session: Session = { id, pty, buffer: [], bufferBytes: 0, timer: null,
       tail: '', readiness: new ComposerReadiness(), sending: false,
       info: { id, pid: pty.pid, cwd, title, agent: launched }, history: new TerminalHistory(), unacked: 0, paused: false,
-      ...(tmux ? { tmux: { host: tmux.host, session: tmux.session } } : {}) }
+      ...(tmux ? { tmux: { host: tmux.host, session: tmux.session }, ...(reattach ? { mouseSeq: 1 } : {}) } : {}) }
     this.sessions.set(id, session)
     if (agent) this.failover?.launched(id, agent, options.failoverToken ?? null, accountId)
     this.wirePty(session, pendingWrite, launched)
@@ -734,7 +746,7 @@ export class TerminalManager {
         if (this.sessions.get(session.id) === session) session.pty.write(`${command}\r`)
       }
       // SSH のタブで、打ち込む前に利用者がマウスを使っていた: tmux のコピーモードを先に抜ける（入ったままだと起動の行を tmux が受け取る）
-      if (session.tmux && session.pointerUsed) void this.leaveTmuxCopyMode(session).then(type)
+      if (mayBeInCopyMode(session)) void this.leaveTmuxCopyMode(session).then(type)
       else type()
     }
     const deadline = setTimeout(fire, STARTUP_WRITE_TIMEOUT_MS)
@@ -753,7 +765,6 @@ export class TerminalManager {
   }
 
   private enqueue(session: Session, data: string): void {
-    if (session.tmux) session.outputAt = Date.now()
     session.history.push(data)
     // 色などの制御を外すのは1回だけ（どのターミナルの出力も main で毎回通る）
     const plain = stripAnsi(data)
@@ -860,9 +871,9 @@ export class TerminalManager {
     const session = this.sessions.get(id)
     if (!session) return
     // SSH のタブ（リモートの tmux）: 右ボタンの報告は渡さない（tmux のメニューで Agent のペインを終わらせない。tmuxInput.ts）。
-    // マウスを使ったことは覚えておく（コピーモードに入っているかもしれない。起動の打ち込みの前に抜ける）
+    // マウスを使ったことは数えておく（ホイールで tmux のコピーモードに入っているかもしれない。Ferret が打ち込む前に抜ける）
     if (session.tmux && hasMouseReport(data)) {
-      session.pointerUsed = true
+      session.mouseSeq = (session.mouseSeq ?? 0) + 1
       data = dropRightButtonReports(data)
       if (!data) return
     }
@@ -871,20 +882,44 @@ export class TerminalManager {
   }
 
   /**
-   * SSH のタブの tmux のコピーモード（ホイールで上へ戻したとき）を抜ける。入ったまま Ferret が打ち込むと、tmux が受け取って
-   * Agent に届かない。抜けたら true。SSH のタブでない・入っていない・つながらないときは false（打ち込みは止めない）
+   * Ferret の外（スマホ）から来たキーを書く。SSH のタブは tmux のコピーモード（ホイールで上へ戻したとき）を先に抜ける
+   * （入ったままだとキーを tmux が受け取る）。抜けるのを待つ間に後のキーが先に届かないよう、タブごとに順番どおりに書く
    */
-  async leaveCopyMode(id: string): Promise<boolean> {
+  writeKey(id: string, data: string): Promise<void> {
     const session = this.sessions.get(id)
-    return session ? this.leaveTmuxCopyMode(session) : false
+    if (!session) return Promise.resolve()
+    if (!session.tmux) {
+      this.write(id, data)
+      return Promise.resolve()
+    }
+    const next = (session.keys ?? Promise.resolve()).then(async () => {
+      await this.leaveTmuxCopyMode(session)
+      this.write(id, data)
+    })
+    // 1つが失敗しても、後のキーは書く
+    session.keys = next.catch(() => undefined)
+    return next
   }
 
+  /**
+   * SSH のタブの tmux のコピーモードを抜ける。入ったまま Ferret が打ち込むと、tmux が受け取って Agent に届かない。
+   * 抜けたら tmux から取った今の画面をしばらく使う（renderer の画面は、描き直しが届くまで上へ戻した位置のまま）。
+   * 抜けたら true。SSH のタブでない・入っていない・つながらないときは false（投げない。打ち込みは止めない）
+   */
   private async leaveTmuxCopyMode(session: Session): Promise<boolean> {
-    if (!session.tmux) return false
+    // マウスを使っていなければ、ホイールでコピーモードに入ってはいない（ssh を動かさない）
+    if (!session.tmux || !mayBeInCopyMode(session)) return false
     const { host, session: name } = session.tmux
+    const seq = session.mouseSeq
     try {
       const { leaveTmuxCopyMode } = await import('./remoteFiles')
-      return (await leaveTmuxCopyMode(host, name)) === true
+      const live = await leaveTmuxCopyMode(host, name)
+      // 確かめられた（この間にまたマウスを使っていれば、次も確かめる）。つながらないときは次も確かめる
+      if (live) session.copyModeSeq = seq
+      if (!live?.left) return false
+      session.screen = { text: live.screen.slice(-10000), at: Date.now() }
+      session.screenHeldUntil = Date.now() + TMUX_SCREEN_HOLD_MS
+      return true
     } catch {
       return false
     }
@@ -896,9 +931,30 @@ export class TerminalManager {
     return session ? (session.screen?.text ?? session.tail) : ''
   }
 
+  /**
+   * 判定に使う今の画面の文字。SSH のタブは、tmux のコピーモードの間 renderer の画面が上へ戻した位置のもの（昔の上限の知らせなど）に
+   * なるので、tmux から今の画面を取り直す（コピーモードは抜けない）。取れなければ screenText と同じ
+   */
+  async liveScreenText(id: string): Promise<string> {
+    const session = this.sessions.get(id)
+    if (!session) return ''
+    if (session.tmux) {
+      const { host, session: name } = session.tmux
+      const live = await import('./remoteFiles').then(({ captureTmuxPane }) => captureTmuxPane(host, name)).catch(() => null)
+      if (live !== null) return live
+    }
+    return this.screenText(id)
+  }
+
   updateScreen(id: string, text: string): void {
     const session = this.sessions.get(id)
-    if (session && session.screen?.text !== text.slice(-10000)) session.screen = { text: text.slice(-10000), at: Date.now() }
+    if (!session) return
+    // コピーモードを抜けた直後: tmux から取った今の画面を、遅れて届く上へ戻した位置の画面で上書きしない
+    if (session.screenHeldUntil !== undefined) {
+      if (Date.now() < session.screenHeldUntil) return
+      session.screenHeldUntil = undefined
+    }
+    if (session.screen?.text !== text.slice(-10000)) session.screen = { text: text.slice(-10000), at: Date.now() }
   }
 
   async agentState(id: string): Promise<{ kind: AgentKind; state: string; agent: TuiAgent | null }> {
@@ -977,14 +1033,8 @@ export class TerminalManager {
     const { kind, agent } = await this.agentState(id)
     if (kind === 'unknown') return { ok: false, message: t('terminal.send.noAgent') }
     // SSH のタブ: tmux のコピーモード（ホイールで上へ戻したとき）を先に抜ける。入ったままだと貼り付けと Enter を tmux が受け取る。
-    // 抜けたら、描き直しを renderer が知らせ直すまで待ってから状態を見る（上へ戻した位置の古い画面で判定しない）
-    if (session.tmux) {
-      const since = Date.now()
-      if (await this.leaveTmuxCopyMode(session)) {
-        await waitForRedraw({ since, outputAt: () => session.outputAt, screenAt: () => session.screen?.at,
-          alive: () => this.sessions.get(id) === session, limitMs: TMUX_REDRAW_WAIT_MS })
-      }
-    }
+    // 抜けたら、状態は tmux から取った今の画面で見る（上へ戻した位置の古い画面で判定しない）
+    if (session.tmux) await this.leaveTmuxCopyMode(session)
     // Enter で送信されると確かめていない Agent は、貼り付けるだけにする（@shared/sendTarget）
     const submit = agentSubmitsPaste(agent)
     // Claude Code / Codex 以外は待機中の見え方を知らないので、確認待ちでなく、出力が落ち着いていれば送る

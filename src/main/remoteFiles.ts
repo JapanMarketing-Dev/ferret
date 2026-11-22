@@ -24,11 +24,11 @@ import {
   REMOTE_NOT_FOLDER_EXIT,
   type FolderListing
 } from '@shared/remoteFiles'
-import { isValidSshHost, tmuxHasSessionCommand, tmuxKillSessionCommand, tmuxLeaveCopyModeCommand, type SshTarget } from '@shared/sshCommand'
+import { isValidSshHost, tmuxCapturePaneCommand, tmuxHasSessionCommand, tmuxKillSessionCommand, tmuxLeaveCopyModeCommand, type SshTarget } from '@shared/sshCommand'
 import { toolEnv } from './github/gh'
 
 /**
- * SSH のプロジェクトのファイルツリー（読む・新しいファイル・フォルダを作る）とエディタの保存・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末・コピーモードを抜ける。
+ * SSH のプロジェクトのファイルツリー（読む・新しいファイル・フォルダを作る）とエディタの保存・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末・コピーモードを抜ける・今の画面を取る。
  * リモートで動かす1行は src/shared/remoteFiles.ts / sshCommand.ts の純粋な関数で組み立て、ここは ssh を動かすだけ。
  *
  * - 対話なし（BatchMode）で動かす。鍵やパスワードは扱わず、~/.ssh/config と ssh-agent に任せる
@@ -176,21 +176,35 @@ export function killTmuxSession(host: string, session: string, run: SshRunner = 
   void run(host, tmuxKillSessionCommand(session), { timeoutMs: 15_000 }).catch(() => undefined)
 }
 
-/** コピーモードを抜けるのを待つ上限。接続を使い回していれば 1 往復で済む（使い回しが切れていてもつなぎ直せる長さ） */
+/** コピーモードを抜ける・今の画面を取るのを待つ上限。接続を使い回していれば 1 往復で済む（使い回しが切れていてもつなぎ直せる長さ） */
 export const TMUX_LEAVE_COPY_MODE_TIMEOUT_MS = 3000
 
-/**
- * tmux のコピーモードを抜ける（Ferret が Agent へ打ち込む前。ホイールで上へ戻したままだと、貼り付けと Enter を tmux が受け取る）。
- * 抜けたら true、入っていなければ false、つながらない・遅い・分からないときは null。失敗しても投げない（送信を止めない）
- */
-export async function leaveTmuxCopyMode(host: string, session: string, run: SshRunner = runSsh): Promise<boolean | null> {
-  let result: SshRunResult
+/** 1行を動かして、終了コード 0 の出力だけを返す（つながらない・遅い・組み立てられないときは null。投げない） */
+async function runTmuxLine(host: string, line: () => string, run: SshRunner): Promise<string | null> {
   try {
-    result = await run(host, tmuxLeaveCopyModeCommand(session), { timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS })
+    const result = await run(host, line(), { timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS })
+    return result.code === 0 ? result.stdout.toString('utf8') : null
   } catch {
     return null
   }
-  if (result.code !== 0) return null
-  const out = result.stdout.toString('utf8').trim()
-  return out === '1' ? true : out === '0' ? false : null
+}
+
+/**
+ * tmux のコピーモードを抜ける（Ferret が Agent へ打ち込む前。ホイールで上へ戻したままだと、貼り付けと Enter を tmux が受け取る）。
+ * left: 入っていて抜けたか。screen: 今の画面（抜けた直後の renderer の画面は、描き直しが届くまで上へ戻した位置のまま）。
+ * つながらない・遅い・分からないときは null。失敗しても投げない（送信を止めない）
+ */
+export async function leaveTmuxCopyMode(host: string, session: string, run: SshRunner = runSsh): Promise<{ left: boolean; screen: string } | null> {
+  const out = await runTmuxLine(host, () => tmuxLeaveCopyModeCommand(session), run)
+  if (out === null) return null
+  const newline = out.indexOf('\n')
+  const mode = (newline < 0 ? out : out.slice(0, newline)).trim()
+  if (mode !== '1' && mode !== '0') return null
+  return { left: mode === '1', screen: newline < 0 ? '' : out.slice(newline + 1).replace(/\n+$/, '') }
+}
+
+/** tmux の今の画面（コピーモードは抜けない）。取れなければ null */
+export async function captureTmuxPane(host: string, session: string, run: SshRunner = runSsh): Promise<string | null> {
+  const out = await runTmuxLine(host, () => tmuxCapturePaneCommand(session), run)
+  return out === null ? null : out.replace(/\n+$/, '')
 }

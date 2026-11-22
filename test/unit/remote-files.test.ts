@@ -26,6 +26,7 @@ import {
   sshShellSpec,
   tmuxHasSessionCommand,
   tmuxKillSessionCommand,
+  tmuxCapturePaneCommand,
   tmuxLeaveCopyModeCommand,
   tmuxSessionName
 } from '../../src/shared/sshCommand'
@@ -34,6 +35,7 @@ import {
   createRemoteEntry,
   createRemoteFolder,
   writeRemoteFile,
+  captureTmuxPane,
   killTmuxSession,
   leaveTmuxCopyMode,
   TMUX_LEAVE_COPY_MODE_TIMEOUT_MS,
@@ -239,31 +241,50 @@ describe('tmux のセッション（SSH のタブの常駐）', () => {
     expect(() => tmuxKillSessionCommand('a;b')).toThrow()
   })
 
-  it('コピーモードを抜ける1行: 入っていれば cancel して 1、いなければ 0（中のコマンドにも -t を書く）', () => {
+  it('コピーモードを抜ける1行: 入っていたか（1 / 0）を出して抜け、今の画面を出す（中のコマンドにも -t を書く）', () => {
     expect(tmuxLeaveCopyModeCommand('ferret-a-1-t')).toBe(
-      `tmux display-message -p -t '=ferret-a-1-t:' '#{pane_in_mode}' ';' if-shell -F -t '=ferret-a-1-t:' '#{pane_in_mode}' 'send-keys -X -t =ferret-a-1-t: cancel'`
+      `tmux display-message -p -t '=ferret-a-1-t:' '#{pane_in_mode}' ';' if-shell -F -t '=ferret-a-1-t:' '#{pane_in_mode}' 'send-keys -X -t =ferret-a-1-t: cancel' ';' capture-pane -p -t '=ferret-a-1-t:'`
     )
-    for (const bad of ["a'b", 'a;b', 'a b', 'a:b', '$(x)', '']) expect(() => tmuxLeaveCopyModeCommand(bad), bad).toThrow()
+    expect(tmuxCapturePaneCommand('ferret-a-1-t')).toBe(`tmux capture-pane -p -t '=ferret-a-1-t:'`)
+    for (const bad of ["a'b", 'a;b', 'a b', 'a:b', '$(x)', '']) {
+      expect(() => tmuxLeaveCopyModeCommand(bad), bad).toThrow()
+      expect(() => tmuxCapturePaneCommand(bad), bad).toThrow()
+    }
   })
 
-  it('leaveTmuxCopyMode: 1 なら抜けた・0 なら入っていない・それ以外（失敗・接続できない・分からない出力）は null。待つのは短く', async () => {
+  it('leaveTmuxCopyMode: 1 行目が 1 なら抜けた・0 なら入っていない。残りは今の画面。それ以外（失敗・接続できない・分からない出力）は null。待つのは短く', async () => {
     const calls: Array<{ command: string; timeoutMs?: number }> = []
     const reply = (code: number, stdout: string): SshRunner => async (_h, command, options) => {
       calls.push({ command, timeoutMs: options?.timeoutMs })
       return { code, stdout: Buffer.from(stdout), stderr: '' }
     }
-    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '1\n'))).toBe(true)
-    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '0\n'))).toBe(false)
-    // 無いセッションは何も出さずに 0 で終わる（tmux 3.5a で確かめた）。ツリーのモードは cancel が効かず 1
-    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, ''))).toBeNull()
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '1\nline 1\n› Ask Codex to do anything\n\n'))).toEqual({ left: true, screen: 'line 1\n› Ask Codex to do anything' })
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '0\n$ \n'))).toEqual({ left: false, screen: '$ ' })
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, '1'))).toEqual({ left: true, screen: '' })
+    // 無いセッション（capture-pane が失敗して 1）、ツリーのモード（cancel が効かず 1）、分からない出力
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(1, '\n'))).toBeNull()
     expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(1, '1\n'))).toBeNull()
+    expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(0, 'sh: tmux: not found\n'))).toBeNull()
     expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(255, ''))).toBeNull()
     expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', () => Promise.reject(new Error('x')))).toBeNull()
     // 名前がおかしければ送らずに null（投げない）
     expect(await leaveTmuxCopyMode('h', "a'; rm -rf ~", reply(0, '1\n'))).toBeNull()
-    expect(calls).toHaveLength(5)
+    expect(calls).toHaveLength(7)
     expect(calls[0]).toEqual({ command: tmuxLeaveCopyModeCommand('ferret-a-1-t'), timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS })
     expect(TMUX_LEAVE_COPY_MODE_TIMEOUT_MS).toBeLessThanOrEqual(5000)
+  })
+
+  it('captureTmuxPane: 今の画面（末尾の空行は落とす）。失敗・接続できない・名前がおかしいときは null', async () => {
+    const commands: string[] = []
+    const reply = (code: number, stdout: string): SshRunner => async (_h, command) => {
+      commands.push(command)
+      return { code, stdout: Buffer.from(stdout), stderr: '' }
+    }
+    expect(await captureTmuxPane('h', 'ferret-a-1-t', reply(0, 'a\nb\n\n'))).toBe('a\nb')
+    expect(await captureTmuxPane('h', 'ferret-a-1-t', reply(1, ''))).toBeNull()
+    expect(await captureTmuxPane('h', 'ferret-a-1-t', () => Promise.reject(new Error('x')))).toBeNull()
+    expect(await captureTmuxPane('h', 'a b', reply(0, 'x'))).toBeNull()
+    expect(commands).toEqual([tmuxCapturePaneCommand('ferret-a-1-t'), tmuxCapturePaneCommand('ferret-a-1-t')])
   })
 
   it.runIf(posix)('tmux が無いリモートでは知らせを出してシェルになる（手元の sh で確かめる）', async () => {

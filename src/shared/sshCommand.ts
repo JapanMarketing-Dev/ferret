@@ -103,14 +103,21 @@ export function tmuxKillSessionCommand(session: string): string {
 
 /**
  * tmux のコピーモード（ホイールで上へ戻したとき）を抜ける1行。コピーモードの間は、Ferret が送る貼り付けと Enter を
- * tmux が受け取ってしまい Agent に届かない。入っていれば抜けて 1、入っていなければ何もせず 0 を出す（どちらも終了コード 0）。
+ * tmux が受け取ってしまい Agent に届かない。1行目に入っていたか（1 / 0）を出し、入っていれば抜ける。
+ * 続けて今の画面（capture-pane。コピーモードの間も上へ戻した位置ではなく、今の画面）を出す。
  * 抜けるコマンドにも -t を書き、if-shell の -t の引き継ぎに頼らない（tmux 2.6〜3.5a で、ほかのセッションのコピーモードは残ることを確かめた）
  */
 export function tmuxLeaveCopyModeCommand(session: string): string {
   const name = checkTmuxSessionName(session)
   const target = tmuxPaneTarget(name)
   return `tmux display-message -p -t ${target} '#{pane_in_mode}' ';' ` +
-    `if-shell -F -t ${target} '#{pane_in_mode}' ${shellQuote(`send-keys -X -t =${name}: cancel`)}`
+    `if-shell -F -t ${target} '#{pane_in_mode}' ${shellQuote(`send-keys -X -t =${name}: cancel`)} ';' ` +
+    `capture-pane -p -t ${target}`
+}
+
+/** tmux の今の画面を出す1行（コピーモードは抜けない。上へ戻した位置ではなく、今の画面） */
+export function tmuxCapturePaneCommand(session: string): string {
+  return `tmux capture-pane -p -t ${tmuxPaneTarget(session)}`
 }
 
 type SshTargetCheck = { ok: true; target: SshTarget } | { ok: false; reason: 'host' | 'path' }

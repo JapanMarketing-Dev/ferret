@@ -1,7 +1,8 @@
 /**
  * SSH のタブ（リモートの tmux の中）のホイールとコピーモード。
  *   - tmux のセッションだけマウスを有効にする（無効だと xterm.js がホイールを ↑↓ のキーにして送り、Agent の入力の履歴が出る）
- *   - Ferret が打ち込む前（Agent への送信・起動の行）にコピーモードを抜ける（入ったままだと貼り付けと Enter を tmux が受け取る）
+ *   - Ferret が打ち込む前（Agent への送信・スマホのキー・起動の行）にコピーモードを抜ける（入ったままだと貼り付けと Enter を tmux が受け取る）。
+ *     抜けた直後とコピーモードの間の判定は、tmux から取った今の画面で行う（renderer の画面は上へ戻した位置のまま）
  *   - 右ボタンの報告は tmux に渡さない（押したまま動かして離すと、tmux のメニューの Kill などが動く）
  * node-pty と ssh は差し替える。本物の tmux の結合テストは、Linux で tmux と script があるときだけ専用のソケットで動かす
  * （利用者の tmux には触れない: TMUX を渡さず、TMUX_TMPDIR を一時フォルダにし、tmux は -L を付けるラッパー経由）
@@ -14,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_AGENT_PREFERENCES } from '../../src/shared/agentCatalog'
 import { delay } from '../../src/shared/delay'
 import { remoteShellCommand, tmuxLeaveCopyModeCommand } from '../../src/shared/sshCommand'
-import { dropRightButtonReports, hasMouseReport, waitForRedraw } from '../../src/main/tmuxInput'
+import { dropRightButtonReports, hasMouseReport } from '../../src/main/tmuxInput'
 import type { SshRunner } from '../../src/main/remoteFiles'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir(), getAppPath: () => tmpdir(), isPackaged: false } }))
@@ -85,35 +86,6 @@ describe('tmux への入力（main/tmuxInput.ts）', () => {
     expect(dropRightButtonReports('a\x1b[<64;1;1M\x1b[<2;1;1Mb\x1b[<2;1;1m\x1b[<65;1;1Mc')).toBe('a\x1b[<64;1;1Mb\x1b[<65;1;1Mc')
     expect(dropRightButtonReports('plain text \x1b[A')).toBe('plain text \x1b[A')
   })
-
-  it('描き直しを待つ: 抜ける前より後の出力を見てから、それより後の画面の知らせで終わる', async () => {
-    let t = 1000
-    let outputAt: number | undefined = 900
-    let screenAt: number | undefined = 950
-    const sleep = async (ms: number) => {
-      t += ms
-      // 抜けてから 100ms 後に描き直しが届き、さらに 200ms 後に renderer が画面を知らせる
-      if (t >= 1100 && outputAt === 900) outputAt = 1100
-      if (t >= 1300 && screenAt === 950) screenAt = 1300
-    }
-    expect(await waitForRedraw({ since: 1000, outputAt: () => outputAt, screenAt: () => screenAt, alive: () => true, limitMs: 2000, now: () => t, sleep })).toBe(true)
-    expect(t).toBeGreaterThanOrEqual(1300)
-    expect(t).toBeLessThan(1500)
-  })
-
-  it('描き直しを待つ: 抜ける前の画面の知らせでは終わらず、上限で諦める。タブが閉じたらすぐ終わる', async () => {
-    let t = 0
-    const sleep = async (ms: number) => { t += ms }
-    // 出力も画面も抜ける前のまま
-    expect(await waitForRedraw({ since: 10, outputAt: () => 5, screenAt: () => 8, alive: () => true, limitMs: 2000, now: () => t, sleep })).toBe(false)
-    expect(t).toBeGreaterThanOrEqual(2000)
-    // 出力は届いたが、画面の知らせがその前のもの
-    t = 0
-    expect(await waitForRedraw({ since: 10, outputAt: () => 20, screenAt: () => 15, alive: () => true, limitMs: 500, now: () => t, sleep })).toBe(false)
-    t = 0
-    expect(await waitForRedraw({ since: 10, outputAt: () => undefined, screenAt: () => undefined, alive: () => false, limitMs: 2000, now: () => t, sleep })).toBe(false)
-    expect(t).toBe(0)
-  })
 })
 
 describe('SSH のタブ: Ferret が打ち込む前に tmux のコピーモードを抜ける（TerminalManager）', () => {
@@ -148,64 +120,148 @@ describe('SSH のタブ: Ferret が打ち込む前に tmux のコピーモード
     manager.disposeAll()
   })
 
-  posixOnly('leaveCopyMode は SSH のタブのセッションに ssh で抜ける1行を送る。手元のタブでは何もしない', async () => {
+  posixOnly('スマホのキー（writeKey）: SSH のタブは抜けてから書き、抜けるのが遅くても順番どおり。手元のタブはすぐ書く', async () => {
     const remoteFiles = await import('../../src/main/remoteFiles')
-    const leave = vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockResolvedValue(true)
-    const { manager, tab } = await reattachedAgentTab()
-    expect(await manager.leaveCopyMode(tab.id)).toBe(true)
-    expect(leave).toHaveBeenCalledTimes(1)
-    expect(leave.mock.calls[0]![0]).toBe('dev-box')
+    const waits = [120, 0, 0]
+    const leave = vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockImplementation(async (host, session) => {
+      state.events.push(`leave:${host}:${session}`)
+      await delay(waits.shift() ?? 0)
+      return null
+    })
+    const { manager, tab, pty } = await reattachedAgentTab()
+    // ↓ ↓ Enter を続けて押した（最初の抜けるのが遅い）
+    await Promise.all([manager.writeKey(tab.id, '\x1b[B'), manager.writeKey(tab.id, '\x1b[B'), manager.writeKey(tab.id, '\r')])
+    expect(pty.writes).toEqual(['\x1b[B', '\x1b[B', '\r'])
+    expect(leave).toHaveBeenCalledTimes(3)
     expect(leave.mock.calls[0]![1]).toMatch(/^ferret-acme-shop-[0-9a-f]{8}-abcd1234$/)
-    leave.mockResolvedValue(null)
-    expect(await manager.leaveCopyMode(tab.id)).toBe(false)
+    expect(state.events.filter((e) => e.startsWith('leave:')).length).toBe(3)
+    // 1つ目の write の前に抜けている
+    expect(state.events.findIndex((e) => e.startsWith('leave:'))).toBeLessThan(state.events.findIndex((e) => e.startsWith('write:')))
+    // 確かめられたら、またマウスを使うまでは ssh を動かさない
+    leave.mockResolvedValueOnce({ left: false, screen: '' })
+    await manager.writeKey(tab.id, '1')
+    await manager.writeKey(tab.id, '2')
+    expect(leave).toHaveBeenCalledTimes(4)
+    manager.write(tab.id, '\x1b[<64;10;10M')
+    await manager.writeKey(tab.id, '3')
+    expect(leave).toHaveBeenCalledTimes(5)
+    expect(pty.writes.slice(-4)).toEqual(['1', '2', '\x1b[<64;10;10M', '3'])
     manager.setRemote(null)
     const local = await manager.create({ size: SIZE })
-    expect(await manager.leaveCopyMode(local.id)).toBe(false)
-    expect(await manager.leaveCopyMode('t999')).toBe(false)
-    expect(leave).toHaveBeenCalledTimes(2)
+    const localPty = state.ptys.at(-1)!
+    await manager.writeKey(local.id, 'y')
+    expect(localPty.writes).toEqual(['y'])
+    expect(leave).toHaveBeenCalledTimes(5)
+    await manager.writeKey('t999', 'y')
     manager.disposeAll()
   })
 
-  posixOnly('送信: 先にコピーモードを抜け、描き直した画面が届いてから貼り付けと Enter を送る', async () => {
+  posixOnly('今の画面（liveScreenText）: SSH のタブは tmux から取る（取れなければ renderer の画面）。手元のタブは renderer の画面', async () => {
     const remoteFiles = await import('../../src/main/remoteFiles')
-    const { manager, tab, pty } = await reattachedAgentTab()
-    // 上へ戻した位置の古い画面（renderer が知らせたもの）
-    manager.updateScreen(tab.id, 'line 12\n✻ Working… (3s · esc to interrupt)')
+    const capture = vi.spyOn(remoteFiles, 'captureTmuxPane').mockResolvedValueOnce('live bottom').mockResolvedValueOnce(null)
+    const { manager, tab } = await reattachedAgentTab()
+    // 上へ戻した位置の画面（昔の上限の知らせ）
+    manager.updateScreen(tab.id, "You've hit your session limit · resets 3:45pm")
+    expect(await manager.liveScreenText(tab.id)).toBe('live bottom')
+    expect(capture.mock.calls[0]![0]).toBe('dev-box')
+    expect(await manager.liveScreenText(tab.id)).toBe("You've hit your session limit · resets 3:45pm")
+    manager.setRemote(null)
+    const local = await manager.create({ size: SIZE })
+    manager.updateScreen(local.id, 'local screen')
+    expect(await manager.liveScreenText(local.id)).toBe('local screen')
+    expect(capture).toHaveBeenCalledTimes(2)
+    manager.disposeAll()
+  })
+
+  posixOnly('送信: 先にコピーモードを抜け、tmux から取った今の画面で判定してから貼り付けと Enter を送る（上へ戻した位置の画面で断らない）', async () => {
+    const remoteFiles = await import('../../src/main/remoteFiles')
+    const { manager, tab } = await reattachedAgentTab()
+    // 上へ戻した位置の画面（renderer が知らせたもの）には、昔の確認の表示が見えている
+    manager.updateScreen(tab.id, 'Do you want to proceed?\n❯ 1. Yes\n  2. No')
     vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockImplementation(async (host, session) => {
       state.events.push(`leave:${host}:${session}`)
-      // tmux がコピーモードを抜けて描き直し、renderer が新しい画面を知らせる
+      // 抜ける前に始まった renderer の知らせ（上へ戻した位置の画面）が、抜けたあとに遅れて届く
       setTimeout(() => {
-        pty.emit('\x1b[H\x1b[2Jlive')
-        setTimeout(() => {
-          state.events.push('screen')
-          manager.updateScreen(tab.id, 'live\n✻ Working… (4s · esc to interrupt)')
-        }, 40)
-      }, 40)
-      return true
+        state.events.push('stale screen')
+        manager.updateScreen(tab.id, 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n[3/120]')
+      }, 0)
+      return { left: true, screen: 'live\n✻ Working… (4s · esc to interrupt)' }
     })
     const result = await manager.sendReview(tab.id, 'Read feedback.md')
     expect(result).toMatchObject({ ok: true, submitted: true })
     expect(state.events[0]).toMatch(/^leave:dev-box:ferret-acme-shop-[0-9a-f]{8}-abcd1234$/)
     const paste = state.events.findIndex((e) => e.includes('Read feedback.md'))
-    expect(paste).toBeGreaterThan(state.events.indexOf('screen'))
-    expect(state.events.indexOf('screen')).toBeGreaterThan(0)
-    expect(state.events.slice(paste + 1)).toContain('write:"\\r"')
+    const enter = state.events.lastIndexOf('write:"\\r"')
+    expect(paste).toBeGreaterThan(0)
+    expect(enter).toBeGreaterThan(paste)
+    // 遅れて届いた古い画面は Enter の前の確かめ（sendToAgent の④）より前に届いているが、今の画面を上書きしていない
+    expect(state.events.indexOf('stale screen')).toBeGreaterThan(0)
+    expect(state.events.indexOf('stale screen')).toBeLessThan(enter)
+    expect(manager.screenText(tab.id)).toContain('esc to interrupt')
     manager.disposeAll()
   })
 
-  posixOnly('送信: 入っていない・つながらないときは待たずに送る（送信は止めない）', async () => {
+  posixOnly('抜けたあと tmux の画面を使うのはしばらくだけ。過ぎたら renderer の知らせに戻る', async () => {
+    const remoteFiles = await import('../../src/main/remoteFiles')
+    vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockResolvedValue({ left: true, screen: 'live from tmux' })
+    const { manager, tab } = await reattachedAgentTab()
+    await manager.writeKey(tab.id, 'y')
+    expect(manager.screenText(tab.id)).toBe('live from tmux')
+    manager.updateScreen(tab.id, 'stale copy-mode view')
+    expect(manager.screenText(tab.id)).toBe('live from tmux')
+    const later = Date.now() + 2000
+    vi.spyOn(Date, 'now').mockReturnValue(later)
+    manager.updateScreen(tab.id, 'renderer again')
+    expect(manager.screenText(tab.id)).toBe('renderer again')
+    manager.disposeAll()
+  })
+
+  posixOnly('送信: 上へ戻した位置の画面のまま抜けられなければ、今まで通りその画面で判定する（確認待ちなら断る）', async () => {
+    const remoteFiles = await import('../../src/main/remoteFiles')
+    const { manager, tab, pty } = await reattachedAgentTab()
+    manager.updateScreen(tab.id, 'Do you want to proceed?\n❯ 1. Yes\n  2. No')
+    vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockResolvedValue(null)
+    expect(await manager.sendReview(tab.id, 'Read feedback.md')).toMatchObject({ ok: false })
+    expect(pty.writes).toEqual([])
+    manager.disposeAll()
+  })
+
+  posixOnly('送信: 入っていない・つながらないときは renderer の画面のまま送る。マウスを使っていなければ ssh を動かさない', async () => {
     const remoteFiles = await import('../../src/main/remoteFiles')
     const { manager, tab, pty } = await reattachedAgentTab()
     manager.updateScreen(tab.id, '✻ Working… (3s · esc to interrupt)')
-    const leave = vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockResolvedValueOnce(false).mockResolvedValueOnce(null)
-    for (const text of ['first', 'second']) {
+    const leave = vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockResolvedValueOnce({ left: false, screen: '$ ' }).mockResolvedValueOnce(null)
+    const send = async (text: string) => {
       const started = performance.now()
       expect(await manager.sendReview(tab.id, text)).toMatchObject({ ok: true, submitted: true })
-      // 描き直しを待つ上限（2 秒）まで待っていない
       expect(performance.now() - started).toBeLessThan(1500)
+      expect(manager.screenText(tab.id)).toBe('✻ Working… (3s · esc to interrupt)')
       expect(pty.writes.some((w) => w.includes(text))).toBe(true)
     }
+    // 戻したタブは分からないので確かめる（入っていなかった）
+    await send('first')
+    expect(leave).toHaveBeenCalledTimes(1)
+    // マウスを使っていない間は確かめない
+    await send('second')
+    expect(leave).toHaveBeenCalledTimes(1)
+    // ホイールのあとは確かめる（つながらなくても送る）
+    manager.write(tab.id, '\x1b[<64;10;10M')
+    await send('third')
     expect(leave).toHaveBeenCalledTimes(2)
+    manager.disposeAll()
+  })
+
+  posixOnly('新しく開いた SSH のタブで、マウスを使っていなければ送信の前に ssh を動かさない', async () => {
+    const remoteFiles = await import('../../src/main/remoteFiles')
+    const leave = vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockResolvedValue(null)
+    const { TerminalManager } = await import('../../src/main/terminal')
+    const manager = new TerminalManager(() => {}, () => {})
+    manager.setRemote(REMOTE)
+    const tab = await manager.create({ size: SIZE, agent: 'claude' })
+    manager.updateScreen(tab.id, '✻ Working… (3s · esc to interrupt)')
+    expect(await manager.sendReview(tab.id, 'hello')).toMatchObject({ ok: true })
+    await manager.writeKey(tab.id, 'y')
+    expect(leave).not.toHaveBeenCalled()
     manager.disposeAll()
   })
 
@@ -213,7 +269,7 @@ describe('SSH のタブ: Ferret が打ち込む前に tmux のコピーモード
     const remoteFiles = await import('../../src/main/remoteFiles')
     const leave = vi.spyOn(remoteFiles, 'leaveTmuxCopyMode').mockImplementation(async (_host, session) => {
       state.events.push(`leave:${session}`)
-      return true
+      return { left: true, screen: '$ ' }
     })
     const { TerminalManager } = await import('../../src/main/terminal')
     const manager = new TerminalManager(() => {}, () => {})
@@ -251,7 +307,12 @@ describe('配線（自動で打ち込む経路はどれもコピーモードを�
     expect(leave).toBeGreaterThan(0)
     expect(leave).toBeLessThan(body.indexOf('while (session.readiness.status()'))
     expect(leave).toBeLessThan(body.indexOf('sendToAgent('))
-    expect(body).toMatch(/waitForRedraw\(\{ since,/)
+  })
+
+  it('上限での切り替えは今の画面で確かめる（コピーモードで上へ戻した位置の昔の知らせで切り替えない）', () => {
+    const failover = read('src/main/failover/service.ts')
+    expect(failover).toMatch(/limitOnScreen\(agent, await terminals\.liveScreenText\(id\)\)/)
+    expect(failover).not.toMatch(/limitOnScreen\(agent, terminals\.screenText\(id\)\)/)
   })
 
   it('Ferret の自動の送信（引き継ぎ・続きを頼む・オーケストラ・スマホの本文）は sendReview を通る。PTY へ直接は書かない', () => {
@@ -261,10 +322,10 @@ describe('配線（自動で打ち込む経路はどれもコピーモードを�
     expect(read('src/main/index.ts')).toMatch(/'terminal:write': \(id, data\) => terminals\?\.write\(id, data\)/)
   })
 
-  it('スマホのキーは、抜けてから write する', () => {
+  it('スマホのキーは writeKey（抜けてから、順番どおり）で書く', () => {
     const mobile = read('src/main/mobileRemote.ts')
-    expect(mobile.indexOf('await terminals.leaveCopyMode?.(info.id)')).toBeGreaterThan(0)
-    expect(mobile.indexOf('await terminals.leaveCopyMode?.(info.id)')).toBeLessThan(mobile.indexOf('terminals.write(info.id, REMOTE_KEYS[parsed.key])'))
+    expect(mobile).toMatch(/await terminals\.writeKey\(info\.id, REMOTE_KEYS\[parsed\.key\]\)/)
+    expect(mobile).not.toMatch(/terminals\.write\(/)
   })
 })
 
@@ -273,8 +334,8 @@ const linuxTools = (() => {
   if (process.platform !== 'linux') return null
   try {
     const tmux = execFileSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf8' }).trim()
-    execFileSync('sh', ['-c', 'command -v script'], { encoding: 'utf8' })
-    return tmux ? { tmux } : null
+    const script = execFileSync('sh', ['-c', 'command -v script'], { encoding: 'utf8' }).trim()
+    return tmux.startsWith('/') && script.startsWith('/') ? { tmux, script } : null
   } catch {
     return null
   }
@@ -318,12 +379,15 @@ describe('本物の tmux（専用のソケット）', () => {
         done({ code, stdout: Buffer.from(stdout), stderr: Buffer.from(stderr).toString('utf8') })
       })
     })
-    const { leaveTmuxCopyMode } = await import('../../src/main/remoteFiles')
+    const { captureTmuxPane, leaveTmuxCopyMode } = await import('../../src/main/remoteFiles')
     const line = remoteShellCommand('~/app', { session, notice: 'NO TMUX' })
     const clients: ChildProcess[] = []
     // ssh -t の代わりに script で端末を用意して、SSH のタブと同じ1行を動かす（script -c は $SHELL -c で動かす）
     const open = () => {
-      const client = spawn('script', ['-qfc', line, '/dev/null'], { env, cwd: home, stdio: ['pipe', 'ignore', 'ignore'] })
+      const client = spawn(linuxTools!.script, ['-qfc', line, '/dev/null'], { env, cwd: home, stdio: ['pipe', 'ignore', 'ignore'] })
+      // 起動できなければ下の待ちで落ちる（例外を投げっぱなしにしない）
+      client.on('error', () => undefined)
+      client.stdin!.on('error', () => undefined)
       clients.push(client)
       return client
     }
@@ -341,15 +405,20 @@ describe('本物の tmux（専用のソケット）', () => {
       wheelUp(client)
       expect(await until(() => inMode() === '1')).toBe(true)
       expect(Number(tmux('display-message', '-p', '-t', pane, '#{scroll_position}'))).toBeGreaterThan(0)
-      expect(await leaveTmuxCopyMode('dev-box', session, runLocal)).toBe(true)
+      // コピーモードの間も、今の画面（上へ戻した位置ではなく最後の行）が取れる。取ってもコピーモードは抜けない
+      expect(await captureTmuxPane('dev-box', session, runLocal)).toContain('line59')
+      expect(inMode()).toBe('1')
+      const left = await leaveTmuxCopyMode('dev-box', session, runLocal)
+      expect(left?.left).toBe(true)
+      expect(left?.screen).toContain('line59')
       expect(inMode()).toBe('0')
-      expect(await leaveTmuxCopyMode('dev-box', session, runLocal)).toBe(false)
-      expect(execFileSync('/bin/sh', ['-c', tmuxLeaveCopyModeCommand(session)], { env, encoding: 'utf8' }).trim()).toBe('0')
+      expect((await leaveTmuxCopyMode('dev-box', session, runLocal))?.left).toBe(false)
+      expect(execFileSync('/bin/sh', ['-c', tmuxLeaveCopyModeCommand(session)], { env, encoding: 'utf8' }).split('\n')[0]).toBe('0')
 
       // sendToAgent と同じ送り方（貼り付けを1回で、少し置いて Enter を別に）
       wheelUp(client)
       expect(await until(() => inMode() === '1')).toBe(true)
-      expect(await leaveTmuxCopyMode('dev-box', session, runLocal)).toBe(true)
+      expect((await leaveTmuxCopyMode('dev-box', session, runLocal))?.left).toBe(true)
       client.stdin!.write('\x1b[200~hello from ferret\x1b[201~')
       await delay(50)
       client.stdin!.write('\r')
