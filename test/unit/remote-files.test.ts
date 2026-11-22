@@ -14,6 +14,7 @@ import {
   remoteCreateCommand,
   remoteCreated,
   remoteListCommand,
+  remoteWriteCommand,
   remoteMkdirCommand,
   remoteReadCommand,
   remoteSearchCommand,
@@ -31,6 +32,7 @@ import {
   browseRemoteFolders,
   createRemoteEntry,
   createRemoteFolder,
+  writeRemoteFile,
   killTmuxSession,
   listRemoteDirectory,
   readRemoteFile,
@@ -48,14 +50,16 @@ const posix = process.platform !== 'win32'
 /** ssh の代わりに、手元の sh でリモートの1行を動かす（HOME を一時フォルダにする）。組み立てた1行の引用が本当に効くかを見る */
 function localShell(home: string): SshRunner & { calls: Array<{ host: string; command: string }> } {
   const calls: Array<{ host: string; command: string }> = []
-  const run: SshRunner = (host, command) => {
+  const run: SshRunner = (host, command, options = {}) => {
     calls.push({ host, command })
     return new Promise((resolve) => {
-      execFile('sh', ['-c', command], { env: { PATH: process.env.PATH, HOME: home, SHELL: '/bin/sh' }, encoding: 'buffer', cwd: home },
+      const child = execFile('sh', ['-c', command], { env: { PATH: process.env.PATH, HOME: home, SHELL: '/bin/sh' }, encoding: 'buffer', cwd: home },
         (error, stdout, stderr) => {
           const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : 255) : 0
           resolve({ code, stdout: Buffer.from(stdout), stderr: Buffer.from(stderr).toString('utf8') })
         })
+      child.stdin?.on('error', () => undefined)
+      child.stdin?.end(options.input)
     })
   }
   return Object.assign(run, { calls })
@@ -118,6 +122,18 @@ describe('リモートで動かす1行の組み立て（注入対策）', () => 
     expect(() => remoteMkdirCommand('relative', 'x')).toThrow()
     expect(() => remoteMkdirCommand('/srv', '../x')).toThrow()
     expect(remoteMkdirCommand('/srv', "it's")).toContain(`mkdir -- 'it'\\''s'`)
+  })
+})
+
+describe('リモートに書く1行', () => {
+  it('名前は単一引用符で囲み、大きさは数だけ。使えないパス・大きさは組み立てない', () => {
+    const cmd = remoteWriteCommand('~/proj', "a/it's.md", 12)
+    expect(cmd).toContain(`'a/it'\\''s.md'`)
+    expect(cmd).toContain("= '12' ]")
+    expect(() => remoteWriteCommand('~/proj', '/etc/passwd', 1)).toThrow()
+    expect(() => remoteWriteCommand('~/proj', '', 1)).toThrow()
+    expect(() => remoteWriteCommand('~/proj', 'a.md', -1)).toThrow()
+    expect(() => remoteWriteCommand('~/proj', 'a.md', 1.5)).toThrow()
   })
 })
 
@@ -338,6 +354,33 @@ describe.runIf(posix)('リモートのファイルツリー（手元の sh で�
     expect(existsSync(join(home, 'proj', "we'ird dir", "it's $(x).ts"))).toBe(true)
   })
 
+  it('エディタの保存: 既にあるファイルへ上書きし（日本語・引用符を含む名前も）、無ければ作る', async () => {
+    expect(await writeRemoteFile(target(), 'README.md', '# 見出し\n本文\n', run)).toEqual({ mtimeMs: 0 })
+    expect(readFileSync(join(home, 'proj', 'README.md'), 'utf8')).toBe('# 見出し\n本文\n')
+    await writeRemoteFile(target(), "we'ird dir/it's.md", 'x', run)
+    expect(readFileSync(join(home, 'proj', "we'ird dir", "it's.md"), 'utf8')).toBe('x')
+    await writeRemoteFile(target(), 'src/main.ts', '', run)
+    expect(readFileSync(join(home, 'proj', 'src', 'main.ts'), 'utf8')).toBe('')
+    // 一時ファイルは残さない
+    expect(existsSync(join(home, 'proj', 'src')) && (await listRemoteDirectory(target(), 'src', run)).map((e) => e.name)).toEqual(['deep', 'main.ts'])
+  })
+
+  it('リンク先のファイルには、リンクを保ったまま中身だけ書く', async () => {
+    await writeRemoteFile(target(), 'link-to-src/main.ts', 'via link\n', run)
+    expect(readFileSync(join(home, 'proj', 'src', 'main.ts'), 'utf8')).toBe('via link\n')
+  })
+
+  it('フォルダ・外のパス・届いた大きさが違うときは書かない（元のファイルはそのまま）', async () => {
+    await expect(writeRemoteFile(target(), 'src', 'x', run)).rejects.toThrow()
+    await expect(writeRemoteFile(target(), '../out.txt', 'x', run)).rejects.toThrow()
+    await expect(writeRemoteFile(target(), '', 'x', run)).rejects.toThrow()
+    expect(existsSync(join(home, 'out.txt'))).toBe(false)
+    const short: SshRunner = (host, command, options) => run(host, command, { ...options, input: Buffer.from('trunc') })
+    await expect(writeRemoteFile(target(), 'README.md', 'a much longer body', short)).rejects.toThrow()
+    expect(readFileSync(join(home, 'proj', 'README.md'), 'utf8')).toBe('# hi\n')
+    expect((await listRemoteDirectory(target(), '', run)).some((e) => e.name.startsWith('.ferret-save'))).toBe(false)
+  })
+
   it('a/b/c.ts のように途中のフォルダも作り、新しくできたいちばん上を返す（あるフォルダはそのまま使う）', async () => {
     expect(await createRemoteEntry(target(), '', 'src/x/y/z.ts', 'file', run)).toEqual({ path: 'src/x/y/z.ts', top: 'src/x' })
     expect(existsSync(join(home, 'proj', 'src', 'x', 'y', 'z.ts'))).toBe(true)
@@ -443,6 +486,16 @@ describe('SSH のファイルツリーのつなぎ込み（作成だけできる
     const explorer = readFileSync('src/renderer/components/FileExplorer.tsx', 'utf8')
     expect(explorer).toContain('createOnly ? ops.openMenu(e, entry) : e.preventDefault()')
     expect(explorer).toContain('createOnly={readOnly && createOnly}')
+  })
+})
+
+describe('SSH のファイルの編集と保存のつなぎ込み', () => {
+  it('fs:write と終了時の保存は SSH ならリモートに書き、開いたファイルは編集できる', () => {
+    const main = readFileSync('src/main/index.ts', 'utf8')
+    expect(main).toContain('writeRemoteFile(remote, relPath, content)')
+    expect(main).toContain('writeRemoteFile(project.ssh, entry.path, entry.content)')
+    const files = readFileSync('src/renderer/editor/useOpenFiles.ts', 'utf8')
+    expect(files).not.toContain('info: undefined, readOnly: true')
   })
 })
 

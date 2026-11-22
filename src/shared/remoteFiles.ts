@@ -176,3 +176,30 @@ export function remoteCreated(stdout: string, parentRel: string, name: string): 
   const topIndex = match ? Number(match[1]) : -1
   return { path: join(parts.length), top: topIndex >= 0 && topIndex < parts.length ? join(topIndex + 1) : join(parts.length) }
 }
+
+/** リモートのファイルへ書く終了コード（フォルダ・普通のファイルでないものには書かない／届いた大きさが違う） */
+export const REMOTE_WRITE_FOLDER_EXIT = 4
+export const REMOTE_WRITE_NOT_REGULAR_EXIT = 3
+export const REMOTE_WRITE_SHORT_EXIT = 22
+
+/**
+ * SSH のプロジェクトのファイルへ、標準入力で受けた内容を書く1行（エディタの保存）。
+ * 回線が途中で切れても元のファイルを壊さないよう、同じフォルダの一時ファイルへ受けて大きさ（bytes）を確かめてから、
+ * 元のファイルへ上書きする（rename で置き換えないので、リンク・権限・持ち主はそのまま。ローカルの writeTextFile と同じ）。
+ * 無ければ新しく作る
+ */
+export function remoteWriteCommand(root: string, rel: string, bytes: number): string {
+  const file = checkRel(rel)
+  if (!file) throw new Error('invalid remote path')
+  if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error('invalid size')
+  const q = shellQuote(file)
+  const slash = file.lastIndexOf('/')
+  const dir = shellQuote(slash < 0 ? '.' : file.slice(0, slash))
+  return [
+    cdRoot(root),
+    `{ [ -d ${q} ] && exit ${REMOTE_WRITE_FOLDER_EXIT}; [ -e ${q} ] && [ ! -f ${q} ] && exit ${REMOTE_WRITE_NOT_REGULAR_EXIT}; :; }`,
+    `ferret_tmp=$(mktemp ${dir}/.ferret-save.XXXXXX)`,
+    `{ cat > "$ferret_tmp" && [ "$(wc -c < "$ferret_tmp" | tr -d ' ')" = '${bytes}' ] || { rm -f -- "$ferret_tmp"; exit ${REMOTE_WRITE_SHORT_EXIT}; }; }`,
+    `{ cat -- "$ferret_tmp" > ${q}; ferret_rc=$?; rm -f -- "$ferret_tmp"; exit $ferret_rc; }`
+  ].join(' && ')
+}

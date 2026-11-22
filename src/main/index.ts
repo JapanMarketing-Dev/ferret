@@ -452,7 +452,9 @@ async function receiveQuitSave(requestId: unknown, entries: unknown): Promise<Qu
     const project = findProjectByFolder(projects, entry.root)
     if (!project) { outcomes.push({ root: entry.root, path: entry.path, ok: false, error: t('errors.folderNotRegistered') }); continue }
     try {
-      await writeTextFile(project.folderPath, entry.path, entry.content)
+      // SSH のプロジェクトはリモートへ書く（手元に同じ名前のパスがあっても書かない）
+      if (project.source === 'ssh' && project.ssh) await (await import('./remoteFiles')).writeRemoteFile(project.ssh, entry.path, entry.content)
+      else await writeTextFile(project.folderPath, entry.path, entry.content)
       outcomes.push({ root: entry.root, path: entry.path, ok: true })
     } catch (err) {
       outcomes.push({ root: entry.root, path: entry.path, ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -3856,7 +3858,11 @@ function registerIpc(): void {
       const remote = remoteFilesTarget()
       return remote ? (await import('./remoteFiles')).readRemoteFile(remote, relPath) : readTextFile(projectRoot(), relPath)
     },
-    'fs:write': (relPath, content) => { assertLocalFiles(); return writeTextFile(projectRoot(), relPath, content) },
+    // SSH のプロジェクトのファイルも保存できる（リモートに ssh で書く）
+    'fs:write': async (relPath, content) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).writeRemoteFile(remote, relPath, content) : writeTextFile(projectRoot(), relPath, content)
+    },
     'fs:files': () => listFiles(projectRoot()),
     'fs:search': async (query, mode) => {
       const remote = remoteFilesTarget()

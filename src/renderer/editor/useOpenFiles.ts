@@ -157,7 +157,7 @@ export function useOpenFiles({
   onError
 }: {
   root: string | null
-  /** SSH のプロジェクト: ファイルはリモートを読むだけ。文字のファイルだけを読み取り専用で開く（画像・Office・HTML のプレビューは出さない） */
+  /** SSH のプロジェクト: リモートの文字のファイルだけを開く（画像・Office・HTML のプレビューは出さない）。編集・保存はできる（main の fs:write が ssh で書く） */
   readOnly?: boolean
   /** 中央のタブの選択（CenterTab）。file: で始まればファイル */
   activeTab: string
@@ -193,13 +193,14 @@ export function useOpenFiles({
     const ticket = requests.current.begin(id)
     const latest = () => requests.current.isLatest(id, ticket)
     try {
-      // SSH のプロジェクト: リモートの文字のファイルだけを読む（ビューア・Office は手元のファイルを前提にしているので使わない）
+      // SSH のプロジェクト: リモートの文字のファイルだけを読む（ビューア・Office は手元のファイルを前提にしているので使わない）。
+      // 2026-11-22 本人「sshで繋いださい、mdなどのファイルをプレビュー、ソースで編集できない」→ 編集できる形で開く
       if (readOnlyRef.current) {
         const result = await window.ade.invoke('fs:read', path)
         if (!latest()) return
         if (result.kind === 'text') {
           drafts.current.set(id, result.content)
-          patch(id, (f) => ({ status: 'ready', saved: result.content, dirty: false, message: undefined, external: undefined, viewer: undefined, info: undefined, readOnly: true, revision: f.revision + 1 }))
+          patch(id, (f) => ({ status: 'ready', saved: result.content, dirty: false, message: undefined, external: undefined, viewer: undefined, info: undefined, readOnly: false, revision: f.revision + 1 }))
         } else {
           drafts.current.delete(id)
           patch(id, { status: 'unavailable', message: result.reason, readOnly: true })

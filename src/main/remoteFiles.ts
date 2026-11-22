@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { posix } from 'node:path'
 import { UserFacingError } from '@shared/errors'
-import { ENTRY_NAME_PROBLEM_KEYS, hasBinaryExtension, isBinaryBuffer, isInsideGitDir, MAX_TEXT_FILE_SIZE, nestedNameParts, nestedNameProblem, type FsCreated, type FsEntry, type FsReadResult, type FsSearchResult } from '@shared/files'
+import { ENTRY_NAME_PROBLEM_KEYS, hasBinaryExtension, isBinaryBuffer, isInsideGitDir, MAX_TEXT_FILE_SIZE, nestedNameParts, nestedNameProblem, type FsCreated, type FsEntry, type FsReadResult, type FsSearchResult, type FsWriteResult } from '@shared/files'
 import { t } from '@shared/i18n'
 import {
   parseRemoteBrowse,
@@ -14,6 +14,10 @@ import {
   remoteListCommand,
   remoteMkdirCommand,
   remoteReadCommand,
+  remoteWriteCommand,
+  REMOTE_WRITE_FOLDER_EXIT,
+  REMOTE_WRITE_NOT_REGULAR_EXIT,
+  REMOTE_WRITE_SHORT_EXIT,
   remoteSearchCommand,
   REMOTE_EXISTS_EXIT,
   REMOTE_NO_PARENT_EXIT,
@@ -24,7 +28,7 @@ import { isValidSshHost, tmuxHasSessionCommand, tmuxKillSessionCommand, type Ssh
 import { toolEnv } from './github/gh'
 
 /**
- * SSH のプロジェクトのファイルツリー（読むのと、新しいファイル・フォルダを作るだけ）・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末。
+ * SSH のプロジェクトのファイルツリー（読む・新しいファイル・フォルダを作る）とエディタの保存・「新しいプロジェクト」の場所選びとフォルダ作成・tmux のセッションの確かめと後始末。
  * リモートで動かす1行は src/shared/remoteFiles.ts / sshCommand.ts の純粋な関数で組み立て、ここは ssh を動かすだけ。
  *
  * - 対話なし（BatchMode）で動かす。鍵やパスワードは扱わず、~/.ssh/config と ssh-agent に任せる
@@ -38,7 +42,7 @@ export interface SshRunResult {
   stderr: string
 }
 
-export type SshRunner = (host: string, command: string, options?: { timeoutMs?: number; maxBytes?: number }) => Promise<SshRunResult>
+export type SshRunner = (host: string, command: string, options?: { timeoutMs?: number; maxBytes?: number; input?: Buffer }) => Promise<SshRunResult>
 
 /** 接続を使い回す ssh のオプション（Windows では空） */
 export function sshMultiplexOptions(platform: NodeJS.Platform = process.platform, home: string = homedir()): string[] {
@@ -49,14 +53,17 @@ export function sshMultiplexOptions(platform: NodeJS.Platform = process.platform
 /** ssh -o BatchMode=yes -- <host> <1行> を動かす。終了コードと出力を返す（失敗でも例外にしない） */
 export const runSsh: SshRunner = (host, command, options = {}) => {
   if (!isValidSshHost(host)) return Promise.reject(new UserFacingError(t('projectSource.errors.host')))
-  const { timeoutMs = 20_000, maxBytes = MAX_TEXT_FILE_SIZE + 1024 * 1024 } = options
+  const { timeoutMs = 20_000, maxBytes = MAX_TEXT_FILE_SIZE + 1024 * 1024, input } = options
   return new Promise((resolve) => {
-    execFile('ssh', [...sshMultiplexOptions(), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', host, command],
+    const child = execFile('ssh', [...sshMultiplexOptions(), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', host, command],
       { env: toolEnv(), timeout: timeoutMs, maxBuffer: maxBytes, encoding: 'buffer', windowsHide: true },
       (error, stdout, stderr) => {
         const code = error ? (typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : 255) : 0
         resolve({ code, stdout: Buffer.from(stdout ?? []), stderr: Buffer.from(stderr ?? []).toString('utf8') })
       })
+    // 標準入力で中身を渡す（保存）。渡さないときは閉じる（リモートの cat などが待ち続けない）
+    child.stdin?.on('error', () => undefined)
+    child.stdin?.end(input)
   })
 }
 
@@ -86,6 +93,28 @@ export async function readRemoteFile(target: SshTarget, rel: string, run: SshRun
   }
   if (isBinaryBuffer(result.stdout)) return { kind: 'binary', path: rel, reason: t('files.errors.binary') }
   return { kind: 'text', path: rel, content: result.stdout.toString('utf8'), mtimeMs: 0 }
+}
+
+/** 保存できる大きさの上限（開けるのは MAX_TEXT_FILE_SIZE まで。編集で増えた分の幅を持たせる） */
+export const MAX_REMOTE_WRITE_BYTES = MAX_TEXT_FILE_SIZE * 4
+
+/** SSH のプロジェクトのファイルへ書く（エディタの保存・終了時の保存） */
+export async function writeRemoteFile(target: SshTarget, rel: string, content: string, run: SshRunner = runSsh): Promise<FsWriteResult> {
+  if (typeof content !== 'string') throw new UserFacingError(t('files.errors.badContent'))
+  const data = Buffer.from(content, 'utf8')
+  if (data.length > MAX_REMOTE_WRITE_BYTES) throw new UserFacingError(t('files.errors.tooLarge', { size: (data.length / 1024 / 1024).toFixed(1), limit: MAX_REMOTE_WRITE_BYTES / 1024 / 1024 }))
+  let command: string
+  try {
+    command = remoteWriteCommand(target.path, rel, data.length)
+  } catch {
+    throw new UserFacingError(t('files.errors.notFound'))
+  }
+  const result = await run(target.host, command, { input: data, timeoutMs: 60_000 })
+  if (result.code === REMOTE_WRITE_FOLDER_EXIT) throw new UserFacingError(t('files.errors.folder'))
+  if (result.code === REMOTE_WRITE_NOT_REGULAR_EXIT) throw new UserFacingError(t('files.errors.notRegular'))
+  if (result.code === REMOTE_WRITE_SHORT_EXIT) throw new UserFacingError(t('remoteFiles.errors.failed', { code: result.code }))
+  if (result.code !== 0) throw sshFailure(result, target.host)
+  return { mtimeMs: 0 }
 }
 
 /** SSH のプロジェクトでファイル名を絞り込む */
