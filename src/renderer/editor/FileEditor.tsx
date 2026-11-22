@@ -95,8 +95,9 @@ export default function FileEditor({ file, editor: api }: { file: OpenFile; edit
   // （MDX は JSX を含むので、ソースだけで編集し、読み取り専用のプレビューで見る）
   const richable = file.language === 'markdown' && file.status === 'ready' && !file.viewer
   // 人は Markdown をほぼ手で直さない（声で Agent に頼む）ので、開いたら読みやすいプレビューを既定にする（ソースへ切り替えられる）
-  // 読むだけのファイル（SSH）はリッチな Markdown エディタ（編集前提）ではなくコードで見せる
-  const rich = richable && !file.readOnly && !sourceFiles.has(file.id)
+  // 読むだけのファイル（SSH）も、プレビューで読める（RichMarkdownEditor が編集できない形で開く）。
+  // 2026-11-22 本人「sshの場合は、mdをソースは見れるがプレビューにできない」
+  const rich = richable && !sourceFiles.has(file.id)
   const setRich = (on: boolean) => {
     if (on) sourceFiles.delete(file.id)
     else sourceFiles.add(file.id)

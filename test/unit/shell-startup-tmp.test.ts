@@ -7,7 +7,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, u
 import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { bashStartupRcfile, createWrapperRoot, planStartupDelivery, verifyWrapperRoot, zshStartupWrapper } from '../../src/main/shellStartup'
+import { bashStartupRcfile, createWrapperRoot, planStartupDelivery, verifyWrapperRoot, wrapperRootVanished, zshStartupWrapper } from '../../src/main/shellStartup'
 
 const base = mkdtempSync(join(tmpdir(), 'ade-sec7-'))
 afterAll(() => rmSync(base, { recursive: true, force: true }))
@@ -85,5 +85,22 @@ describe('security-2 [7] シェルの起動ファイルの置き場所', () => {
     const second = planStartupDelivery({ file: '/bin/bash', args: ['-l'] }, 'codex').shell.args[1]!
     expect(second).not.toBe(first)
     expect(readFileSync(second, 'utf8')).toBe(bashStartupRcfile())
+  })
+})
+
+describe('一時フォルダの掃除で消えた置き場所（FERRET-2F）', () => {
+  it('消えただけ（フォルダごと・ファイルだけ）なら「消えた」、中身の書き換えなら「消えていない」', () => {
+    const whole = createWrapperRoot(base)
+    expect(wrapperRootVanished(whole)).toBe(false)
+    rmSync(whole, { recursive: true, force: true })
+    expect(wrapperRootVanished(whole)).toBe(true)
+    const partial = createWrapperRoot(base)
+    unlinkSync(join(partial, 'bashrc'))
+    expect(wrapperRootVanished(partial)).toBe(true)
+    expect(verifyWrapperRoot(partial)).toBe(false)
+    const edited = createWrapperRoot(base)
+    writeFileSync(join(edited, 'bashrc'), 'echo pwned\n')
+    expect(wrapperRootVanished(edited)).toBe(false)
+    expect(verifyWrapperRoot(edited)).toBe(false)
   })
 })

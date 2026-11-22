@@ -25,3 +25,14 @@ describe('isShutdownIpcReplyError', () => {
     expect(isShutdownIpcReplyError({ exception: 'x' }, true)).toBe(false)
   })
 })
+
+describe('更新の入れ替えの途中も終了の途中とみなす（FERRET-2E が 0.8.24 でも届いた）', () => {
+  it('before-quit-for-update と終了の開始で立て、terminal:screen は送りっぱなしで拒否を捨てる', async () => {
+    const { readFileSync } = await import('node:fs')
+    const main = readFileSync('src/main/telemetry.ts', 'utf8')
+    expect(main).toContain("autoUpdater.on('before-quit-for-update', () => { appQuitting = true })")
+    expect(main).toMatch(/export function noteQuitRequested\(\): void \{\n[^}]*appQuitting = true/)
+    const client = readFileSync('src/renderer/terminal/terminalClient.ts', 'utf8')
+    expect(client).toContain("window.ade.invoke('terminal:screen', this.ptyId, lines.join('\\n')).catch(() => undefined)")
+  })
+})

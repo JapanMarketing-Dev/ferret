@@ -607,7 +607,8 @@ export class TerminalHandle {
         const buffer = this.term.buffer.active
         const lines: string[] = []
         for (let i = buffer.baseY; i < buffer.baseY + this.term.rows; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? '')
-        void window.ade.invoke('terminal:screen', this.ptyId, lines.join('\n'))
+        // 送りっぱなし（返事は使わない）。終了の途中で返事が届かなくても失敗として扱わない（FERRET-2E）
+        window.ade.invoke('terminal:screen', this.ptyId, lines.join('\n')).catch(() => undefined)
       }, screenReportDelay(this.visible))
     })
   }

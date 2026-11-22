@@ -445,3 +445,14 @@ describe('SSH のファイルツリーのつなぎ込み（作成だけできる
     expect(explorer).toContain('createOnly={readOnly && createOnly}')
   })
 })
+
+describe('SSH の Markdown のプレビュー', () => {
+  it('読むだけのファイルもプレビュー（リッチ表示）で開き、編集はさせない', () => {
+    const editor = readFileSync('src/renderer/editor/FileEditor.tsx', 'utf8')
+    expect(editor).toContain('const rich = richable && !sourceFiles.has(file.id)')
+    const rich = readFileSync('src/renderer/editor/richMarkdown/RichMarkdownEditor.tsx', 'utf8')
+    expect(rich).toContain('editable: !readOnly')
+    expect(rich).toContain('readOnly ? () => undefined : registerMarkdownDropTarget')
+    expect(rich).toContain('readOnly={file.readOnly === true}')
+  })
+})

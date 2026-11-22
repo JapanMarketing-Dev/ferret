@@ -1,4 +1,4 @@
-import { closeSync, constants, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs'
+import { closeSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ShellSpec } from './terminal'
@@ -178,6 +178,11 @@ export function verifyWrapperRoot(root: string): boolean {
   }
 }
 
+/** 置き場所か、その中の起動ファイルが消えている（一時フォルダの掃除）。中身や権限が違うだけなら false */
+export function wrapperRootVanished(root: string): boolean {
+  return [root, join(root, 'zsh'), ...WRAPPER_FILES(root).map(([path]) => path)].some((path) => !existsSync(path))
+}
+
 /** 新しい置き場所を base の下に作る（テストでは base を一時フォルダにする） */
 export function createWrapperRoot(base: string = tmpdir()): string {
   const root = mkdtempSync(join(base, 'ade-shell-'))
@@ -197,7 +202,9 @@ function ensureWrapperRoot(): string {
   if (wrapperRoot && verifyWrapperRoot(wrapperRoot)) return wrapperRoot
   if (wrapperRoot) {
     console.warn('[terminal] 起動ファイルの置き場所が書き換えられていたので、作り直します', wrapperRoot)
-    reportHandled(new Error('shell startup directory was tampered'), { area: 'terminal', op: 'verify shell startup file' })
+    // macOS は一時フォルダの古いファイルを消す（長く開いたままの Ferret で起きる。FERRET-2F）。消えただけなら作り直して送らない。
+    // 残っているのに持ち主・権限・中身が違うときだけ、書き換えとして送る
+    if (!wrapperRootVanished(wrapperRoot)) reportHandled(new Error('shell startup directory was tampered'), { area: 'terminal', op: 'verify shell startup file' })
   }
   const root = createWrapperRoot()
   if (!wrapperRoot) {

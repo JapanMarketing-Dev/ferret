@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, dialog, powerMonitor, session, type WebContents } from 'electron'
+import { app, autoUpdater, BrowserWindow, crashReporter, dialog, powerMonitor, session, type WebContents } from 'electron'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -216,6 +216,13 @@ function watchPowerTransitions(): void {
   if (powerWatched) return
   powerWatched = true
   app.on('before-quit', () => { appQuitting = true })
+  // 更新の入れ替え（quitAndInstall）では、before-quit はウインドウを閉じた後に来る。閉じる途中の renderer の
+  // invoke の返事切れを終了の途中とみなせるよう、入れ替えの合図でも立てる（FERRET-2E が 0.8.24 でも届いた）
+  try {
+    autoUpdater.on('before-quit-for-update', () => { appQuitting = true })
+  } catch {
+    // 自動更新の無い環境（Linux）では何もしない
+  }
   void app.whenReady().then(() => {
     for (const event of ['suspend', 'resume', 'lock-screen', 'unlock-screen'] as const) {
       powerMonitor.on(event as 'suspend', () => { powerTransitions.set(event, performance.now()) })
@@ -256,6 +263,8 @@ export function trackIpc(channel: string): () => void {
  */
 let onQuitRequested: (() => void) | null = null
 export function noteQuitRequested(): void {
+  // 終了の途中の IPC の返事切れ（FERRET-2E）も、ここから送らない
+  appQuitting = true
   onQuitRequested?.()
 }
 

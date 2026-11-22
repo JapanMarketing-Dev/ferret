@@ -285,8 +285,11 @@ export default function RichMarkdownEditor({ file, editor: api }: { file: OpenFi
     frontmatterRef.current = model.frontmatter
     setFrontmatter(model.frontmatter)
     setHosts(remoteHosts(model.nodes, file.path))
+    const readOnly = file.readOnly === true
     const editor = new Editor({
       element: host,
+      // 読むだけのファイル（SSH のプロジェクト）は、プレビューとして見せるだけで編集させない
+      editable: !readOnly,
       // 行の頭の Markdown の記法（「- [ ] 」・全角の「＃　」など）で塊に変える規則は、編集のエディタにだけ足す（スキーマは変えない）
       extensions: [...extensions, MarkdownInputRules],
       content: contentOf(model.nodes),
@@ -315,7 +318,7 @@ export default function RichMarkdownEditor({ file, editor: api }: { file: OpenFi
     host.addEventListener('mousedown', keepFocus, true)
     const unregister = registerDraftFlush(file.id, () => { if (timer.current !== undefined) commitRef.current() })
     // 落とした画像・動画を、落とした位置に埋め込む（受けるのは App の中央のペイン。markdownDrop.ts）
-    const unregisterDrop = registerMarkdownDropTarget({
+    const unregisterDrop = readOnly ? () => undefined : registerMarkdownDropTarget({
       path: file.path,
       element: () => host.closest<HTMLElement>('.rich-md-host'),
       insert: (media, point) => { if (editorRef.current === editor) insertMedia(editor, media, point) }
@@ -331,7 +334,7 @@ export default function RichMarkdownEditor({ file, editor: api }: { file: OpenFi
       editor.destroy()
     }
     // revision はディスクの内容で差し替えたとき（外部の変更の取り込み・読み直し）に増える
-  }, [file.id, file.revision, extensions, codec])
+  }, [file.id, file.revision, file.readOnly, extensions, codec])
 
   const onFrontmatter = (value: string) => {
     // 区切りの行と末尾の改行は保つ（消したら frontmatter ごと無くす）
@@ -356,6 +359,7 @@ export default function RichMarkdownEditor({ file, editor: api }: { file: OpenFi
               value={frontmatter.replace(/\n$/, '')}
               rows={Math.min(12, frontmatter.split('\n').length)}
               spellCheck={false}
+              readOnly={file.readOnly === true}
               onChange={(event) => onFrontmatter(event.target.value)}
               data-testid="rich-md-frontmatter"
             />
