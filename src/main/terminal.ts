@@ -734,7 +734,7 @@ export class TerminalManager {
         if (this.sessions.get(session.id) === session) session.pty.write(`${command}\r`)
       }
       // SSH のタブで、打ち込む前に利用者がマウスを使っていた: tmux のコピーモードを先に抜ける（入ったままだと起動の行を tmux が受け取る）
-      if (session.tmux && session.pointerUsed) void this.leaveTmuxCopyMode(session).catch(() => false).then(type)
+      if (session.tmux && session.pointerUsed) void this.leaveTmuxCopyMode(session).then(type)
       else type()
     }
     const deadline = setTimeout(fire, STARTUP_WRITE_TIMEOUT_MS)
@@ -882,8 +882,12 @@ export class TerminalManager {
   private async leaveTmuxCopyMode(session: Session): Promise<boolean> {
     if (!session.tmux) return false
     const { host, session: name } = session.tmux
-    const { leaveTmuxCopyMode } = await import('./remoteFiles')
-    return (await leaveTmuxCopyMode(host, name)) === true
+    try {
+      const { leaveTmuxCopyMode } = await import('./remoteFiles')
+      return (await leaveTmuxCopyMode(host, name)) === true
+    } catch {
+      return false
+    }
   }
 
   /** 画面の末尾のテキスト（renderer が送った表示、無ければ出力の末尾）。上限の確かめと引き継ぎの指示文に使う */

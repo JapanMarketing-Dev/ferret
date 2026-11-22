@@ -256,6 +256,15 @@ describe('直前の入力', () => {
     expect(tracker.lastRequest()).toBe('fix the header')
   })
 
+  it('マウスの報告（SSH のタブの tmux のホイール・クリック）は依頼に混ぜない', () => {
+    const tracker = new LastInputTracker()
+    tracker.push('\x1b[<64;10;10M\x1b[<64;10;10M')
+    tracker.push('fix ')
+    tracker.push('\x1b[<0;3;4M\x1b[<0;3;4m')
+    tracker.push('the footer\x1b[<65;10;10M\r')
+    expect(tracker.lastRequest()).toBe('fix the footer')
+  })
+
   it('貼り付けはまとめて1件。Ferret が送った指示で上書きする', () => {
     const tracker = new LastInputTracker()
     tracker.push('\x1b[200~line one\rline two\x1b[201~\r')

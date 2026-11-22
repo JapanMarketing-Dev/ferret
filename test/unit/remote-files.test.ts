@@ -259,6 +259,9 @@ describe('tmux のセッション（SSH のタブの常駐）', () => {
     expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(1, '1\n'))).toBeNull()
     expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', reply(255, ''))).toBeNull()
     expect(await leaveTmuxCopyMode('h', 'ferret-a-1-t', () => Promise.reject(new Error('x')))).toBeNull()
+    // 名前がおかしければ送らずに null（投げない）
+    expect(await leaveTmuxCopyMode('h', "a'; rm -rf ~", reply(0, '1\n'))).toBeNull()
+    expect(calls).toHaveLength(5)
     expect(calls[0]).toEqual({ command: tmuxLeaveCopyModeCommand('ferret-a-1-t'), timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS })
     expect(TMUX_LEAVE_COPY_MODE_TIMEOUT_MS).toBeLessThanOrEqual(5000)
   })

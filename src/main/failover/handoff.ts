@@ -97,8 +97,9 @@ export class LastInputTracker {
       }
       const ch = data[i]!
       if (ch === '\x1b') {
-        // 矢印・機能キーなど（ESC [ … 終端の文字）
-        const match = /^\x1b(?:\[[0-9;?]*[ -/]*[@-~]|O.|.)?/.exec(data.slice(i))
+        // 矢印・機能キー・マウスの報告など（ESC [ 引数 終端の文字。引数は 0〜9 ; < = > ? など。
+        // SSH のタブの tmux はマウスを有効にしているので、ホイールの ESC [ < 64 ; x ; y M が混ざる）
+        const match = /^\x1b(?:\[[0-?]*[ -/]*[@-~]|O.|.)?/.exec(data.slice(i))
         i += match?.[0].length || 1
         continue
       }

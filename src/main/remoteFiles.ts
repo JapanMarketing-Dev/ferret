@@ -184,8 +184,13 @@ export const TMUX_LEAVE_COPY_MODE_TIMEOUT_MS = 3000
  * 抜けたら true、入っていなければ false、つながらない・遅い・分からないときは null。失敗しても投げない（送信を止めない）
  */
 export async function leaveTmuxCopyMode(host: string, session: string, run: SshRunner = runSsh): Promise<boolean | null> {
-  const result = await run(host, tmuxLeaveCopyModeCommand(session), { timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS }).catch(() => null)
-  if (!result || result.code !== 0) return null
+  let result: SshRunResult
+  try {
+    result = await run(host, tmuxLeaveCopyModeCommand(session), { timeoutMs: TMUX_LEAVE_COPY_MODE_TIMEOUT_MS })
+  } catch {
+    return null
+  }
+  if (result.code !== 0) return null
   const out = result.stdout.toString('utf8').trim()
   return out === '1' ? true : out === '0' ? false : null
 }
