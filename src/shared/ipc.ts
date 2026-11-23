@@ -556,6 +556,12 @@ export interface IpcRequests {
 
   // ファイルエディタ。パスはすべて開いているプロジェクトからの相対パス（外は main が断る）
   'fs:list': (relDir: string) => FsEntry[]
+  /** 開いているフォルダをまとめて読み直す（SSH のプロジェクトのツリー。リモートには変更の知らせが無いので少しずつ見に行く）。読めなかったフォルダは null */
+  'fs:listMany': (relDirs: string[]) => Record<string, FsEntry[] | null>
+  /** 選んだもの（ファイル・フォルダ）をこの PC のダウンロードフォルダへ落とす（SSH のプロジェクトはリモートから）。保存した絶対パスを返す */
+  'fs:download': (relPaths: string[]) => string[]
+  /** この PC のファイル・フォルダを選んで destRel のフォルダへ上げる（SSH のプロジェクト）。作った相対パス。選ばずに閉じたら空 */
+  'fs:upload': (destRel: string, kind: 'files' | 'folder') => string[]
   'fs:read': (relPath: string) => FsReadResult
   'fs:write': (relPath: string, content: string) => FsWriteResult
   /** クイックオープン（⌘P）用の全ファイル一覧。.gitignore に従う */
@@ -890,7 +896,7 @@ export const IPC_REQUEST_CHANNELS = [
   'annotation:redo',
   'review:list', 'review:activity', 'review:label', 'review:delete', 'review:load', 'review:edit', 'review:progress', 'review:verdict', 'review:ngPrompt', 'review:resent', 'review:copy', 'review:folder', 'review:frames', 'review:organize', 'review:restore', 'meeting:pickMedia', 'meeting:pickTranscript', 'meeting:import', 'meeting:score', 'capture:model', 'capture:apiKey', 'capture:devices', 'settings:capture', 'capture:availability', 'capture:testConnection', 'settings:stt', 'settings:organizer', 'organize:testConnection', 'settings:decision', 'decision:testConnection', 'usage:apiCalls', 'usage:openApiLog', 'capture:whisperModels', 'capture:downloadModel', 'capture:cancelModelDownload',
   'capture:screenAccess', 'capture:sources', 'capture:setTarget', 'capture:openScreenSettings', 'capture:apps', 'capture:launchApp',
-  'fs:list', 'fs:read', 'fs:write', 'fs:files', 'fs:search', 'fs:inspect', 'fs:readOffice', 'fs:openOffice', 'fs:writeOffice', 'fs:gitStatus', 'fs:create', 'fs:copy', 'fs:move', 'fs:import', 'fs:pasteClipboard', 'fs:importMedia', 'fs:copyPath', 'fs:terminalDir', 'fs:rename', 'fs:trash', 'fs:reveal', 'fs:openExternal', 'editor:unsaved', 'editor:quitSave', 'preview:render',
+  'fs:list', 'fs:listMany', 'fs:download', 'fs:upload', 'fs:read', 'fs:write', 'fs:files', 'fs:search', 'fs:inspect', 'fs:readOffice', 'fs:openOffice', 'fs:writeOffice', 'fs:gitStatus', 'fs:create', 'fs:copy', 'fs:move', 'fs:import', 'fs:pasteClipboard', 'fs:importMedia', 'fs:copyPath', 'fs:terminalDir', 'fs:rename', 'fs:trash', 'fs:reveal', 'fs:openExternal', 'editor:unsaved', 'editor:quitSave', 'preview:render',
   'github:open', 'github:repoStatus', 'github:autoFetch', 'github:gitAction', 'github:autoFetchConsent',
   'github:repoCreateInfo', 'github:createPrivateRepo', 'settings:github',
   'star:star', 'star:openWeb', 'star:later', 'star:never', 'star:fromMenu',

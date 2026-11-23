@@ -157,7 +157,7 @@ export function useOpenFiles({
   onError
 }: {
   root: string | null
-  /** SSH のプロジェクト: リモートの文字のファイルだけを開く（画像・Office・HTML のプレビューは出さない）。編集・保存はできる（main の fs:write が ssh で書く） */
+  /** SSH のプロジェクト: リモートの文字のファイルと画像・動画・音声・PDF を開く（Office・HTML のプレビューは出さない）。編集・保存はできる（main の fs:write が ssh で書く） */
   readOnly?: boolean
   /** 中央のタブの選択（CenterTab）。file: で始まればファイル */
   activeTab: string
@@ -195,7 +195,9 @@ export function useOpenFiles({
     try {
       // SSH のプロジェクト: リモートの文字のファイルだけを読む（ビューア・Office は手元のファイルを前提にしているので使わない）。
       // 2026-11-22 本人「sshで繋いださい、mdなどのファイルをプレビュー、ソースで編集できない」→ 編集できる形で開く
-      if (readOnlyRef.current) {
+      // 画像・動画・音声・PDF は SSH のプロジェクトでもビューアで開く（中身は main が ssh で読んで ade-media://project/ で返す）。
+      // 2026-11-23 本人「sshでpngなどが全部プレビューで開けないので開けるようにしてください」
+      if (readOnlyRef.current && (asText || !mediaKindOf(path))) {
         const result = await window.ade.invoke('fs:read', path)
         if (!latest()) return
         if (result.kind === 'text') {

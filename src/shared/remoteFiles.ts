@@ -65,6 +65,89 @@ export function remoteReadCommand(root: string, rel: string, limit: number): str
   return `${cdRoot(root)} && { test -f ${quoted} || exit 3; } && head -c ${Math.max(0, Math.floor(limit)) + 1} -- ${quoted}`
 }
 
+/** 1回の ssh でまとめて読み直すフォルダの上限（ツリーで開いているフォルダ。超えた分は次の回に回さず省く） */
+export const MAX_REMOTE_LIST_MANY = 300
+/** まとめて読む一覧の区切りの行。名前は / を含まないので、ls の出力と取り違えない */
+const LIST_MANY_MARK = '//ferret-dir '
+const LIST_MANY_MISSING = '//ferret-missing'
+
+/**
+ * 開いているフォルダの中身をまとめて出す1行（ツリーの読み直し。外部の変更を知らせる仕組みがリモートには無いので、少しずつ見に行く）。
+ * フォルダごとに `//ferret-dir <番号>` の行のあとに `ls -1ApL` の出力、読めなければ `//ferret-missing` を出す
+ */
+export function remoteListManyCommand(root: string, rels: readonly string[]): string {
+  const parts = rels.slice(0, MAX_REMOTE_LIST_MANY).map((rel, i) => {
+    const dir = checkRel(rel)
+    return `printf '%s\\n' ${shellQuote(`${LIST_MANY_MARK}${i}`)}; ( cd -- ${shellQuote(dir || '.')} 2>/dev/null && LC_ALL=C ls -1ApL 2>/dev/null ) || printf '%s\\n' ${shellQuote(LIST_MANY_MISSING)}`
+  })
+  return `${cdRoot(root)} && { ${parts.join('; ')}; }`
+}
+
+/** remoteListManyCommand の出力 → フォルダごとの中身（読めなかったフォルダは null。出力に無いフォルダは含めない） */
+export function parseRemoteListingMany(stdout: string, rels: readonly string[]): Map<string, FsEntry[] | null> {
+  const out = new Map<string, FsEntry[] | null>()
+  let index = -1
+  let lines: string[] = []
+  let missing = false
+  const flush = () => {
+    const rel = rels[index]
+    if (index < 0 || rel === undefined) return
+    out.set(rel, missing ? null : parseRemoteListing(lines.join('\n'), rel))
+  }
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith(LIST_MANY_MARK)) {
+      flush()
+      const n = Number(line.slice(LIST_MANY_MARK.length))
+      index = Number.isInteger(n) && n >= 0 ? n : -1
+      lines = []
+      missing = false
+    } else if (line === LIST_MANY_MISSING) {
+      missing = true
+    } else if (index >= 0) {
+      lines.push(line)
+    }
+  }
+  flush()
+  return out
+}
+
+/**
+ * ファイルの大きさと、start バイト目から count バイトまでを出す1行（画像・PDF・動画のプレビュー、binary の16進数）。
+ * 1行目に大きさ、続けて中身。普通のファイルでなければ終了コード 3
+ */
+export function remoteReadRangeCommand(root: string, rel: string, start: number, count: number): string {
+  const file = checkRel(rel)
+  if (!file) throw new Error('invalid remote path')
+  const quoted = shellQuote(file)
+  const from = Math.max(0, Math.floor(start)) + 1
+  const n = Math.max(0, Math.floor(count))
+  // BSD の head は -c 0 を断るので、大きさだけのときは中身を読まない
+  const body = n > 0 ? ` && { tail -c +${from} -- ${quoted} | head -c ${n}; }` : ''
+  return `${cdRoot(root)} && { test -f ${quoted} || exit 3; } && ferret_size=$(wc -c < ${quoted}) && printf '%s\\n' $ferret_size${body}`
+}
+
+/** remoteReadRangeCommand の出力 → 大きさと中身。形が違えば null */
+export function parseRemoteReadRange(stdout: Buffer): { size: number; data: Buffer } | null {
+  const newline = stdout.indexOf(0x0a)
+  if (newline < 0) return null
+  const size = Number(stdout.subarray(0, newline).toString('utf8').trim())
+  if (!Number.isSafeInteger(size) || size < 0) return null
+  return { size, data: stdout.subarray(newline + 1) }
+}
+
+/** 選んだもの（相対パス）を tar にして標準出力へ出す1行（ダウンロード）。プロジェクトのフォルダそのもの・.git の中は断る */
+export function remoteTarCommand(root: string, rels: readonly string[]): string {
+  if (rels.length === 0) throw new Error('invalid remote path')
+  const names = rels.map((rel) => shellQuote(checkTarget(rel))).join(' ')
+  return `${cdRoot(root)} && tar -cf - -- ${names}`
+}
+
+/** 標準入力の tar を、プロジェクトの中のフォルダ（相対パス）へ広げる1行（アップロード）。既にあるファイルは上書きしない（-k） */
+export function remoteUntarCommand(root: string, destRel: string): string {
+  const dest = checkDestination(destRel)
+  return `${cdRoot(root)} && cd -- ${shellQuote(dest)} && tar -xkf - --no-same-owner`
+}
+
 /** glob の特別な文字を打ち消す（find -iname に渡す） */
 function escapeGlob(text: string): string {
   return text.replace(/[\\*?[\]]/g, (c) => `\\${c}`)
@@ -565,4 +648,30 @@ export function trimTrailingSlashes(path: string): string {
   let end = path.length
   while (end > 1 && path[end - 1] === '/') end--
   return path.slice(0, end)
+}
+
+/** 2つの一覧が同じ（名前・種類・並び）か */
+function sameEntries(a: readonly FsEntry[], b: readonly FsEntry[]): boolean {
+  return a.length === b.length && a.every((entry, i) => entry.name === b[i]!.name && entry.kind === b[i]!.kind && entry.path === b[i]!.path)
+}
+
+/**
+ * まとめて読み直した結果（fs:listMany）を、ツリーが持っている一覧に重ねる。変わったものが無ければ null（描き直さない）。
+ * 読めなかったフォルダ（null。消えた・移った）は外す。根（''）は外さない（読めないのは一時的なことが多い）。結果に無いフォルダはそのまま
+ */
+export function mergeListings(current: ReadonlyMap<string, readonly FsEntry[]>, fresh: Readonly<Record<string, FsEntry[] | null>>): Map<string, FsEntry[]> | null {
+  let next: Map<string, FsEntry[]> | null = null
+  for (const [dir, entries] of Object.entries(fresh)) {
+    const old = current.get(dir)
+    if (old === undefined) continue
+    if (entries === null) {
+      if (dir === '') continue
+      next ??= new Map(current as Map<string, FsEntry[]>)
+      next.delete(dir)
+    } else if (!sameEntries(old, entries)) {
+      next ??= new Map(current as Map<string, FsEntry[]>)
+      next.set(dir, entries)
+    }
+  }
+  return next
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { sanitizeGithubPreferences } from '@shared/repoCreate'
-import { MAX_TEXT_FILE_SIZE } from '@shared/files'
+import { MAX_TEXT_FILE_SIZE, type FsEntry } from '@shared/files'
 // 静的に読む（動的 import にすると、browser.ts の静的 import と1つにまとめられたときに使わない export として消され、
 // memoryAction が undefined になった。FERRET-2A）
 import { MEMORY_CHECK_MS, formatGb, memoryAction } from '@shared/browserMemory'
@@ -10,7 +10,7 @@ import { programCopyText } from './terminalClipboard'
 import { showAgentNotification } from './agentNotify'
 import { failoverPrefs, initFailover, onUsageChanged, setFailoverPrefs, switchRunningAgents } from './failover/service'
 import { agentLabel, isAccountAgent } from '@shared/agentCatalog'
-import { droppedFolder, inspectDropped } from './droppedPaths'
+import { droppedFolder, inspectDropped, isRecentlyDropped } from './droppedPaths'
 import { terminalOwnsMenuKey } from '@shared/terminalMenuKeys'
 import { BROWSER_TAB_CLOSE_ACTIONS, browserTabsToClose } from '@shared/browserTabs'
 import { existsSync, mkdirSync, realpathSync, watch, type FSWatcher } from 'node:fs'
@@ -3858,6 +3858,33 @@ function registerIpc(): void {
       const remote = remoteFilesTarget()
       return remote ? (await import('./remoteFiles')).listRemoteDirectory(remote, relDir) : listDirectory(projectRoot(), relDir)
     },
+    'fs:listMany': async (relDirs) => {
+      const remote = remoteFilesTarget()
+      if (remote) return (await import('./remoteFiles')).listRemoteDirectories(remote, relDirs)
+      if (!Array.isArray(relDirs)) throw new UserFacingError(t('files.errors.badContent'))
+      const root = projectRoot()
+      const out: Record<string, FsEntry[] | null> = {}
+      for (const dir of relDirs.slice(0, 300)) if (typeof dir === 'string') out[dir] = await listDirectory(root, dir).catch(() => null)
+      return out
+    },
+    // ダウンロード: SSH のプロジェクトのリモートの tar を、この PC のダウンロードフォルダへ広げて Finder で見せる
+    'fs:download': async (relPaths) => {
+      const remote = remoteFilesTarget()
+      const downloads = app.getPath('downloads')
+      // 手元のプロジェクトのファイルは既にこの PC にあるので、ダウンロードは SSH のプロジェクトだけ
+      if (!remote) throw new UserFacingError(t('files.errors.badContent'))
+      const saved = await (await import('./remoteFiles')).downloadRemoteEntries(remote, relPaths, downloads)
+      if (saved[0]) shell.showItemInFolder(saved[0])
+      return saved
+    },
+    // アップロード: この PC のファイル・フォルダを選び、SSH のプロジェクトへ上げる（選んだパスは main のダイアログから来たものだけ）
+    'fs:upload': async (destRel, kind) => {
+      const remote = remoteFilesTarget()
+      if (!remote) throw new UserFacingError(t('files.errors.badContent'))
+      const picked = await dialog.showOpenDialog(mainWindow!, { properties: kind === 'folder' ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'] })
+      if (picked.canceled || picked.filePaths.length === 0) return []
+      return (await import('./remoteFiles')).uploadToRemote(remote, picked.filePaths, destRel)
+    },
     'fs:read': async (relPath) => {
       const remote = remoteFilesTarget()
       return remote ? (await import('./remoteFiles')).readRemoteFile(remote, relPath) : readTextFile(projectRoot(), relPath)
@@ -3876,7 +3903,10 @@ function registerIpc(): void {
       }
       return searchFiles(projectRoot(), query, mode)
     },
-    'fs:inspect': (relPath) => inspectProjectFile(projectRoot(), relPath),
+    'fs:inspect': async (relPath) => {
+      const remote = remoteFilesTarget()
+      return remote ? (await import('./remoteFiles')).inspectRemoteFile(remote, relPath) : inspectProjectFile(projectRoot(), relPath)
+    },
     'fs:readOffice': (relPath) => readOfficeFile(projectRoot(), relPath),
     // 古い形式などは LibreOffice で変えてから開く・書き戻す（変換の部品は使うときに読む）
     'fs:openOffice': async (relPath) => {
@@ -3909,7 +3939,16 @@ function registerIpc(): void {
       const remote = remoteFilesTarget()
       return remote ? (await import('./remoteFiles')).moveRemoteEntries(remote, relPaths, destRel) : moveEntries(projectRoot(), relPaths, destRel)
     },
-    'fs:import': (absolutePaths, destRel) => { assertLocalImport(); return importEntries(projectRoot(), absolutePaths, destRel) },
+    'fs:import': async (absolutePaths, destRel) => {
+      // SSH のプロジェクトへは、落としたもの（drop:inspect で確かめた絶対パスだけ）を ssh で上げる
+      const remote = remoteFilesTarget()
+      if (remote) {
+        if (!Array.isArray(absolutePaths) || absolutePaths.some((p) => !isRecentlyDropped(p))) throw new UserFacingError(t('files.errors.badContent'))
+        const created = await (await import('./remoteFiles')).uploadToRemote(remote, absolutePaths, destRel)
+        return created.map((to, i) => ({ from: String(absolutePaths[i]), to }))
+      }
+      return importEntries(projectRoot(), absolutePaths, destRel)
+    },
     // ファイルツリーの貼り付け（⌘V / Ctrl+V）。OS のクリップボードのファイル・画像を main が読んで取り込み、作ったものの相対パスだけを返す
     // （クリップボードの中身・元のパスは renderer へ返さない。押した直後の1回だけ。security-7 [1]）
     'fs:pasteClipboard': async (destRel) => {
@@ -4198,7 +4237,12 @@ async function main(): Promise<void> {
   protocol.handle('ade-media', async (request) => {
     const url = new URL(request.url)
     // エディタで開いたプロジェクトの画像・動画・音声・PDF（src/main/projectMedia.ts が外・リンク・パイプを断る）
-    if (url.hostname === 'project') return projectMediaResponse(workspace.folderPath, request.url, request.headers.get('range'))
+    if (url.hostname === 'project') {
+      // SSH のプロジェクトはリモートのファイルを ssh で読んで返す（src/main/remoteFiles.ts）
+      const remote = remoteFilesTarget()
+      if (remote) return (await import('./remoteFiles')).remoteMediaResponse(remote, request.url, request.headers.get('range'))
+      return projectMediaResponse(workspace.folderPath, request.url, request.headers.get('range'))
+    }
     // Agent が撮った AFTER のスクリーンショット: /<id>/file/<レビューのフォルダからの相対パス>（src/main/afterShots.ts が中を確かめる）
     const shot = /^\/(\d{8}-\d{6})\/file\/(.+)$/.exec(url.pathname)
     if (url.hostname === 'review' && shot && workspace.folderPath) {

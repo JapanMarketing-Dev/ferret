@@ -1,7 +1,7 @@
 import { expandedStorageKey } from '@shared/fileTreeState'
 import { TREE_DRAG_TYPE } from '../lib/treeDrag'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
-import { ChevronRight, ClipboardPaste, Copy, CopyPlus, ExternalLink, Eye, EyeOff, FileCode, FilePlus, FileSearch, FileText, Folder, FolderOpen, FolderPlus, Link, ListCollapse, Pencil, RefreshCw, Scissors, Search, SquareTerminal, Trash2, Undo2 } from 'lucide-react'
+import { ChevronRight, ClipboardPaste, Copy, CopyPlus, Download, ExternalLink, Eye, EyeOff, FileCode, FilePlus, FileSearch, FileText, Folder, FolderOpen, FolderPlus, FolderUp, Link, ListCollapse, Pencil, RefreshCw, Scissors, Search, SquareTerminal, Trash2, Undo2, Upload } from 'lucide-react'
 import { ENTRY_NAME_PROBLEM_KEYS, isSameOrUnder, nestedNameParts, nestedNameProblem, type FsEntry, type FsTransfer } from '@shared/files'
 import { GIT_STATE_LETTER, gitStateFor, isHiddenByDefault, withoutHidden, type GitDecorations, type GitFileState } from '@shared/gitDecorations'
 import type { TranslationKey } from '@shared/i18n'
@@ -172,7 +172,7 @@ function FileExplorerImpl({
 }) {
   const t = useT()
   // ツリーの状態（開いたときに読む・外部の変更で読み直す）はフィードバックの右パネルと共用（fileTree.tsx）
-  const tree = useFileTree(root, { expandedKey: root ? expandedStorageKey('files', projectId ?? root) : null })
+  const tree = useFileTree(root, { expandedKey: root ? expandedStorageKey('files', projectId ?? root) : null, poll: remote })
   const { expanded, loading, toggleDir } = tree
   // git の色分け（変更・追跡外・.gitignore の対象）。git のリポジトリでなければ何も付けない（SSH のプロジェクトは手元で git を読めないので付けない）
   const git = useGitDecorations(remote ? null : root)
@@ -731,19 +731,36 @@ function useTreeOperations({
     requestTerminalAt(await window.ade.invoke('fs:terminalDir', path))
   })
 
-  /** 外から落としたもの（Finder・エクスプローラー）をコピーして取り込む。SSH のプロジェクトへは取り込めないことを知らせる（黙って何もしないままにしない） */
+  /** SSH のプロジェクトのものを、この PC のダウンロードフォルダへ落とす（main が保存先を Finder で見せる） */
+  const download = (paths: string[]) => run(async () => {
+    const saved = await window.ade.invoke('fs:download', paths)
+    setNotice(t('fileExplorer.downloaded', { count: saved.length }))
+  })
+
+  /** この PC のファイル・フォルダを選んで、SSH のプロジェクトのフォルダへ上げる */
+  const upload = (dest: string, kind: 'files' | 'folder') => run(async () => {
+    const created = await window.ade.invoke('fs:upload', dest, kind).catch((err: unknown) => { reloadAfterFailure([], dest); throw err })
+    if (created.length === 0) return
+    if (dest) tree.expandDir(dest)
+    tree.reloadDir(dest)
+    selectPaths(created)
+    setNotice(t('fileExplorer.uploaded', { count: created.length }))
+  })
+
+  /** 外から落としたもの（Finder・エクスプローラー）をコピーして取り込む。SSH のプロジェクトへは ssh で上げる（元に戻すの履歴には積まない） */
   const importDropped = (dataTransfer: DataTransfer, dest: string) => {
-    if (remote) {
-      setActionError(t('remoteFiles.errors.noImport'))
-      return
-    }
     // files はイベントの間しか読めないので、ここで先に読み出す（readDrop は同期の部分で File を取り出す）
     const pending = readDrop(dataTransfer)
     void run(async () => {
       const entries = await pending
       // 実パスの無いもの（ブラウザ・ほかのアプリから引いた画像など）は取り込めない。黙って何もしないままにしない
       if (entries.length === 0) { setActionError(t('drop.errors.unreadable')); return }
-      afterCopied(dest, await window.ade.invoke('fs:import', entries.map((e) => e.path), dest))
+      const done = await window.ade.invoke('fs:import', entries.map((e) => e.path), dest).catch((err: unknown) => { if (remote) reloadAfterFailure([], dest); throw err })
+      if (!remote) { afterCopied(dest, done); return }
+      if (dest) tree.expandDir(dest)
+      tree.reloadDir(dest)
+      selectPaths(done.map((d) => d.to))
+      setNotice(t('fileExplorer.uploaded', { count: done.length }))
     })
   }
 
@@ -972,6 +989,7 @@ function useTreeOperations({
     targetDir, startCreate, startRename, askDelete, hintFor, cancelEdit, commit, trash, onRowClick, openMenu, onTreeKeyDown, onClipboardEvent, onBodyMouseDown,
     onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
     cut, copy, paste, duplicate, copyPath, reveal, openExternally, openInTerminal, undo, onOpen, onOpenSource, entryOf, dirtyPaths,
+    download, upload, refresh: () => { setMenu(null); tree.refresh() },
     closeMenu: () => setMenu(null)
   }
 }
@@ -1111,6 +1129,13 @@ function TreeMenu({ ops, remote = false, showHidden, onToggleHidden }: { ops: Tr
       {sep}
       <MenuItem icon={<Link size={13} strokeWidth={1.75} />} label={t('fileExplorer.copyPath')} shortcut={KEYS.copyPath()} onClick={() => void ops.copyPath(entry ? targets : [''], 'absolute')} testId="explorer-menu-copy-path" />
       {entry && <MenuItem icon={<Link size={13} strokeWidth={1.75} />} label={t('fileExplorer.copyRelativePath')} shortcut={KEYS.copyRelativePath()} onClick={() => void ops.copyPath(targets, 'relative')} testId="explorer-menu-copy-relative-path" />}
+      {/* SSH のプロジェクト: この PC とのやりとり（ダウンロード・アップロード）。2026-11-23 本人「右クリックでダウンロードとかも入れておいて」 */}
+      {remote && <>
+      {sep}
+      {entry && <MenuItem icon={<Download size={13} strokeWidth={1.75} />} label={t('fileExplorer.download')} onClick={() => void ops.download(targets)} testId="explorer-menu-download" />}
+      <MenuItem icon={<Upload size={13} strokeWidth={1.75} />} label={t('fileExplorer.uploadFiles')} onClick={() => void ops.upload(ops.targetDir(entry), 'files')} testId="explorer-menu-upload-files" />
+      <MenuItem icon={<FolderUp size={13} strokeWidth={1.75} />} label={t('fileExplorer.uploadFolder')} onClick={() => void ops.upload(ops.targetDir(entry), 'folder')} testId="explorer-menu-upload-folder" />
+      </>}
       {/* Finder で表示・ターミナルで開くは手元のフォルダを扱うので、SSH のプロジェクトでは出さない */}
       {!remote && <>
       {sep}
@@ -1127,6 +1152,7 @@ function TreeMenu({ ops, remote = false, showHidden, onToggleHidden }: { ops: Tr
       {sep}
       <MenuItem icon={<Undo2 size={13} strokeWidth={1.75} />} label={t('fileExplorer.undo')} shortcut={KEYS.undo()} disabled={ops.history.length === 0} onClick={ops.undo} testId="explorer-menu-undo" />
       {sep}
+      <MenuItem icon={<RefreshCw size={13} strokeWidth={1.75} />} label={t('fileExplorer.refresh')} onClick={ops.refresh} testId="explorer-menu-refresh" />
       <MenuItem
         icon={showHidden ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
         label={showHidden ? t('fileExplorer.hideHidden') : t('fileExplorer.showHidden')}

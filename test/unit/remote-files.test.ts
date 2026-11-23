@@ -1063,9 +1063,11 @@ describe('SSH のファイルツリーのつなぎ込み（作成・名前の変
     expect(main).toContain('moveRemoteEntries(remote, relPaths, destRel)')
     expect(main).toContain('copyRemoteEntries(remote, relPaths, destRel)')
     expect(main).toContain('remotePathsForClipboard(remote, relPaths, which)')
-    expect(main).toContain("'fs:import': (absolutePaths, destRel) => { assertLocalImport();")
+    // 落としたもの（drop:inspect で確かめたパスだけ）は ssh で上げる。OS のクリップボードからの貼り付けは断る
+    expect(main).toContain('absolutePaths.some((p) => !isRecentlyDropped(p))')
+    expect(main).toContain('uploadToRemote(remote, absolutePaths, destRel)')
     expect(main).not.toContain('assertLocalFiles')
-    expect(main.match(/assertLocalImport\(\)/g)).toHaveLength(3)
+    expect(main.match(/assertLocalImport\(\)/g)).toHaveLength(2)
   })
 
   it('ツリーは SSH でもローカルと同じ操作を出し、この PC のファイルを扱うものだけを出さない', () => {
@@ -1079,8 +1081,10 @@ describe('SSH のファイルツリーのつなぎ込み（作成・名前の変
     expect(explorer).toMatch(/\{!remote && <>\s*\{sep\}\s*<MenuItem icon=\{<FolderOpen/)
     expect(explorer).toContain('{!remote && <IconButton size="sm" label={t(\'fileExplorer.quickOpen\'')
     expect(explorer).toContain("if (!remote && code === 'KeyR'")
-    // 外から落としたもの・OS のクリップボードは取り込まずに知らせる。削除の確認と元に戻すはリモートのゴミ箱の文言
-    expect(explorer).toContain("setActionError(t('remoteFiles.errors.noImport'))")
+    // OS のクリップボードは取り込まずに知らせる。落としたもの・右クリックはアップロード、ダウンロードもできる。削除の確認と元に戻すはリモートのゴミ箱の文言
+    expect(explorer).toContain("window.ade.invoke('fs:upload', dest, kind)")
+    expect(explorer).toContain("window.ade.invoke('fs:download', paths)")
+    expect(explorer).toContain("poll: remote")
     expect(explorer).toContain("setNotice(t('fileExplorer.pasteNothingRemote'))")
     expect(explorer).toContain("remote ? t('fileExplorer.deleteBodyRemote')")
     expect(explorer).toContain("remote ? t('fileExplorer.undoTrashRemote')")

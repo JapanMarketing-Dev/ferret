@@ -1,6 +1,9 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { mkdtemp, readdir, rename, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { posix } from 'node:path'
+import { basename, dirname, extname, join, posix } from 'node:path'
+import { BINARY_HEAD_BYTES, MAX_VIEWER_BYTES, mediaTypeOf, projectMediaPathFromUrl, type FsFileInfo } from '@shared/fileViewer'
+import { parseByteRange } from './mediaRange'
 import { UserFacingError } from '@shared/errors'
 import { ENTRY_NAME_PROBLEM_KEYS, entryNameProblem, hasBinaryExtension, isBinaryBuffer, isInsideGitDir, isSameOrUnder, MAX_COPY_BYTES, MAX_COPY_ENTRIES, MAX_TEXT_FILE_SIZE, nestedNameParts, nestedNameProblem, type FsCreated, type FsEntry, type FsReadResult, type FsSearchResult, type FsTransfer, type FsWriteResult } from '@shared/files'
 import { t } from '@shared/i18n'
@@ -9,6 +12,8 @@ import {
   isValidRemoteRelPath,
   parseRemoteBrowse,
   parseRemoteListing,
+  parseRemoteListingMany,
+  parseRemoteReadRange,
   parseRemoteReport,
   parseRemoteSearch,
   remoteBrowseCommand,
@@ -17,6 +22,11 @@ import {
   remoteCreateCommand,
   remoteCreated,
   remoteListCommand,
+  remoteListManyCommand,
+  remoteReadRangeCommand,
+  remoteTarCommand,
+  remoteUntarCommand,
+  MAX_REMOTE_LIST_MANY,
   remoteMkdirCommand,
   remoteMoveCommand,
   remoteMoveInput,
@@ -135,6 +145,90 @@ export async function listRemoteDirectory(target: SshTarget, rel: string, run: S
   // リンク切れがあると ls は 1 で終わるが、一覧は出る
   if (result.code !== 0 && !(result.code === 1 && result.stdout.length > 0)) throw sshFailure(result, target.host)
   return parseRemoteListing(result.stdout.toString('utf8'), rel)
+}
+
+/**
+ * SSH のプロジェクトで、開いているフォルダの中身をまとめて読む（ツリーの読み直し。1回の ssh で済ませる）。
+ * 読めなかったフォルダ（消えた・移った）は null。つながらないときは投げる（呼ぶ側は次の回にまた見る）
+ */
+export async function listRemoteDirectories(target: SshTarget, rels: unknown, run: SshRunner = runSsh): Promise<Record<string, FsEntry[] | null>> {
+  if (!Array.isArray(rels)) throw new UserFacingError(t('files.errors.badContent'))
+  const dirs = [...new Set(rels.filter((rel): rel is string => typeof rel === 'string' && isValidRemoteRelPath(rel)))].slice(0, MAX_REMOTE_LIST_MANY)
+  if (dirs.length === 0) return {}
+  const result = await run(target.host, remoteListManyCommand(target.path, dirs), { timeoutMs: 15_000, maxBytes: 32 * 1024 * 1024 })
+  if (result.code !== 0) throw sshFailure(result, target.host)
+  return Object.fromEntries(parseRemoteListingMany(result.stdout.toString('utf8'), dirs))
+}
+
+/** 大きさと先頭のバイト（binary の16進数・ビューアの大きさの確かめ）。普通のファイルでなければ断る */
+export async function inspectRemoteFile(target: SshTarget, rel: string, run: SshRunner = runSsh): Promise<FsFileInfo> {
+  if (typeof rel !== 'string' || !isValidRemoteRelPath(rel) || rel === '') throw new UserFacingError(t('files.errors.notFound'))
+  const result = await run(target.host, remoteReadRangeCommand(target.path, rel, 0, BINARY_HEAD_BYTES), { timeoutMs: 20_000 })
+  if (result.code === 3) throw new UserFacingError(t('files.errors.notRegular'))
+  if (result.code !== 0) throw sshFailure(result, target.host)
+  const parsed = parseRemoteReadRange(result.stdout)
+  if (!parsed) throw new UserFacingError(t('remoteFiles.errors.failed', { code: result.code }))
+  return { path: rel, size: parsed.size, mtimeMs: 0, head: new Uint8Array(parsed.data.subarray(0, BINARY_HEAD_BYTES)) }
+}
+
+/** 動画・音声を Range で返すときの1回の上限（全体を ssh で送らない。video は続きを頼み直す） */
+export const REMOTE_MEDIA_CHUNK_BYTES = 8 * 1024 * 1024
+/** リモートの動画・音声の上限（Range で少しずつ読むが、際限なくは読ませない） */
+const REMOTE_STREAM_LIMIT = 4 * 1024 * 1024 * 1024
+
+const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
+
+/**
+ * ade-media://project/... に SSH のプロジェクトのファイルで答える（画像・PDF・動画・音声）。
+ * 画像・PDF は全体を1回で、動画・音声は Range ごとに REMOTE_MEDIA_CHUNK_BYTES までを ssh で読む
+ */
+export async function remoteMediaResponse(target: SshTarget, url: string, rangeHeader: string | null, run: SshRunner = runSsh): Promise<Response> {
+  const notFound = () => new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain' } })
+  const rel = projectMediaPathFromUrl(url)
+  const media = rel ? mediaTypeOf(rel) : null
+  if (!rel || !media || !isValidRemoteRelPath(rel)) return notFound()
+  const limit = Number.isFinite(MAX_VIEWER_BYTES[media.kind]) ? MAX_VIEWER_BYTES[media.kind] : REMOTE_STREAM_LIMIT
+  const streaming = media.kind === 'video' || media.kind === 'audio'
+  const readRange = async (start: number, count: number) => {
+    const result = await run(target.host, remoteReadRangeCommand(target.path, rel, start, count), { timeoutMs: 120_000, maxBytes: count + 64 * 1024 }).catch(() => null)
+    return result && result.code === 0 ? parseRemoteReadRange(result.stdout) : null
+  }
+  const headers = (type: string): Record<string, string> => ({
+    'Content-Type': type, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+    ...(type === 'image/svg+xml' ? { 'Content-Security-Policy': SVG_CSP } : {})
+  })
+  // 末尾から n バイト（bytes=-n）は大きさが要るので、先に大きさだけ見る
+  let start = 0
+  let wantEnd: number | null = null
+  const suffix = rangeHeader ? /^bytes=-(\d+)$/.exec(rangeHeader.trim()) : null
+  if (suffix) {
+    const head = await readRange(0, 0)
+    if (!head) return notFound()
+    const range = parseByteRange(rangeHeader, head.size)
+    if (range === 'unsatisfiable' || !range) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${head.size}` } })
+    start = range.start
+    wantEnd = range.end
+  } else if (rangeHeader) {
+    const m = /^bytes=(\d+)-(\d*)$/.exec(rangeHeader.trim())
+    if (m) { start = Number(m[1]); wantEnd = m[2] === '' ? null : Number(m[2]) }
+  }
+  const ranged = !!rangeHeader && (suffix !== null || /^bytes=\d+-\d*$/.test(rangeHeader.trim()))
+  const count = streaming || ranged
+    ? Math.min(REMOTE_MEDIA_CHUNK_BYTES, wantEnd === null ? REMOTE_MEDIA_CHUNK_BYTES : wantEnd - start + 1)
+    : limit + 1
+  const read = await readRange(start, Math.max(0, count))
+  if (!read) return notFound()
+  if (read.size > limit) return new Response('Too large', { status: 413, headers: { 'Content-Type': 'text/plain' } })
+  if (!streaming && !ranged) {
+    return new Response(new Uint8Array(read.data), { status: 200, headers: { ...headers(media.type), 'Content-Length': String(read.data.length) } })
+  }
+  if (start >= read.size && read.size > 0) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${read.size}` } })
+  if (read.size === 0) return new Response(null, { status: 200, headers: { ...headers(media.type), 'Content-Length': '0' } })
+  const end = start + read.data.length - 1
+  return new Response(new Uint8Array(read.data), {
+    status: 206,
+    headers: { ...headers(media.type), 'Content-Length': String(read.data.length), 'Content-Range': `bytes ${start}-${end}/${read.size}` }
+  })
 }
 
 /** SSH のプロジェクトのファイルを読む（文字だけ。上限より大きいもの・バイナリは理由を返す） */
@@ -433,4 +527,115 @@ export async function leaveTmuxCopyMode(host: string, session: string, run: SshR
 export async function captureTmuxPane(host: string, session: string, run: SshRunner = runSsh): Promise<string | null> {
   const out = await runTmuxLine(host, () => tmuxCapturePaneCommand(session), run)
   return out === null ? null : out.replace(/\n+$/, '')
+}
+
+// ── ダウンロード（リモート → この PC のダウンロードフォルダ）・アップロード（この PC → リモート） ──
+
+/** ダウンロード・アップロードを待つ上限 */
+const REMOTE_TRANSFER_TIMEOUT_MS = 30 * 60_000
+
+/** ssh の引数（runSsh と同じ。対話なし・接続の使い回し） */
+function sshArgs(host: string): string[] {
+  return [...sshMultiplexOptions(), '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', host, REMOTE_BOOTSTRAP]
+}
+
+/** この PC の tar で作るときの引数（macOS は ._ ファイルと拡張属性を入れない。リモートの GNU tar が警告を出すため） */
+function localTarCreateArgs(platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'darwin' ? ['--no-mac-metadata', '--no-xattrs'] : []
+}
+
+/** 子プロセスの終わり（終了コードと標準エラーの最後の行） */
+function waitChild(child: ReturnType<typeof spawn>): Promise<{ code: number; stderr: string }> {
+  let stderr = ''
+  child.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-4000) })
+  return new Promise((resolve) => {
+    child.on('error', (err) => resolve({ code: 255, stderr: err.message }))
+    child.on('close', (code) => resolve({ code: code ?? 255, stderr }))
+  })
+}
+
+function transferFailure(code: number, stderr: string, host: string): UserFacingError {
+  return sshFailure({ code, stdout: Buffer.alloc(0), stderr }, host)
+}
+
+/** dir の中で name と重ならない名前（「名前 (2).拡張子」…）の絶対パス */
+async function uniqueLocalPath(dir: string, name: string): Promise<string> {
+  const ext = extname(name)
+  const stem = ext && ext !== name ? name.slice(0, -ext.length) : name
+  for (let n = 1; n < 10_000; n++) {
+    const candidate = join(dir, n === 1 ? name : `${stem} (${n})${ext}`)
+    if (!(await stat(candidate).then(() => true, () => false))) return candidate
+  }
+  throw new UserFacingError(t('files.errors.exists', { name }))
+}
+
+/**
+ * SSH のプロジェクトの選んだもの（ファイル・フォルダ）を、この PC のフォルダ（ふつうはダウンロード）へ落とす。
+ * リモートの tar をこの PC の tar で広げる（いったん隠しフォルダへ広げ、同じ名前があれば「名前 (2)」にして移す）。保存した絶対パスを返す
+ */
+export async function downloadRemoteEntries(target: SshTarget, relPaths: unknown, downloadsDir: string): Promise<string[]> {
+  if (!isValidSshHost(target.host)) throw new UserFacingError(t('projectSource.errors.host'))
+  const rels = remoteSelection(relPaths)
+  const command = (() => { try { return remoteTarCommand(target.path, rels) } catch { throw new UserFacingError(t('files.errors.notFound')) } })()
+  const staging = await mkdtemp(join(downloadsDir, '.ferret-download-'))
+  try {
+    const ssh = spawn('ssh', sshArgs(target.host), { env: toolEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    const tar = spawn('tar', ['-xf', '-', '-C', staging], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] })
+    const timer = setTimeout(() => { ssh.kill(); tar.kill() }, REMOTE_TRANSFER_TIMEOUT_MS)
+    ssh.stdin.on('error', () => undefined)
+    tar.stdin.on('error', () => undefined)
+    ssh.stdin.end(remoteStdin(command))
+    ssh.stdout.pipe(tar.stdin)
+    const [sshDone, tarDone] = await Promise.all([waitChild(ssh), waitChild(tar)])
+    clearTimeout(timer)
+    if (sshDone.code !== 0) throw transferFailure(sshDone.code, sshDone.stderr, target.host)
+    if (tarDone.code !== 0) throw new UserFacingError(t('remoteFiles.errors.downloadFailed', { detail: tarDone.stderr.trim().split('\n').pop()?.slice(0, 200) ?? '' }))
+    const saved: string[] = []
+    for (const name of await readdir(staging)) {
+      const dest = await uniqueLocalPath(downloadsDir, name)
+      await rename(join(staging, name), dest)
+      saved.push(dest)
+    }
+    return saved
+  } finally {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+/**
+ * この PC のファイル・フォルダ（絶対パス）を、SSH のプロジェクトのフォルダ（destRel）へ上げる。作った相対パスを返す。
+ * 同じ名前が既にあれば何も上げない（上書きしない。リモートの tar も -k で上書きしない）
+ */
+export async function uploadToRemote(target: SshTarget, localPaths: unknown, destRel: unknown, run: SshRunner = runSsh): Promise<string[]> {
+  if (!isValidSshHost(target.host)) throw new UserFacingError(t('projectSource.errors.host'))
+  const dest = remoteDestination(destRel)
+  if (!Array.isArray(localPaths) || localPaths.length === 0 || localPaths.length > MAX_TRASH_ENTRIES || localPaths.some((p) => typeof p !== 'string' || !p)) throw new UserFacingError(t('files.errors.badContent'))
+  const paths = [...new Set(localPaths as string[])]
+  const names = new Set<string>()
+  for (const path of paths) {
+    const name = basename(path)
+    if (entryNameProblem(name) || /[\r\n]/.test(name)) throw new UserFacingError(t('files.errors.badContent'))
+    if (names.has(name.toLowerCase())) throw new UserFacingError(t('files.errors.exists', { name }))
+    names.add(name.toLowerCase())
+  }
+  const existing = await listRemoteDirectory(target, dest, run)
+  const clash = existing.find((entry) => names.has(entry.name.toLowerCase()))
+  if (clash) throw new UserFacingError(t('files.errors.exists', { name: clash.name }))
+  const command = (() => { try { return remoteUntarCommand(target.path, dest) } catch { throw new UserFacingError(t('files.errors.notFound')) } })()
+  // 親フォルダごとに tar を作る（-C で親へ移って名前だけ入れる）
+  const groups = new Map<string, string[]>()
+  for (const path of paths) groups.set(dirname(path), [...(groups.get(dirname(path)) ?? []), basename(path)])
+  for (const [parent, group] of groups) {
+    const tar = spawn('tar', [...localTarCreateArgs(), '-cf', '-', '-C', parent, '--', ...group], { env: { ...process.env, COPYFILE_DISABLE: '1' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const ssh = spawn('ssh', sshArgs(target.host), { env: toolEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+    const timer = setTimeout(() => { ssh.kill(); tar.kill() }, REMOTE_TRANSFER_TIMEOUT_MS)
+    ssh.stdin.on('error', () => undefined)
+    ssh.stdin.write(remoteStdin(command))
+    tar.stdout.pipe(ssh.stdin)
+    const [tarDone, sshDone] = await Promise.all([waitChild(tar), waitChild(ssh)])
+    clearTimeout(timer)
+    if (tarDone.code !== 0) throw new UserFacingError(t('remoteFiles.errors.uploadFailed', { detail: tarDone.stderr.trim().split('\n').pop()?.slice(0, 200) ?? '' }))
+    if (sshDone.code !== 0) throw transferFailure(sshDone.code, sshDone.stderr, target.host)
+  }
+  return paths.map((path) => joinRel(dest, basename(path)))
 }
