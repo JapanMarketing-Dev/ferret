@@ -36,6 +36,7 @@ import {
   eventLoopBlockContext,
   eventLoopBlockThreshold,
   shouldReportEventLoopBlock,
+  axRebuildNearBlock,
   sleepNearBlock,
   shouldReportUnresponsive,
   SLEEP_AFTER_BLOCK_MS,
@@ -339,7 +340,10 @@ export function watchEventLoop(threshold: number): void {
         if (sleepNearBlock({ blockEndAt: now, lagMs: lag, sleepAt: [suspendedAt, lockedAt] })) return
         // 止まりの前に終わった重い処理は手がかりにしない（FERRET-M の 0.8.9。blockSlowOpWindowMs）
         const windowMs = blockSlowOpWindowMs({ lagMs: lag, msSinceBlockEnd: Date.now() - blockEndWall, intervalMs: INTERVAL })
-        reportPerf('event-loop-block', lag, eventLoopBlockContext(inflight, recentSlowOps(Date.now(), windowMs).slice(0, 3), {
+        const slow = recentSlowOps(Date.now(), windowMs).slice(0, 3)
+        // 他のアプリが補助技術を切り替えた直後の、手がかりの無い止まりは送らない（FERRET-M の 0.8.29。axRebuildNearBlock）
+        if (axRebuildNearBlock({ lagMs: lag, axChangedMsAgo: ax.axChangedMsAgo, slowOps: slow.length })) return
+        reportPerf('event-loop-block', lag, eventLoopBlockContext(inflight, slow, {
           heapUsedMb: memory.heapUsed / 2 ** 20, rssMb: memory.rss / 2 ** 20, ...ax
         }))
       }, SLEEP_AFTER_BLOCK_MS).unref?.()

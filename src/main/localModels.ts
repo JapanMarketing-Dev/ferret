@@ -3,6 +3,7 @@
  * メモリは os.totalmem() ですぐ分かる。VRAM は nvidia-smi を1回だけ非同期に聞き（macOS では聞かない）、分かるまではメモリだけで選ぶ。
  * Electron に依存させない（単体テストで呼べるように）。
  */
+import { SMALL_JSON_MAX_BYTES, readJsonBody } from './boundedResponse'
 import { execFile } from 'node:child_process'
 import { arch, cpus, platform, totalmem } from 'node:os'
 import { parseNvidiaSmiVram, recommendLocalModels, type HardwareInfo, type LocalModelRecommendation } from '@shared/localModels'
@@ -61,7 +62,8 @@ export async function checkLocalServer(baseUrl: string, model: string, fetchImpl
     await res.body?.cancel().catch(() => undefined)
     return 'down'
   }
-  const body = await res.json().catch(() => null) as { data?: Array<{ id?: unknown }> } | null
+  const read = await readJsonBody(res, SMALL_JSON_MAX_BYTES)
+  const body = (read.failed ? null : read.json) as { data?: Array<{ id?: unknown }> } | null
   const ids = Array.isArray(body?.data) ? body.data.map((m) => String(m.id ?? '')) : []
   // Ollama は「名前:latest」で返すことがある。名前だけで頼んだものも同じとみなす
   const has = ids.some((id) => id === model || id === `${model}:latest` || id.replace(/:latest$/, '') === model)

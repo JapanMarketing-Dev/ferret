@@ -402,12 +402,32 @@ export function createGpuContextLostGate(now: () => number = Date.now): () => bo
  * 実行ファイルの名前（crash.exe）が分かって、Ferret（配布版の ferret・ferret.exe、dev の electron）でなければ捨てる。
  * Ferret の helper（「Ferret Helper (Renderer)」など）は名前に空白が入り crash.exe が付かないので、これまでどおり送る
  */
-export function shouldSendNativeCrash(event: { tags?: object }): boolean {
+export function shouldSendNativeCrash(event: { tags?: object; breadcrumbs?: unknown }): boolean {
   const tags = (event.tags ?? {}) as Record<string, unknown>
   if (tags['event.process'] === 'browser') return true
   if (typeof tags['crash.exe'] === 'string' && !isOwnExecutable(tags['crash.exe'])) return false
   if (tags['crash.code'] === '0x0' && tags['crash.module'] === 'dyld') return false
+  if (crashedDuringUpdateSwap(event.breadcrumbs)) return false
   return typeof tags['exit.reason'] !== 'string' || shouldReportProcessGone(tags['exit.reason'])
+}
+
+/**
+ * 前の起動のパンくずから、［再起動して更新］で版を入れ替える途中だったか。
+ * macOS の Squirrel.Mac は main が終わるとすぐアプリを入れ替えるので、まだ終わりきっていない子のプロセス（GPU・renderer など）が
+ * 消えた古いファイルを読みにいき、dyld から abort する。Ferret のコードでは防げず、利用者は更新の途中で何も見ない。
+ * 「Native crash (unknown): libsystem_kernel.dylib」（スタックは dyld → libsystem_c → abort）として届いていた（Sentry FERRET-2G：0.8.25→0.8.26）。
+ * 印は flow の `update install`（0.8.30〜は macOS でも残す）と、それより前の版の `slow op`（op が `ipc:update:install`）。
+ * main（browser）の報告はこれに関係なく送る
+ */
+export function crashedDuringUpdateSwap(breadcrumbs: unknown): boolean {
+  const list = Array.isArray(breadcrumbs) ? breadcrumbs : (breadcrumbs as { values?: unknown } | undefined)?.values
+  if (!Array.isArray(list)) return false
+  return (list as Array<Record<string, unknown> | null>).some((b) => {
+    if (b?.category !== 'flow') return false
+    if (b.message === 'update install') return true
+    const data = b.data as Record<string, unknown> | undefined
+    return b.message === 'slow op' && data?.op === 'ipc:update:install'
+  })
 }
 
 /** 確認用（FERRET_SENTRY_TEST。以前の MOVIE_ADE_SENTRY_TEST も可）。`1`/`all` は全部、`main,renderer` のように選べる */
@@ -534,6 +554,22 @@ export function sleepNearBlock(s: { blockEndAt: number; lagMs: number; sleepAt: 
   const from = s.blockEndAt - s.lagMs - RESUME_GRACE_MS
   const to = s.blockEndAt + SLEEP_AFTER_BLOCK_MS
   return s.sleepAt.some((at) => at != null && Number.isFinite(at) && at >= from && at <= to)
+}
+
+/** 補助技術の切り替えから、この時間までに始まった止まりは画面の木の作り直しとみなす */
+export const AX_REBUILD_GRACE_MS = 5000
+/** これ以上長い止まりは、補助技術の切り替えの近くでも送る（作り直しだけでは説明できない長さ） */
+export const AX_REBUILD_MAX_LAG_MS = 5000
+
+/**
+ * 送らない、他のアプリが補助技術を切り替えた直後の止まり。Chromium が画面の木を作り直す間 main が止まる
+ * （FERRET-M の 0.8.29 の macOS：前面に戻った直後、切り替えの 3.1 秒後に 1.0s。重い処理は無く、処理中の IPC は 2ms の fs:gitStatus だけ）。
+ * アプリの手がかり（止まりの間の重い処理）があれば送る。axChangedMsAgo は止まりが終わった時刻からの経過
+ */
+export function axRebuildNearBlock(s: { lagMs: number; axChangedMsAgo: number | null; slowOps: number }): boolean {
+  if (s.axChangedMsAgo === null || !Number.isFinite(s.axChangedMsAgo) || s.axChangedMsAgo < 0) return false
+  if (s.slowOps > 0 || !(s.lagMs < AX_REBUILD_MAX_LAG_MS)) return false
+  return s.axChangedMsAgo <= s.lagMs + AX_REBUILD_GRACE_MS
 }
 
 /**

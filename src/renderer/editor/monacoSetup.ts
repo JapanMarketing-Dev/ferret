@@ -51,6 +51,11 @@ import 'monaco-editor/features/wordHighlighter/register'
 import 'monaco-editor/features/wordOperations/register'
 import 'monaco-editor/features/wordPartOperations/register'
 import 'monaco-editor/editor/common/standaloneStrings'
+// TS / JSON の言語機能は、開いたときに Monaco のほぼ全部の機能（CodeLens・アウトラインなど）を後から読む。
+// サービスは最初のエディタを作った時点で固まるため、後から来た機能が使うサービスの登録が間に合わず
+// 「depends on UNKNOWN service ICodeLensCache」で落ちる（FERRET-2J）。その登録だけを先に読んでおく
+import 'monaco-editor/editor/contrib/codelens/browser/codeLensCache'
+import 'monaco-editor/editor/contrib/documentSymbols/browser/outlineModel'
 import editorWorker from 'monaco-editor/editor/editor.worker?worker'
 import jsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import tsWorker from 'monaco-editor/language/typescript/ts.worker?worker'

@@ -107,7 +107,7 @@ describe('nvidia-smi の VRAM', () => {
 })
 
 describe('端末内のサーバーの確認（整理の前）', () => {
-  const json = (body: unknown, ok = true) => vi.fn(async () => ({ ok, json: async () => body }) as unknown as Response)
+  const json = (body: unknown, ok = true) => vi.fn(async () => Response.json(body, { status: ok ? 200 : 500 }))
 
   it('動いていてモデルがあれば ok（:latest も同じとみなす）', async () => {
     expect(await checkLocalServer('http://localhost:11434/v1/', 'qwen3:8b', json({ data: [{ id: 'qwen3:8b' }] }))).toBe('ok')

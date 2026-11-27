@@ -1,3 +1,4 @@
+import { SMALL_JSON_MAX_BYTES, readJsonBody } from './boundedResponse'
 import {
   APP_VERSION_PATTERN,
   ARCHES,
@@ -120,12 +121,9 @@ export async function sendToRelay(
       headers: { 'User-Agent': deps.userAgent },
       signal: controller.signal
     })
-    let json: unknown = null
-    try {
-      json = await response.json()
-    } catch {
-      // JSON でない（中継の前のプロキシのエラーページなど）
-    }
+    // JSON でない（中継の前のプロキシのエラーページなど）・読めないときは null
+    const read = await readJsonBody(response, SMALL_JSON_MAX_BYTES)
+    const json: unknown = read.failed ? null : read.json
     if (controller.signal.aborted) return failure('timeout')
     const r = (json && typeof json === 'object' ? json : {}) as Record<string, unknown>
     if (response.status === 201 && r.ok === true && typeof r.url === 'string' && /^https:\/\/github\.com\//.test(r.url)) {

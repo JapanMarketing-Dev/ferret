@@ -2,6 +2,7 @@
  * 共有リンクの Worker（workers/feedback-share）と話す。Electron に依存させない（単体テストで偽の fetch を渡すため）。
  * 持ち主のトークンは Authorization ヘッダーでだけ送り、URL・ログ・エラーメッセージに出さない。
  */
+import { SMALL_JSON_MAX_BYTES, readJsonBody } from '../boundedResponse'
 import {
   ITEM_ID_PATTERN,
   OWNER_TOKEN_PATTERN,
@@ -81,12 +82,11 @@ export class ShareClient {
 
   private async call(path: string, init: RequestInit, token?: string): Promise<Record<string, unknown>> {
     const res = await this.raw(path, init, token)
-    let body: Record<string, unknown>
-    try {
-      body = (await res.json()) as Record<string, unknown>
-    } catch {
-      throw new ShareApiError('bad_response', res.status)
-    }
+    // 本文の途中で切れた・時間切れは回線の都合（readJsonBody。FERRET-2K と同じ）
+    const read = await readJsonBody(res, SMALL_JSON_MAX_BYTES)
+    if (read.failed) throw new ShareApiError(read.failed === 'network' ? 'network' : 'bad_response', res.status)
+    if (!read.json || typeof read.json !== 'object' || Array.isArray(read.json)) throw new ShareApiError('bad_response', res.status)
+    const body = read.json as Record<string, unknown>
     if (!res.ok || body.ok !== true) {
       const code = typeof body.code === 'string' && ERROR_CODES.has(body.code) ? body.code as ShareErrorCode : 'bad_response'
       throw new ShareApiError(code, res.status)
@@ -133,7 +133,8 @@ export class ShareClient {
     assertItemId(recordingId)
     const res = await this.raw(`/v1/shares/${shareId}/recordings/${recordingId}/${file}`, { method: 'GET' }, token, timeoutMs)
     if (!res.ok) {
-      const body = await res.json().catch(() => null) as { code?: unknown } | null
+      const read = await readJsonBody(res, SMALL_JSON_MAX_BYTES)
+      const body = (read.failed ? null : read.json) as { code?: unknown } | null
       throw new ShareApiError(typeof body?.code === 'string' && ERROR_CODES.has(body.code) ? body.code as ShareErrorCode : 'bad_response', res.status)
     }
     return res

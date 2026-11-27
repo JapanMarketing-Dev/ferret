@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { STACK_LIMIT, parseMinidumpCrash } from '../../src/shared/minidump'
-import { NATIVE_CRASH_FLOW_LIMIT, isOwnExecutable, memoryBucket, minimizeNativeCrash, scrubEvent, shouldSendNativeCrash, uptimeBucket } from '../../src/shared/telemetry'
+import { NATIVE_CRASH_FLOW_LIMIT, crashedDuringUpdateSwap, isOwnExecutable, memoryBucket, minimizeNativeCrash, scrubEvent, shouldSendNativeCrash, uptimeBucket } from '../../src/shared/telemetry'
 
 /**
  * main のネイティブのクラッシュ（FERRET-12、0.4.16 の Windows）は、minidump を捨てていたので原因が分からなかった。
@@ -293,6 +293,40 @@ describe('dyld で読み込みの途中に止められた子のプロセスは�
     expect(shouldSendNativeCrash(unknown({ code: '0x0', module: 'Electron Framework' }))).toBe(true)
     const main = minimizeNativeCrash({ level: 'fatal', platform: 'native', tags: { 'event.process': 'browser' }, contexts: { electron: { details: { reason: 'unknown' } } } }, { code: '0x0', module: 'dyld' })
     expect(shouldSendNativeCrash(scrubEvent(main))).toBe(true)
+  })
+})
+
+describe('［再起動して更新］の入れ替えの途中で落ちた子のプロセスは送らない（FERRET-2G）', () => {
+  const quit = [
+    { category: 'flow', message: 'update check', timestamp: 1 },
+    { category: 'flow', message: 'quit begin', timestamp: 2, data: { terminals: 35 } },
+    { category: 'flow', message: 'quit terminals', timestamp: 3, data: { closed: 35, left: 0, waitedMs: 458 } }
+  ]
+  const crash = (breadcrumbs: Array<Record<string, unknown>>, proc?: string) => scrubEvent(minimizeNativeCrash(
+    { level: 'fatal', platform: 'native', tags: { 'os.platform': 'darwin', ...(proc ? { 'event.process': proc } : {}) }, contexts: { electron: { details: { reason: 'unknown' } } }, breadcrumbs },
+    { code: '0x0', module: 'libsystem_kernel.dylib', offset: '0x9650', stack: ['libsystem_pthread.dylib+0x1600', 'libsystem_c.dylib+0x1076c', 'dyld+0x71f84'] }
+  ))
+
+  it('0.8.25 の形（slow op の ipc:update:install）なら送らない', () => {
+    const out = crash([quit[0], quit[1], { category: 'flow', message: 'slow op', timestamp: 2, data: { ms: 1747, op: 'ipc:update:install' } }, quit[2]])
+    expect(shouldSendNativeCrash(out)).toBe(false)
+  })
+
+  it('flow の update install（macOS も含む）があれば送らない', () => {
+    expect(shouldSendNativeCrash(crash([{ category: 'flow', message: 'update install', timestamp: 1, data: { method: 'squirrel-mac' } }, ...quit]))).toBe(false)
+  })
+
+  it('更新でない終了・ほかの slow op・main は送る', () => {
+    expect(shouldSendNativeCrash(crash(quit))).toBe(true)
+    expect(shouldSendNativeCrash(crash([...quit, { category: 'flow', message: 'slow op', timestamp: 4, data: { ms: 2000, op: 'ipc:fs:list' } }]))).toBe(true)
+    expect(shouldSendNativeCrash(crash([{ category: 'flow', message: 'update install', timestamp: 1, data: { method: 'squirrel-mac' } }], 'browser'))).toBe(true)
+    expect(shouldSendNativeCrash(crash([]))).toBe(true)
+  })
+
+  it('パンくずの形が崩れていても落ちない', () => {
+    expect(crashedDuringUpdateSwap(undefined)).toBe(false)
+    expect(crashedDuringUpdateSwap({ values: [null, { category: 'flow', message: 'update install' }] })).toBe(true)
+    expect(crashedDuringUpdateSwap([{ category: 'console', message: 'update install' }])).toBe(false)
   })
 })
 

@@ -207,12 +207,13 @@ export async function installUpdate(method: InstallMethod, path: string, file: V
   // 入れ替える直前にもう一度 sha256 を確かめる（確かめている間に入れ替わっていないかも、前後の実体で見る）
   const before = fileIdentity(path)
   if ((await hashFile(path)) !== file.sha256 || fileIdentity(path) !== before) throw new Error('update file changed before install')
+  // 入れ替えの途中で終わりきっていない子のプロセスが落ちた報告を、次の起動で見分ける印（FERRET-2G。crashedDuringUpdateSwap）
+  flow('update install', { method })
   if (method === 'squirrel-mac') {
     // Squirrel.Mac が受け取り終えたもの（stageUpdate）を、終了のあとで入れ替えて起動し直す
     autoUpdater.quitAndInstall()
     return
   }
-  flow('update install', { method })
   if (method === 'nsis') {
     // インストーラーは、終了の後始末（PTY を閉じる・設定やタブを書く）が終わった app の quit で起動する（runPendingInstall）。
     // 先に起動すると、--updated のインストーラーは約1.3秒後にインストール先の下のプロセスを止めにくるので、

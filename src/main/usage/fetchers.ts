@@ -4,7 +4,7 @@ import { parseClaudeCredentials, readClaudeCredential, readCodexAccessToken } fr
 import { isTokenExpiring, refreshClaudeCredentials, type CredentialLocation } from './oauthRefresh'
 import { t } from '@shared/i18n'
 import { errorKind, reportHandled } from '@shared/report'
-import { ResponseTooLargeError, SMALL_JSON_MAX_BYTES, readBoundedJson } from '../boundedResponse'
+import { SMALL_JSON_MAX_BYTES, readJsonBody, type JsonBodyResult } from '../boundedResponse'
 
 /**
  * Claude / Codex の使用量を、それぞれの公式のエンドポイントから読む。
@@ -76,13 +76,8 @@ function networkFailure(provider: AccountAgent): ProviderRateLimits {
  * 応答の本文を読む。読む途中で切れた・時間切れ（AbortSignal.timeout は本文の読み込みにも効く）は通信の失敗で、応答の形の変化ではない。
  * 形の変化として送っていた（Sentry FERRET-23: 'parse codex usage' の AbortError）。JSON として読めない・大きすぎるものだけを形の失敗にする
  */
-export async function readUsageBody(response: Response): Promise<{ failed: false; json: unknown } | { failed: 'network' } | { failed: 'format'; err: unknown }> {
-  try {
-    return { failed: false, json: await readBoundedJson(response, SMALL_JSON_MAX_BYTES) }
-  } catch (err) {
-    if (err instanceof SyntaxError || err instanceof ResponseTooLargeError) return { failed: 'format', err }
-    return { failed: 'network' }
-  }
+export function readUsageBody(response: Response): Promise<JsonBodyResult> {
+  return readJsonBody(response, SMALL_JSON_MAX_BYTES)
 }
 
 // ───────────────────────── Claude ─────────────────────────

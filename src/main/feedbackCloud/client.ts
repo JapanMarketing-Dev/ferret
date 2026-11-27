@@ -19,6 +19,10 @@ import {
   type CloudMe,
   type CloudUpload
 } from '@shared/feedbackCloud'
+import { isJsonContentType, readJsonBody } from '../boundedResponse'
+
+/** 指摘を読む応答の上限（20台×3000件とチームの分。本文は 2000 字まで） */
+export const CLOUD_RESPONSE_MAX_BYTES = 128 * 1024 * 1024
 
 export type CloudFetch = (url: string, init: RequestInit) => Promise<Response>
 
@@ -93,12 +97,14 @@ export class CloudClient {
     } catch {
       throw new CloudApiError('network')
     }
-    let body: unknown
-    try {
-      body = await res.json()
-    } catch {
-      throw new CloudApiError(res.ok ? 'bad_response' : statusCode(res.status), res.status)
+    // 本文の途中で切れた・時間切れ、Worker 以外（途中のプロキシ・ログインの要る Wi-Fi）の HTML は回線の都合（FERRET-2K の 0.8.29 の Windows）
+    if (res.ok && !isJsonContentType(res)) {
+      await res.body?.cancel().catch(() => undefined)
+      throw new CloudApiError('network', res.status)
     }
+    const read = await readJsonBody(res, CLOUD_RESPONSE_MAX_BYTES)
+    if (read.failed) throw new CloudApiError(!res.ok ? statusCode(res.status) : read.failed === 'network' ? 'network' : 'bad_response', res.status)
+    const body = read.json
     if (!isObject(body)) throw new CloudApiError('bad_response', res.status)
     if (!res.ok || body.ok === false) {
       const code = typeof body.code === 'string' && ERROR_CODES.has(body.code) ? body.code as CloudErrorCode : statusCode(res.status)

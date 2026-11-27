@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { SMALL_JSON_MAX_BYTES, readJsonBody } from '../boundedResponse'
 import { chmod, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
@@ -79,7 +80,9 @@ export async function refreshClaudeCredentials(request: TokenRequest, json: stri
       signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS)
     })
     if (!response.ok) return null
-    return applyRefreshedToken(json, (await response.json()) as TokenResponse, now)
+    const read = await readJsonBody(response, SMALL_JSON_MAX_BYTES)
+    if (read.failed) return null
+    return applyRefreshedToken(json, read.json as TokenResponse, now)
   } catch {
     // 通信の失敗は「ログインの更新待ち」のまま（次の読み込みでまた試す）
     return null

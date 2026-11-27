@@ -87,6 +87,35 @@ export async function readBoundedJson(res: Response, maxBytes: number = AI_RESPO
   return JSON.parse(await readBoundedText(res, maxBytes)) as unknown
 }
 
+/**
+ * JSON の本文を読み、失敗を「読み込みの失敗」と「形の失敗」に分ける。投げない。
+ * 本文の途中で切れた・時間切れ（fetch の AbortSignal.timeout は本文の読み込みにも効く）は network、
+ * JSON でない・上限より大きいは format。network は回線の都合なので Sentry に送らない（FERRET-23・FERRET-2K）。
+ * 外部の API の JSON は res.json() ではなくこれで読む（test/unit/response-json-policy.test.ts が落とす）
+ */
+export type JsonBodyResult = { failed: false; json: unknown } | { failed: 'network' } | { failed: 'format'; err: unknown }
+
+export async function readJsonBody(res: Response, maxBytes: number = AI_RESPONSE_MAX_BYTES): Promise<JsonBodyResult> {
+  let text: string
+  try {
+    text = await readBoundedText(res, maxBytes)
+  } catch (err) {
+    if (err instanceof ResponseTooLargeError) return { failed: 'format', err }
+    return { failed: 'network' }
+  }
+  try {
+    return { failed: false, json: JSON.parse(text) as unknown }
+  } catch (err) {
+    return { failed: 'format', err }
+  }
+}
+
+/** 返したのが JSON の口か（content-type が JSON か無い）。HTML などは途中のプロキシ・ログインの要る Wi-Fi の画面 */
+export function isJsonContentType(res: Pick<Response, 'headers'>): boolean {
+  const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+  return type === '' || type === 'application/json' || type.endsWith('+json')
+}
+
 /** 失敗の応答の本文の先頭。読めなければ空文字（説明に使うだけなので想定内） */
 export async function readErrorText(res: Response, maxBytes: number = ERROR_BODY_MAX_BYTES): Promise<string> {
   try {

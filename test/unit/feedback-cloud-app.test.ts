@@ -99,7 +99,32 @@ describe('Worker との話し方（client.ts）', () => {
     await expect(client(() => Response.json({ ok: false, code: 'weird' }, { status: 400 })).start('a@b.co')).rejects.toMatchObject({ code: 'bad_response' })
     await expect(client(() => new Response('oops', { status: 401 })).me(TOKEN)).rejects.toMatchObject({ code: 'unauthorized' })
     await expect(client(() => new Response('oops', { status: 502 })).me(TOKEN)).rejects.toMatchObject({ code: 'server' })
-    await expect(client(() => new Response('not json', { status: 200 })).me(TOKEN)).rejects.toMatchObject({ code: 'bad_response' })
+    await expect(client(() => new Response('not json', { status: 200, headers: { 'content-type': 'application/json' } })).me(TOKEN)).rejects.toMatchObject({ code: 'bad_response' })
+    await expect(client(() => new Response('[1]', { status: 200, headers: { 'content-type': 'application/json' } })).me(TOKEN)).rejects.toMatchObject({ code: 'bad_response' })
+    await expect(client(() => new Response('{"ok":tr', { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } })).download(TOKEN)).rejects.toMatchObject({ code: 'bad_response' })
+  })
+
+  // FERRET-2K（0.8.29 の Windows）：GET /v1/feedback の本文の読み込みが途中で失敗したのを bad_response として送っていた
+  it('本文の読み込みの途中の失敗・時間切れは network（知らせない）', async () => {
+    const failing = (err: unknown) => () => new Response(new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode('{"ok":true,"me":')); c.error(err) }
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    for (const err of [new TypeError('terminated'), new DOMException('The operation was aborted due to timeout', 'TimeoutError'), new DOMException('aborted', 'AbortError'), new Error('ECONNRESET')]) {
+      const client = new CloudClient({ fetch: fakeFetch(failing(err)).fetch, base: BASE })
+      await expect(client.download(TOKEN)).rejects.toMatchObject({ code: 'network' })
+    }
+    // 失敗の状態の番号のときは番号から（読めなくても）
+    const broken502 = new CloudClient({ fetch: fakeFetch(() => new Response(new ReadableStream({ start(c) { c.error(new TypeError('terminated')) } }), { status: 502 })).fetch, base: BASE })
+    await expect(broken502.me(TOKEN)).rejects.toMatchObject({ code: 'server', status: 502 })
+  })
+
+  it('200 でも JSON でない応答（途中のプロキシ・ログインの要る Wi-Fi の画面）は network', async () => {
+    const client = (type: string) => new CloudClient({ fetch: fakeFetch(() => new Response('<html>login</html>', { status: 200, headers: { 'content-type': type } })).fetch, base: BASE })
+    await expect(client('text/html; charset=utf-8').download(TOKEN)).rejects.toMatchObject({ code: 'network' })
+    await expect(client('text/plain').me(TOKEN)).rejects.toMatchObject({ code: 'network' })
+    // JSON の種類は読む
+    const ok = new CloudClient({ fetch: fakeFetch(() => new Response(JSON.stringify(ME), { headers: { 'content-type': 'application/problem+json' } })).fetch, base: BASE })
+    expect(await ok.me(TOKEN)).toEqual(ME)
   })
 
   it('エラーのメッセージにトークンを出さない', async () => {

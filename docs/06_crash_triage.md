@@ -74,6 +74,7 @@ tags と添付で分かること（どれも利用者の内容は含まない）
   - `block.ipc` / contexts.block の inflight は「止まった間に待たされていた IPC」で、原因とは限らない（非同期の `fs:gitStatus` などが巻き添えで長く見える）
   - 手がかりの重い処理は、止まりの始まりから測りの間隔（1秒）前より後に終わったものだけ（`blockSlowOpWindowMs`）。待つのが仕事の IPC（`terminal:continueWork`。`WAITING_IPC_CHANNELS`）は重い処理にも処理中の IPC にも出さない（FERRET-M の 0.8.9：止まりの 7 秒前に終わった `ipc:terminal:continueWork 3812ms` が原因に見えていた）。待つ IPC を足したら `WAITING_IPC_CHANNELS` にも足す
   - 手がかりが何も無い止まりは、タグ `block.axchange`（補助技術の切り替えが止まりの何秒前か）を見る。`<5s` に偏るなら、他のアプリが補助技術を有効にして Chromium が画面の木を作り直した止まり
+    - 0.8.30 から、補助技術の切り替えから5秒以内に始まった5秒未満の止まりで、重い処理が無いものは送らない（FERRET-M の 0.8.29 の macOS：前面に戻った直後、切り替えの 3.1 秒後に 1.0s。`axRebuildNearBlock`）
 - main では子プロセスを同期で起動しない（`execFileSync`・`execSync`・`spawnSync`）・同期のダイアログを使わない。`test/unit/main-blocking-policy.test.ts` が落とす。どうしても要るときはそのテストの ALLOWED に理由と一緒に足す
 - `opendir` は直接使わない（Windows で落ちる。FERRET-1Q）。`src/main/dirEntries.ts` の `readDirEntries` を使う（`test/unit/dir-entries.test.ts` が落とす）
 - マシン全体が詰まっている間（macOS の熱の状態が serious・critical、または 1分の load average ÷ CPU の数が 2 以上）の止まりは送らない（`isMachineOverloaded`）。0.7.13 の macOS の 1.1s・2.2s は、何本もの Agent とビルドで load average が約30、thermal-state-change が続く中で起き、止まりの手がかり（IPC・重い処理）は無かった。送る止まりにはタグ `block.thermal`・`block.load` を付ける
@@ -85,6 +86,9 @@ tags と添付で分かること（どれも利用者の内容は含まない）
 
 ### 送らない失敗（再発の防止）
 
+- 外部の応答の JSON は `res.json()` で読まず、`readJsonBody`（`src/main/boundedResponse.ts`）で読む。本文の途中の切断・時間切れは `network`、JSON でない・大きすぎるは `format` に分かれる。
+  Ferret アカウントの同期で、本文の読み込みの途中の失敗を `feedback cloud: bad_response` として送っていた（FERRET-2K の 0.8.29 の Windows）。
+  200 でも content-type が JSON でない応答（途中のプロキシ・ログインの要る Wi-Fi の画面）も `network`。`test/unit/response-json-policy.test.ts` が `src/main` の `.json()` を落とす
 - 中断・時間切れ（`AbortError`・`TimeoutError`。`errorKind` を通したものも）は `reportHandled` が送らない（FERRET-23：本文の読み込み中の時間切れを「応答の形の変化」として送っていた）。
   続いた時間切れを知りたいときは、理由だけの例外を作って送る（`updateCheck.ts` の `check update: timeout`）。
   応答の本文は `fetch` の時間切れが読み込みにも効くので、読み込みの失敗と形の失敗を分ける（`usage/fetchers.ts` の `readUsageBody`）
