@@ -58,7 +58,8 @@ describe('monaco のサービス登録（FERRET-2J）', () => {
   })
 
   it('CodeLens のキャッシュとアウトラインのサービスは最初から読む', () => {
-    const rel = new Set([...eager].map((file) => path.relative(root, file)))
+    // Windows では区切りが \ になるので / にそろえる
+    const rel = new Set([...eager].map((file) => path.relative(root, file).split(path.sep).join('/')))
     expect(rel.has('editor/contrib/codelens/browser/codeLensCache.js')).toBe(true)
     expect(rel.has('editor/contrib/documentSymbols/browser/outlineModel.js')).toBe(true)
   })

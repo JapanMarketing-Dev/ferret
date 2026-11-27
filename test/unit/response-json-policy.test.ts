@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -22,7 +22,7 @@ describe('応答の JSON の読み方', () => {
   it('src/main では .json() を呼ばない（readJsonBody を使う）', () => {
     const bad: string[] = []
     for (const file of files(root)) {
-      if (BROWSER_SCRIPT_FILES.has(file.split('/').pop()!)) continue
+      if (BROWSER_SCRIPT_FILES.has(basename(file))) continue
       readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
         const code = line.replace(/\/\/.*$/, '')
         if (/^\s*(\/\*\*|\*)/.test(code)) return // コメントの行
